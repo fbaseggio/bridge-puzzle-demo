@@ -9,6 +9,7 @@ export type DecisionRecord = {
   sig: string;
   chosenCard: CardId;
   chosenClassId: string;
+  chosenAltClassId: string;
   chosenBucket: string;
   bucketCards: CardId[];
   sameBucketAlternativeClassIds: string[];
@@ -119,6 +120,7 @@ export type EngineEvent =
       };
       chosenBucket?: string;
       bucketCards?: CardId[];
+      policyClassByCard?: Record<string, string>;
       decisionSig?: string;
       replay?: { action: 'forced' | 'disabled'; index?: number; reason?: 'sig-mismatch' | 'card-not-legal'; card?: CardId };
     }

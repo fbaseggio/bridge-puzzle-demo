@@ -545,23 +545,38 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
     if (event.type === 'autoplay' && (event.play.seat === 'E' || event.play.seat === 'W') && event.decisionSig) {
       const chosenCard = toCardId(event.play.suit, event.play.rank);
       const bucketCards = event.bucketCards ? [...event.bucketCards] : [chosenCard];
+      const policyClassByCard = event.policyClassByCard ?? {};
+      const chosenBucket = event.chosenBucket ?? 'unknown';
+      const toAltClassId = (card: CardId): string => {
+        const mapped = policyClassByCard[card];
+        if (mapped) return mapped;
+        if (chosenBucket.startsWith('tier1')) return 'idle:tier1';
+        if (chosenBucket.startsWith('tier2') || chosenBucket.startsWith('tier3')) return `busy:${card[0]}`;
+        if (chosenBucket.startsWith('tier4')) return `other:${card[0]}`;
+        return classInfoForCard(shadow, event.play.seat, card).classId;
+      };
       const classOrder: string[] = [];
       const representativeCardByClass: Record<string, CardId> = {};
-      for (const card of bucketCards) {
-        const info = classInfoForCard(shadow, event.play.seat, card);
-        if (!classOrder.includes(info.classId)) classOrder.push(info.classId);
-        if (!representativeCardByClass[info.classId]) representativeCardByClass[info.classId] = info.representative;
-      }
       const chosenClassId = classInfoForCard(shadow, event.play.seat, chosenCard).classId;
+      const chosenPolicyClassId = toAltClassId(chosenCard);
+      for (const card of bucketCards) {
+        const classId = toAltClassId(card);
+        if (!classOrder.includes(classId)) classOrder.push(classId);
+        if (!representativeCardByClass[classId]) representativeCardByClass[classId] = card;
+      }
+      if (classOrder.includes(chosenPolicyClassId)) {
+        representativeCardByClass[chosenPolicyClassId] = chosenCard;
+      }
       currentRunTranscript.push({
         index: currentRunTranscript.length,
         seat: event.play.seat,
         sig: event.decisionSig,
         chosenCard,
         chosenClassId,
-        chosenBucket: event.chosenBucket ?? 'unknown',
+        chosenAltClassId: chosenPolicyClassId,
+        chosenBucket,
         bucketCards,
-        sameBucketAlternativeClassIds: classOrder.filter((id) => id !== chosenClassId),
+        sameBucketAlternativeClassIds: classOrder.filter((id) => id !== chosenPolicyClassId),
         representativeCardByClass
       });
     }
@@ -673,7 +688,11 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
 
 function resetGame(seed: number, reason: string): void {
   clearSingletonAutoplayTimer();
-  currentSeed = seed >>> 0;
+  const nextSeed = seed >>> 0;
+  if (nextSeed !== (currentSeed >>> 0)) {
+    triedAltClass.clear();
+  }
+  currentSeed = nextSeed;
   state = init({ ...currentProblem, rngSeed: currentSeed });
   logs = [...logs, `${reason} seed=${currentSeed}`].slice(-500);
   runStatus = 'running';
@@ -798,7 +817,7 @@ function runTurn(play: Play): void {
     };
     logs = [...logs, `[PLAYAGAIN] recorded transcript ${lastSuccessfulTranscript.decisions.length} decisions`].slice(-500);
     for (const rec of lastSuccessfulTranscript.decisions) {
-      triedAltClass.add(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, rec.chosenClassId));
+      triedAltClass.add(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, rec.chosenAltClassId));
     }
     const availability = hasUntriedAlternatives(lastSuccessfulTranscript, triedAltClass);
     playAgainAvailable = availability.ok;

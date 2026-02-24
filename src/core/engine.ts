@@ -165,6 +165,7 @@ type AutoChoice = {
   preferredDiscard?: PreferredDiscardDecision;
   chosenBucket?: string;
   bucketCards?: CardId[];
+  policyClassByCard?: Record<string, string>;
   decisionSig?: string;
   replay?: { action: 'forced' | 'disabled'; index?: number; reason?: 'sig-mismatch' | 'card-not-legal'; card?: CardId };
 };
@@ -228,6 +229,29 @@ function evaluatePreferredDiscard(state: State): PreferredDiscardDecision | null
   return { preferred, applied: false, reason: 'not-in-hand' };
 }
 
+function buildPolicyClassByCard(
+  state: State,
+  seat: Seat,
+  chosenBucket: string | undefined,
+  bucketCards: CardId[] | undefined
+): Record<string, string> | undefined {
+  if (!bucketCards || bucketCards.length === 0) return undefined;
+  const out: Record<string, string> = {};
+  for (const card of bucketCards) {
+    const defaultClass = classInfoForCard(state, seat, card).classId;
+    if (!chosenBucket || !chosenBucket.startsWith('tier')) {
+      out[card] = defaultClass;
+    } else if (chosenBucket.startsWith('tier1')) {
+      out[card] = 'idle:tier1';
+    } else if (chosenBucket.startsWith('tier2') || chosenBucket.startsWith('tier3')) {
+      out[card] = `busy:${card[0]}`;
+    } else {
+      out[card] = `other:${card[0]}`;
+    }
+  }
+  return out;
+}
+
 function chooseAutoplay(state: State, policy: Policy): AutoChoice {
   const isDefender = state.turn === 'E' || state.turn === 'W';
   const decisionSig = isDefender ? decisionSignature(state) : undefined;
@@ -256,19 +280,28 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
           state.replay.cursor += 1;
           const chosenBucket = rec.chosenBucket;
           const bucketCards = [...rec.bucketCards];
+          const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
           const isDivergence = state.replay.divergenceIndex !== null && rec.index === state.replay.divergenceIndex;
           if (isDivergence) state.replay.enabled = false;
-          return { play: fallback, decisionSig, chosenBucket, bucketCards, replay: { action: 'forced', index: rec.index, card: toCardId(fallback.suit, fallback.rank) } };
+          return {
+            play: fallback,
+            decisionSig,
+            chosenBucket,
+            bucketCards,
+            policyClassByCard,
+            replay: { action: 'forced', index: rec.index, card: toCardId(fallback.suit, fallback.rank) }
+          };
         }
       } else {
         state.replay.cursor += 1;
         const chosenBucket = rec.chosenBucket;
         const bucketCards = [...rec.bucketCards];
+        const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
         const isDivergence = state.replay.divergenceIndex !== null && rec.index === state.replay.divergenceIndex;
         if (isDivergence) {
           state.replay.enabled = false;
         }
-        return { play: forced, decisionSig, chosenBucket, bucketCards, replay: { action: 'forced', index: rec.index, card: forceCard } };
+        return { play: forced, decisionSig, chosenBucket, bucketCards, policyClassByCard, replay: { action: 'forced', index: rec.index, card: forceCard } };
       }
     }
   }
@@ -277,11 +310,15 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
   if (pref?.applied && pref.chosen) {
     state.preferredDiscardUsed[state.turn] = true;
     const { suit, rank } = parseCardId(pref.chosen);
+    const bucketCards: CardId[] = [pref.chosen];
+    const chosenBucket = 'preferred';
+    const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
     return {
       play: { seat: state.turn, suit, rank },
       preferredDiscard: pref,
-      chosenBucket: 'preferred',
-      bucketCards: [pref.chosen],
+      chosenBucket,
+      bucketCards,
+      policyClassByCard,
       decisionSig,
       replay: replayNote
     };
@@ -289,11 +326,15 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
 
   if (policy.kind === 'randomLegal') {
     const legal = legalPlays(state);
+    const chosenBucket = 'legal';
+    const bucketCards = legal.map((p) => toCardId(p.suit, p.rank));
+    const policyClassByCard = isDefender ? buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards) : undefined;
     return {
       play: chooseUniformLegal(state),
       preferredDiscard: pref ?? undefined,
-      chosenBucket: 'legal',
-      bucketCards: legal.map((p) => toCardId(p.suit, p.rank)),
+      chosenBucket,
+      bucketCards,
+      policyClassByCard,
       decisionSig,
       replay: replayNote
     };
@@ -305,11 +346,15 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
   const leadSuit = state.trick[0]?.suit ?? null;
   if (!leadSuit) {
     const legal = legalPlays(state);
+    const chosenBucket = 'lead:none';
+    const bucketCards = legal.map((p) => toCardId(p.suit, p.rank));
+    const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
     return {
       play: chooseUniformLegal(state),
       preferredDiscard: pref ?? undefined,
-      chosenBucket: 'lead:none',
-      bucketCards: legal.map((p) => toCardId(p.suit, p.rank)),
+      chosenBucket,
+      bucketCards,
+      policyClassByCard,
       decisionSig,
       replay: replayNote
     };
@@ -317,22 +362,30 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
   if (state.hands[state.turn][leadSuit].length > 0) {
     const inSuit = legalPlays(state);
     if (!state.threat || !state.threatLabels) {
+      const chosenBucket = 'follow:baseline';
+      const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank));
+      const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
       return {
         play: chooseUniformLegal(state),
         preferredDiscard: pref ?? undefined,
-        chosenBucket: 'follow:baseline',
-        bucketCards: inSuit.map((p) => toCardId(p.suit, p.rank)),
+        chosenBucket,
+        bucketCards,
+        policyClassByCard,
         decisionSig,
         replay: replayNote
       };
     }
     const threshold = getIdleThreatThresholdRank(leadSuit, state.threat, state.threatLabels as DefenderLabels);
     if (!threshold) {
+      const chosenBucket = 'follow:baseline';
+      const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank));
+      const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
       return {
         play: chooseUniformLegal(state),
         preferredDiscard: pref ?? undefined,
-        chosenBucket: 'follow:baseline',
-        bucketCards: inSuit.map((p) => toCardId(p.suit, p.rank)),
+        chosenBucket,
+        bucketCards,
+        policyClassByCard,
         decisionSig,
         replay: replayNote
       };
@@ -342,11 +395,15 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
     const bucket = below.length > 0 ? below : above;
     const idx = pickRandomIndex(bucket.length, state.rng);
     const selected = bucket[idx] ?? bucket[0] ?? inSuit[0] ?? null;
+    const chosenBucket = below.length > 0 ? 'follow:below' : 'follow:above';
+    const bucketCards = bucket.map((p) => toCardId(p.suit, p.rank));
+    const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
     return {
       play: selected,
       preferredDiscard: pref ?? undefined,
-      chosenBucket: below.length > 0 ? 'follow:below' : 'follow:above',
-      bucketCards: bucket.map((p) => toCardId(p.suit, p.rank)),
+      chosenBucket,
+      bucketCards,
+      policyClassByCard,
       decisionSig,
       replay: replayNote
     };
@@ -377,11 +434,13 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
   const idx = pickRandomIndex(chosenBucket.cards.length, state.rng);
   const chosen = chosenBucket.cards[idx] ?? chosenBucket.cards[0];
   const { suit, rank } = parseCardId(chosen);
+  const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket.name, chosenBucket.cards);
   return {
     play: { seat: state.turn, suit, rank },
     preferredDiscard: pref ?? undefined,
     chosenBucket: chosenBucket.name,
     bucketCards: [...chosenBucket.cards],
+    policyClassByCard,
     decisionSig,
     replay: replayNote
   };
@@ -395,6 +454,7 @@ function applyOnePlay(
   preferredDiscard?: PreferredDiscardDecision,
   chosenBucket?: string,
   bucketCards?: CardId[],
+  policyClassByCard?: Record<string, string>,
   decisionSig?: string,
   replay?: { action: 'forced' | 'disabled'; index?: number; reason?: 'sig-mismatch' | 'card-not-legal'; card?: CardId }
 ): EngineEvent[] {
@@ -410,7 +470,7 @@ function applyOnePlay(
   state.trick.push({ ...play });
   state.trickClassIds.push(`${play.seat}:${playedClass}`);
   if (eventType === 'autoplay') {
-    events.push({ type: eventType, play: { ...play }, preferredDiscard, chosenBucket, bucketCards, decisionSig, replay });
+    events.push({ type: eventType, play: { ...play }, preferredDiscard, chosenBucket, bucketCards, policyClassByCard, decisionSig, replay });
   } else {
     events.push({ type: eventType, play: { ...play } });
   }
@@ -574,7 +634,19 @@ export function apply(state: State, play: Play): { state: State; events: EngineE
       break;
     }
 
-    events.push(...applyOnePlay(next, auto.play, 'autoplay', auto.preferredDiscard, auto.chosenBucket, auto.bucketCards, auto.decisionSig, auto.replay));
+    events.push(
+      ...applyOnePlay(
+        next,
+        auto.play,
+        'autoplay',
+        auto.preferredDiscard,
+        auto.chosenBucket,
+        auto.bucketCards,
+        auto.policyClassByCard,
+        auto.decisionSig,
+        auto.replay
+      )
+    );
   }
 
   if (allHandsEmpty(next.hands)) {

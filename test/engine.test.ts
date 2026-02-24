@@ -281,6 +281,101 @@ describe('bridge engine v0.1', () => {
     expect(firstAuto && firstAuto.type === 'autoplay' ? `${firstAuto.play.suit}${firstAuto.play.rank}` : null).toBe('SK');
   });
 
+  test('discard policy-class collapsing groups busy by suit and idle into one class', () => {
+    const step = apply(init(p001), { seat: 'S', suit: 'C', rank: 'A' });
+    const wAuto = step.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
+    expect(wAuto && wAuto.type === 'autoplay').toBe(true);
+    if (!wAuto || wAuto.type !== 'autoplay') return;
+    expect(wAuto.chosenBucket).toBe('tier3b');
+    expect(wAuto.bucketCards?.sort()).toEqual(['HA', 'SJ', 'SK']);
+    expect(wAuto.policyClassByCard).toEqual({
+      SK: 'busy:S',
+      SJ: 'busy:S',
+      HA: 'busy:H'
+    });
+
+    const idleProblem: Problem = {
+      id: 'idle-policy-class',
+      contract: { strain: 'NT' },
+      leader: 'S',
+      userControls: ['S'],
+      goal: { type: 'minTricks', side: 'NS', n: 0 },
+      hands: {
+        N: { S: ['8'], H: [], D: [], C: [] },
+        E: { S: ['K'], H: [], D: [], C: [] },
+        S: { S: [], H: ['A'], D: [], C: [] },
+        W: { S: [], H: [], D: ['2'], C: ['3'] }
+      },
+      policies: {
+        W: { kind: 'threatAware' },
+        E: { kind: 'randomLegal' },
+        N: { kind: 'randomLegal' }
+      },
+      threatCardIds: ['S8'],
+      rngSeed: 9
+    };
+    const idleStep = apply(init(idleProblem), { seat: 'S', suit: 'H', rank: 'A' });
+    const idleAuto = idleStep.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
+    expect(idleAuto && idleAuto.type === 'autoplay').toBe(true);
+    if (!idleAuto || idleAuto.type !== 'autoplay') return;
+    expect(idleAuto.chosenBucket).toBe('tier1a');
+    expect(idleAuto.bucketCards?.sort()).toEqual(['C3', 'D2']);
+    expect(idleAuto.policyClassByCard).toEqual({
+      D2: 'idle:tier1',
+      C3: 'idle:tier1'
+    });
+  });
+
+  test('follow decisions collapse equals alternatives into one alt class', () => {
+    const problem: Problem = {
+      id: 'follow-equals-collapse',
+      contract: { strain: 'NT' },
+      leader: 'N',
+      userControls: ['N'],
+      goal: { type: 'minTricks', side: 'NS', n: 0 },
+      hands: {
+        N: { S: ['A'], H: [], D: [], C: [] },
+        E: { S: ['J', 'T'], H: [], D: [], C: [] },
+        S: { S: ['2'], H: [], D: [], C: [] },
+        W: { S: ['3'], H: [], D: [], C: [] }
+      },
+      policies: {
+        E: { kind: 'threatAware' },
+        S: { kind: 'randomLegal' },
+        W: { kind: 'randomLegal' }
+      },
+      threatCardIds: ['S2'],
+      rngSeed: 21
+    };
+
+    const start = init(problem);
+    const step = apply(start, { seat: 'N', suit: 'S', rank: 'A' });
+    const eAuto = step.events.find((e) => e.type === 'autoplay' && e.play.seat === 'E');
+    expect(eAuto && eAuto.type === 'autoplay').toBe(true);
+    if (!eAuto || eAuto.type !== 'autoplay') return;
+
+    const chosenCard = `${eAuto.play.suit}${eAuto.play.rank}` as CardId;
+    const bucketCards = eAuto.bucketCards ? [...eAuto.bucketCards] : [chosenCard];
+    expect(bucketCards.sort()).toEqual(['SJ', 'ST']);
+    expect(eAuto.policyClassByCard).toBeTruthy();
+    if (!eAuto.policyClassByCard) return;
+
+    const classOrder: string[] = [];
+    const representativeCardByClass: Record<string, CardId> = {};
+    const chosenPolicyClassId = eAuto.policyClassByCard[chosenCard] ?? classInfoForCard(start, 'E', chosenCard).classId;
+    for (const card of bucketCards) {
+      const classId = eAuto.policyClassByCard[card] ?? classInfoForCard(start, 'E', card).classId;
+      if (!classOrder.includes(classId)) classOrder.push(classId);
+      if (!representativeCardByClass[classId]) representativeCardByClass[classId] = card;
+    }
+    if (classOrder.includes(chosenPolicyClassId)) representativeCardByClass[chosenPolicyClassId] = chosenCard;
+    const sameBucketAlternativeClassIds = classOrder.filter((id) => id !== chosenPolicyClassId);
+
+    expect(eAuto.policyClassByCard.SJ).toBe(eAuto.policyClassByCard.ST);
+    expect(classOrder.length).toBe(1);
+    expect(sameBucketAlternativeClassIds).toEqual([]);
+  });
+
   test('coordinated busy suit feeds tier2 before solo tiers', () => {
     const position = {
       hands: {
@@ -487,6 +582,7 @@ describe('bridge engine v0.1', () => {
           sig: firstAuto!.decisionSig!,
           chosenCard: `${firstAuto!.play.suit}${firstAuto!.play.rank}` as CardId,
           chosenClassId: `${firstAuto!.play.seat}:${firstAuto!.play.suit}:${firstAuto!.play.rank}-${firstAuto!.play.rank}`,
+          chosenAltClassId: `${firstAuto!.play.seat}:${firstAuto!.play.suit}:${firstAuto!.play.rank}-${firstAuto!.play.rank}`,
           chosenBucket: firstAuto!.chosenBucket ?? 'unknown',
           bucketCards: firstAuto!.bucketCards ? [...firstAuto!.bucketCards] : [`${firstAuto!.play.suit}${firstAuto!.play.rank}` as CardId],
           sameBucketAlternativeClassIds: [],
@@ -541,6 +637,7 @@ describe('bridge engine v0.1', () => {
           sig: firstAuto.decisionSig ?? '',
           chosenCard,
           chosenClassId,
+          chosenAltClassId: chosenClassId,
           chosenBucket: firstAuto.chosenBucket ?? 'unknown',
           bucketCards,
           sameBucketAlternativeClassIds,
@@ -563,5 +660,56 @@ describe('bridge engine v0.1', () => {
     expect(hasUntriedAlternatives(transcript, tried).ok).toBe(false);
     const reseededTranscript: SuccessfulTranscript = { ...transcript, seed: transcript.seed + 1000 };
     expect(hasUntriedAlternatives(reseededTranscript, tried).ok).toBe(false);
+  });
+
+  test('p003-like play-again bookkeeping does not re-offer an already-explored policy class', () => {
+    const tried = new Set<string>();
+
+    const baseline: SuccessfulTranscript = {
+      problemId: 'p003',
+      seed: 101,
+      decisions: [
+        {
+          index: 0,
+          seat: 'E',
+          sig: 'sig-0',
+          chosenCard: 'SQ',
+          chosenClassId: 'E:S:Q-Q',
+          chosenAltClassId: 'busy:S',
+          chosenBucket: 'tier3b',
+          bucketCards: ['SQ', 'ST', 'DA'],
+          sameBucketAlternativeClassIds: ['busy:D'],
+          representativeCardByClass: { 'busy:S': 'SQ', 'busy:D': 'DA' }
+        }
+      ],
+      userPlays: []
+    };
+
+    for (const rec of baseline.decisions) {
+      tried.add(triedAltKey(baseline.problemId, rec.index, rec.chosenBucket, rec.chosenAltClassId));
+    }
+    expect(hasUntriedAlternatives(baseline, tried).ok).toBe(true);
+
+    tried.add(triedAltKey(baseline.problemId, 0, 'tier3b', 'busy:D'));
+
+    const forcedRun: SuccessfulTranscript = {
+      ...baseline,
+      seed: 202,
+      decisions: [
+        {
+          ...baseline.decisions[0],
+          chosenCard: 'DA',
+          chosenClassId: 'E:D:A-A',
+          chosenAltClassId: 'busy:D',
+          sameBucketAlternativeClassIds: ['busy:S'],
+          representativeCardByClass: { 'busy:S': 'ST', 'busy:D': 'DA' }
+        }
+      ]
+    };
+    for (const rec of forcedRun.decisions) {
+      tried.add(triedAltKey(forcedRun.problemId, rec.index, rec.chosenBucket, rec.chosenAltClassId));
+    }
+
+    expect(hasUntriedAlternatives(forcedRun, tried).ok).toBe(false);
   });
 });
