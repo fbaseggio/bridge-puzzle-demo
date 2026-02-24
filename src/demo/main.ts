@@ -558,14 +558,22 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
       const classOrder: string[] = [];
       const representativeCardByClass: Record<string, CardId> = {};
       const chosenClassId = classInfoForCard(shadow, event.play.seat, chosenCard).classId;
-      const chosenPolicyClassId = toAltClassId(chosenCard);
+      const chosenAltClassId = toAltClassId(chosenCard);
       for (const card of bucketCards) {
         const classId = toAltClassId(card);
         if (!classOrder.includes(classId)) classOrder.push(classId);
         if (!representativeCardByClass[classId]) representativeCardByClass[classId] = card;
       }
-      if (classOrder.includes(chosenPolicyClassId)) {
-        representativeCardByClass[chosenPolicyClassId] = chosenCard;
+      if (classOrder.includes(chosenAltClassId)) {
+        representativeCardByClass[chosenAltClassId] = chosenCard;
+      }
+      const coveredCards = bucketCards.filter((card) => toAltClassId(card) === chosenAltClassId);
+      const remainingClasses = classOrder.filter((id) => id !== chosenAltClassId);
+      if (verboseLog) {
+        logs = [
+          ...logs,
+          `[EQC] idx=${currentRunTranscript.length} seat=${event.play.seat} bucket=${chosenBucket} classes=${classOrder.join(',') || '-'} chosen=${chosenAltClassId} covers=${coveredCards.join(',') || '-'} remaining=${remainingClasses.join(',') || '-'}`
+        ].slice(-500);
       }
       currentRunTranscript.push({
         index: currentRunTranscript.length,
@@ -573,10 +581,10 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
         sig: event.decisionSig,
         chosenCard,
         chosenClassId,
-        chosenAltClassId: chosenPolicyClassId,
+        chosenAltClassId,
         chosenBucket,
         bucketCards,
-        sameBucketAlternativeClassIds: classOrder.filter((id) => id !== chosenPolicyClassId),
+        sameBucketAlternativeClassIds: classOrder.filter((id) => id !== chosenAltClassId),
         representativeCardByClass
       });
     }
@@ -817,7 +825,8 @@ function runTurn(play: Play): void {
     };
     logs = [...logs, `[PLAYAGAIN] recorded transcript ${lastSuccessfulTranscript.decisions.length} decisions`].slice(-500);
     for (const rec of lastSuccessfulTranscript.decisions) {
-      triedAltClass.add(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, rec.chosenAltClassId));
+      const chosenAltClassId = rec.chosenAltClassId || rec.chosenClassId;
+      triedAltClass.add(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, chosenAltClassId));
     }
     const availability = hasUntriedAlternatives(lastSuccessfulTranscript, triedAltClass);
     playAgainAvailable = availability.ok;
@@ -863,6 +872,21 @@ function startPlayAgain(): void {
   let forcedCard: CardId | null = null;
   for (let i = lastSuccessfulTranscript.decisions.length - 1; i >= 0; i -= 1) {
     const rec = lastSuccessfulTranscript.decisions[i];
+    if (verboseLog) {
+      const allClasses = [rec.chosenAltClassId ?? rec.chosenClassId, ...rec.sameBucketAlternativeClassIds].filter(
+        (v, idx, arr) => v && arr.indexOf(v) === idx
+      );
+      const triedClasses = allClasses.filter((classId) =>
+        triedAltClass.has(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, classId))
+      );
+      const remainingClasses = rec.sameBucketAlternativeClassIds.filter(
+        (classId) => !triedAltClass.has(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, classId))
+      );
+      logs = [
+        ...logs,
+        `[EQC:playagain] idx=${rec.index} tried=${triedClasses.join(',') || '-'} remaining=${remainingClasses.join(',') || '-'}`
+      ].slice(-500);
+    }
     const altClass = rec.sameBucketAlternativeClassIds.find(
       (classId) => !triedAltClass.has(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, classId))
     );

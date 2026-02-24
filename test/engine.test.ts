@@ -293,6 +293,45 @@ describe('bridge engine v0.1', () => {
       SJ: 'busy:S',
       HA: 'busy:H'
     });
+    const chosenCard = `${wAuto.play.suit}${wAuto.play.rank}` as CardId;
+    const chosenAltClassId = wAuto.policyClassByCard?.[chosenCard] ?? `busy:${chosenCard[0]}`;
+    const classOrder: string[] = [];
+    for (const card of wAuto.bucketCards ?? []) {
+      const cls = wAuto.policyClassByCard?.[card] ?? `busy:${card[0]}`;
+      if (!classOrder.includes(cls)) classOrder.push(cls);
+    }
+    const sameBucketAlternativeClassIds = classOrder.filter((id) => id !== chosenAltClassId);
+    expect(classOrder.sort()).toEqual(['busy:H', 'busy:S']);
+    expect(sameBucketAlternativeClassIds.length).toBe(1);
+
+    const transcript: SuccessfulTranscript = {
+      problemId: p001.id,
+      seed: p001.rngSeed,
+      decisions: [
+        {
+          index: 0,
+          seat: 'W',
+          sig: wAuto.decisionSig ?? '',
+          chosenCard,
+          chosenClassId: classInfoForCard(init(p001), 'W', chosenCard).classId,
+          chosenAltClassId,
+          chosenBucket: wAuto.chosenBucket ?? 'tier3b',
+          bucketCards: [...(wAuto.bucketCards ?? [])],
+          sameBucketAlternativeClassIds,
+          representativeCardByClass: {
+            'busy:S': 'SK',
+            'busy:H': 'HA'
+          }
+        }
+      ],
+      userPlays: []
+    };
+    const tried = new Set<string>([
+      triedAltKey(transcript.problemId, 0, transcript.decisions[0].chosenBucket, transcript.decisions[0].chosenAltClassId)
+    ]);
+    expect(hasUntriedAlternatives(transcript, tried).ok).toBe(true);
+    tried.add(triedAltKey(transcript.problemId, 0, transcript.decisions[0].chosenBucket, sameBucketAlternativeClassIds[0]));
+    expect(hasUntriedAlternatives(transcript, tried).ok).toBe(false);
 
     const idleProblem: Problem = {
       id: 'idle-policy-class',
@@ -649,9 +688,9 @@ describe('bridge engine v0.1', () => {
 
     expect(sameBucketAlternativeClassIds.length).toBeGreaterThan(0);
     const tried = new Set<string>([
-      triedAltKey(transcript.problemId, 0, transcript.decisions[0].chosenBucket, transcript.decisions[0].chosenClassId)
+      triedAltKey(transcript.problemId, 0, transcript.decisions[0].chosenBucket, transcript.decisions[0].chosenAltClassId)
     ]);
-    expect(tried.has(triedAltKey(transcript.problemId, 0, transcript.decisions[0].chosenBucket, transcript.decisions[0].chosenClassId))).toBe(true);
+    expect(tried.has(triedAltKey(transcript.problemId, 0, transcript.decisions[0].chosenBucket, transcript.decisions[0].chosenAltClassId))).toBe(true);
     expect(hasUntriedAlternatives(transcript, tried).ok).toBe(true);
 
     const forcedAltClass = sameBucketAlternativeClassIds[0];
