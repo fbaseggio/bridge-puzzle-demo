@@ -191,6 +191,10 @@ body {
 }
 
 .played-text {
+  display: inline-flex;
+  align-items: baseline;
+  white-space: nowrap;
+  min-width: 1.6em;
   font-size: 16px;
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
   line-height: 1;
