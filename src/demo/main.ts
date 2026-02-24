@@ -27,6 +27,7 @@ import {
 } from '../ai/threatModel';
 import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock, formatInitBlock } from '../ai/threatModelVerbose';
 import { getCardRankColor } from '../ui/annotations';
+import { hasUntriedAlternatives, triedAltKey } from './playAgain';
 import { demoProblems } from './problems';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -78,6 +79,9 @@ let verboseLog = false;
 let showLog = true;
 let showGuides = true;
 let teachingMode = true;
+let autoplaySingletons = false;
+let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
+let singletonAutoplayKey: string | null = null;
 
 let trickFrozen = false;
 let lastCompletedTrick: Play[] | null = null;
@@ -113,6 +117,14 @@ let runStatus: RunStatus = 'running';
 let playAgainAvailable = false;
 let playAgainUnavailableReason: string | null = null;
 let playAgainLastCandidateIndex: number | null = null;
+
+function clearSingletonAutoplayTimer(): void {
+  if (singletonAutoplayTimer) {
+    clearTimeout(singletonAutoplayTimer);
+    singletonAutoplayTimer = null;
+  }
+  singletonAutoplayKey = null;
+}
 
 function sortRanksDesc(ranks: Rank[]): Rank[] {
   const strength = new Map(rankOrder.map((r, i) => [r, i] as const));
@@ -328,27 +340,6 @@ function restoreSnapshot(snapshot: GameSnapshot): void {
   playAgainAvailable = snapshot.playAgainAvailable;
   playAgainUnavailableReason = snapshot.playAgainUnavailableReason;
   playAgainLastCandidateIndex = snapshot.playAgainLastCandidateIndex;
-}
-
-function triedAltKey(problemId: string, seed: number, decisionIndex: number, chosenBucket: string, altClassId: string): string {
-  return `${problemId}|${seed}|${decisionIndex}|${chosenBucket}|${altClassId}`;
-}
-
-function hasUntriedAlternatives(
-  transcript: SuccessfulTranscript | null,
-  triedSet: Set<string>
-): { ok: boolean; lastCandidateIndex?: number; reason?: string } {
-  if (!transcript || transcript.decisions.length === 0) {
-    return { ok: false, reason: 'no-untried-same-bucket-alternatives' };
-  }
-  for (let i = transcript.decisions.length - 1; i >= 0; i -= 1) {
-    const rec = transcript.decisions[i];
-    const untried = rec.sameBucketAlternativeClassIds.find(
-      (altClassId) => !triedSet.has(triedAltKey(transcript.problemId, transcript.seed, rec.index, rec.chosenBucket, altClassId))
-    );
-    if (untried) return { ok: true, lastCandidateIndex: rec.index };
-  }
-  return { ok: false, reason: 'no-untried-same-bucket-alternatives' };
 }
 
 function totalCards(s: State, seat: Seat): number {
@@ -601,6 +592,62 @@ function unfreezeTrick(flushDeferredLogs: boolean): void {
   }
 }
 
+function stateSingletonKey(s: State, play: Play): string {
+  const handSig = seatOrder
+    .map((seat) => `${seat}:${suitOrder.map((suit) => s.hands[seat][suit].join('')).join('/')}`)
+    .join('|');
+  const trickSig = s.trick.map((p) => `${p.seat}${p.suit}${p.rank}`).join(',');
+  return `${s.phase}|${s.turn}|${s.leader}|${trickSig}|${handSig}|${play.seat}${play.suit}${play.rank}`;
+}
+
+function syncSingletonAutoplay(): void {
+  const userControlledSeats = state.userControls;
+  const userTurn = userControlledSeats.includes(state.turn);
+  const canAutoplayNow =
+    userTurn &&
+    ((!trickFrozen && state.phase === 'awaitUser') || (trickFrozen && canLeadDismiss && state.phase !== 'end'));
+  if (!autoplaySingletons || !canAutoplayNow) {
+    clearSingletonAutoplayTimer();
+    return;
+  }
+
+  const legal = legalPlays(state).filter((p) => p.seat === state.turn);
+  if (legal.length !== 1) {
+    clearSingletonAutoplayTimer();
+    return;
+  }
+
+  const onlyPlay = legal[0];
+  const key = stateSingletonKey(state, onlyPlay);
+  if (singletonAutoplayTimer && singletonAutoplayKey === key) return;
+
+  clearSingletonAutoplayTimer();
+  singletonAutoplayKey = key;
+  singletonAutoplayTimer = setTimeout(() => {
+    const liveUserControlledSeats = state.userControls;
+    const liveUserTurn = liveUserControlledSeats.includes(state.turn);
+    const liveCanAutoplay =
+      liveUserTurn &&
+      ((!trickFrozen && state.phase === 'awaitUser') || (trickFrozen && canLeadDismiss && state.phase !== 'end'));
+    if (!autoplaySingletons || !liveCanAutoplay) {
+      clearSingletonAutoplayTimer();
+      return;
+    }
+    const liveLegal = legalPlays(state).filter((p) => p.seat === state.turn);
+    if (liveLegal.length !== 1) {
+      clearSingletonAutoplayTimer();
+      return;
+    }
+    const livePlay = liveLegal[0];
+    if (stateSingletonKey(state, livePlay) !== key) {
+      clearSingletonAutoplayTimer();
+      return;
+    }
+    clearSingletonAutoplayTimer();
+    runTurn(livePlay);
+  }, 500);
+}
+
 function refreshThreatModel(problemId: string, clearLogs: boolean): void {
   if (clearLogs) logs = [];
   const rawThreats = getThreatCardIds(currentProblem as ProblemWithThreats);
@@ -625,6 +672,7 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
 }
 
 function resetGame(seed: number, reason: string): void {
+  clearSingletonAutoplayTimer();
   currentSeed = seed >>> 0;
   state = init({ ...currentProblem, rngSeed: currentSeed });
   logs = [...logs, `${reason} seed=${currentSeed}`].slice(-500);
@@ -642,6 +690,7 @@ function resetGame(seed: number, reason: string): void {
 }
 
 function selectProblem(problemId: string): void {
+  clearSingletonAutoplayTimer();
   const entry = demoProblems.find((p) => p.id === problemId);
   if (!entry) return;
   currentProblem = entry.problem;
@@ -664,6 +713,7 @@ function selectProblem(problemId: string): void {
 }
 
 function backupLastUserPlay(): void {
+  clearSingletonAutoplayTimer();
   const snapshot = undoStack.pop();
   if (!snapshot) return;
   restoreSnapshot(snapshot);
@@ -672,6 +722,7 @@ function backupLastUserPlay(): void {
 }
 
 function runTurn(play: Play): void {
+  clearSingletonAutoplayTimer();
   if (state.replay.enabled && state.replay.transcript && (play.seat === 'N' || play.seat === 'S')) {
     const playId = toCardId(play.suit, play.rank) as CardId;
     const actualClass = classInfoForCard(state, play.seat, playId).classId;
@@ -746,6 +797,9 @@ function runTurn(play: Play): void {
       userPlays: currentRunUserPlays.map((u) => ({ ...u }))
     };
     logs = [...logs, `[PLAYAGAIN] recorded transcript ${lastSuccessfulTranscript.decisions.length} decisions`].slice(-500);
+    for (const rec of lastSuccessfulTranscript.decisions) {
+      triedAltClass.add(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, rec.chosenClassId));
+    }
     const availability = hasUntriedAlternatives(lastSuccessfulTranscript, triedAltClass);
     playAgainAvailable = availability.ok;
     playAgainUnavailableReason = availability.ok ? null : (availability.reason ?? 'no-untried-same-bucket-alternatives');
@@ -773,6 +827,7 @@ function runTurn(play: Play): void {
 }
 
 function startPlayAgain(): void {
+  clearSingletonAutoplayTimer();
   const availability = hasUntriedAlternatives(lastSuccessfulTranscript, triedAltClass);
   playAgainAvailable = availability.ok;
   playAgainUnavailableReason = availability.ok ? null : (availability.reason ?? 'no-untried-same-bucket-alternatives');
@@ -790,12 +845,12 @@ function startPlayAgain(): void {
   for (let i = lastSuccessfulTranscript.decisions.length - 1; i >= 0; i -= 1) {
     const rec = lastSuccessfulTranscript.decisions[i];
     const altClass = rec.sameBucketAlternativeClassIds.find(
-      (classId) => !triedAltClass.has(triedAltKey(lastSuccessfulTranscript.problemId, lastSuccessfulTranscript.seed, rec.index, rec.chosenBucket, classId))
+      (classId) => !triedAltClass.has(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, classId))
     );
     if (altClass) {
       divergenceIndex = rec.index;
       forcedCard = rec.representativeCardByClass[altClass] ?? null;
-      triedAltClass.add(triedAltKey(lastSuccessfulTranscript.problemId, lastSuccessfulTranscript.seed, rec.index, rec.chosenBucket, altClass));
+      triedAltClass.add(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, altClass));
       if (!forcedCard) continue;
       logs = [...logs, `[PLAYAGAIN] divergenceIndex=${divergenceIndex} forcedCard=${forcedCard}`].slice(-500);
       break;
@@ -1076,6 +1131,18 @@ function render(): void {
   };
   teachLabel.append(teachBox, ' Teaching mode');
   tableTools.appendChild(teachLabel);
+
+  const singletonLabel = document.createElement('label');
+  const singletonBox = document.createElement('input');
+  singletonBox.type = 'checkbox';
+  singletonBox.checked = autoplaySingletons;
+  singletonBox.onchange = () => {
+    autoplaySingletons = singletonBox.checked;
+    syncSingletonAutoplay();
+    render();
+  };
+  singletonLabel.append(singletonBox, ' Autoplay singletons');
+  tableTools.appendChild(singletonLabel);
   tableHost.appendChild(tableTools);
 
   const tableCanvas = document.createElement('main');
@@ -1126,6 +1193,7 @@ function render(): void {
     root.appendChild(panel);
     log.scrollTop = log.scrollHeight;
   }
+  syncSingletonAutoplay();
 }
 
 refreshThreatModel(currentProblemId, false);

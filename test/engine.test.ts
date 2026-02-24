@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
-import { apply, init, legalPlays, type CardId, type Problem, type SuccessfulTranscript } from '../src/core';
+import { apply, classInfoForCard, init, legalPlays, type CardId, type Problem, type SuccessfulTranscript } from '../src/core';
 import { chooseDiscard, computeDiscardTiers } from '../src/ai/defenderDiscard';
 import { computeDefenderLabels, initThreatContext, type DefenderLabels } from '../src/ai/threatModel';
+import { hasUntriedAlternatives, triedAltKey } from '../src/demo/playAgain';
 import { p001 } from '../src/puzzles/p001';
 import { p002 } from '../src/puzzles/p002';
 
@@ -503,5 +504,64 @@ describe('bridge engine v0.1', () => {
     expect(replayAuto && replayAuto.type === 'autoplay' ? `${replayAuto.play.suit}${replayAuto.play.rank}` : null).toBe(
       `${firstAuto!.play.suit}${firstAuto!.play.rank}`
     );
+  });
+
+  test('p001 play-again alternatives exhaust after baseline chosen class and forced class are both tried', () => {
+    const start = init(p001);
+    const step = apply(start, { seat: 'S', suit: 'C', rank: 'A' });
+    const firstAuto = step.events.find((e) => e.type === 'autoplay' && (e.play.seat === 'E' || e.play.seat === 'W'));
+    expect(firstAuto && firstAuto.type === 'autoplay').toBe(true);
+    if (!firstAuto || firstAuto.type !== 'autoplay') return;
+
+    const chosenCard = `${firstAuto.play.suit}${firstAuto.play.rank}` as CardId;
+    const bucketCards = firstAuto.bucketCards ? [...firstAuto.bucketCards] : [chosenCard];
+    const classOrder: string[] = [];
+    const representativeCardByClass: Record<string, CardId> = {};
+    for (const card of bucketCards) {
+      const info = classInfoForCard(start, firstAuto.play.seat, card);
+      if (!classOrder.includes(info.classId)) classOrder.push(info.classId);
+      if (!representativeCardByClass[info.classId]) representativeCardByClass[info.classId] = info.representative;
+    }
+    const chosenClassId = classInfoForCard(start, firstAuto.play.seat, chosenCard).classId;
+    const sameBucketAlternativeClassIds = classOrder.filter((id) => id !== chosenClassId);
+    const spadeClassIds = new Set(
+      bucketCards
+        .filter((card) => card.startsWith('S'))
+        .map((card) => classInfoForCard(start, firstAuto.play.seat, card).classId)
+    );
+    expect(spadeClassIds.size).toBe(1);
+
+    const transcript: SuccessfulTranscript = {
+      problemId: p001.id,
+      seed: p001.rngSeed,
+      decisions: [
+        {
+          index: 0,
+          seat: firstAuto.play.seat,
+          sig: firstAuto.decisionSig ?? '',
+          chosenCard,
+          chosenClassId,
+          chosenBucket: firstAuto.chosenBucket ?? 'unknown',
+          bucketCards,
+          sameBucketAlternativeClassIds,
+          representativeCardByClass
+        }
+      ],
+      userPlays: []
+    };
+
+    expect(sameBucketAlternativeClassIds.length).toBeGreaterThan(0);
+    const tried = new Set<string>([
+      triedAltKey(transcript.problemId, 0, transcript.decisions[0].chosenBucket, transcript.decisions[0].chosenClassId)
+    ]);
+    expect(tried.has(triedAltKey(transcript.problemId, 0, transcript.decisions[0].chosenBucket, transcript.decisions[0].chosenClassId))).toBe(true);
+    expect(hasUntriedAlternatives(transcript, tried).ok).toBe(true);
+
+    const forcedAltClass = sameBucketAlternativeClassIds[0];
+    tried.add(triedAltKey(transcript.problemId, 0, transcript.decisions[0].chosenBucket, forcedAltClass));
+
+    expect(hasUntriedAlternatives(transcript, tried).ok).toBe(false);
+    const reseededTranscript: SuccessfulTranscript = { ...transcript, seed: transcript.seed + 1000 };
+    expect(hasUntriedAlternatives(reseededTranscript, tried).ok).toBe(false);
   });
 });
