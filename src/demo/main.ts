@@ -3,6 +3,7 @@ import './style.css';
 import {
   apply,
   classInfoForCard,
+  getSuitEquivalenceClasses,
   init,
   legalPlays,
   type DecisionRecord,
@@ -50,10 +51,10 @@ const rankGlyphWidth = 9;
 const rankGap = 4;
 const handPadX = 4;
 const handPadY = 6;
-const rowHeight = 14;
+const rowHeight = 17;
 const seatRowHeight = 16;
 const seatToSuitGap = 3;
-const suitRowSpacingTotal = 8; // 4 rows with 1px top/bottom row margins.
+const suitRowSpacingTotal = 16; // 4 rows with 2px top/bottom row margins.
 const verticalGap = Math.round(rowHeight * 0.6);
 const horizontalGap = Math.round(rowHeight * 0.6);
 const handBoxWidth = suitColWidth + suitGap + maxSuitLineLen * rankGlyphWidth + Math.max(0, maxSuitLineLen - 1) * rankGap + handPadX;
@@ -134,6 +135,22 @@ function displayRank(rank: Rank): string {
   return rank === 'T' ? '10' : rank;
 }
 
+function formatSuitWithEquivalence(s: State, seat: Seat, suit: Suit): string {
+  const classes = getSuitEquivalenceClasses(s, seat, suit);
+  if (classes.length === 0) return '-';
+  return classes
+    .map((members) => {
+      const text = members.join('');
+      return members.length > 1 ? `(${text})` : text;
+    })
+    .join('');
+}
+
+function formatHandInitSummary(s: State, seat: Seat): string {
+  const suitParts = suitOrder.map((suit) => formatSuitWithEquivalence(s, seat, suit));
+  return `${seat}: ${suitParts.join('/')}`;
+}
+
 function rankColorClass(cardId: CardId): string {
   if (!threatCtx || !threatLabels) return 'rank--black';
   const color = getCardRankColor(cardId, threatCtx, threatLabels, teachingMode);
@@ -146,9 +163,9 @@ function rankColorClass(cardId: CardId): string {
         : 'rank--black';
 }
 
-function appendRankContent(target: HTMLElement, rank: Rank, colorClass: string): void {
+function appendRankContent(target: HTMLElement, rank: Rank, colorClass: string, isEquivalent = false): void {
   const wrap = document.createElement('span');
-  wrap.className = `rank ${colorClass}`;
+  wrap.className = `rank ${colorClass}${isEquivalent ? ' eq-underline' : ''}`;
 
   if (rank !== 'T') {
     wrap.textContent = displayRank(rank);
@@ -157,7 +174,7 @@ function appendRankContent(target: HTMLElement, rank: Rank, colorClass: string):
   }
 
   const ten = document.createElement('span');
-  ten.className = `rank ten ${colorClass}`;
+  ten.className = `rank ten ${colorClass}${isEquivalent ? ' eq-underline' : ''}`;
   const one = document.createElement('span');
   one.className = 'digit-one';
   one.textContent = '1';
@@ -601,7 +618,8 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
         position: positionFromState(state),
         ctx: threatCtx,
         labels: threatLabels
-      })
+      }),
+      ...seatOrder.map((seat) => `[HAND:init] ${formatHandInitSummary(state, seat)}`)
     ].slice(-500);
   }
 }
@@ -835,22 +853,31 @@ function renderSuitRow(view: State, seat: Seat, suit: Suit, legalSet: Set<string
   cards.className = 'cards';
 
   const ranks = sortRanksDesc(view.hands[seat][suit]);
+  const equivalentRanks = new Set<Rank>();
+  if (teachingMode) {
+    for (const cls of getSuitEquivalenceClasses(view, seat, suit)) {
+      if (cls.length > 1) {
+        for (const rank of cls) equivalentRanks.add(rank);
+      }
+    }
+  }
   if (ranks.length > 0) {
     for (const rank of ranks) {
       const key = `${suit}${rank}`;
       const isLegal = canAct && legalSet.has(key);
+      const isEquivalent = equivalentRanks.has(rank);
 
       if (isLegal) {
         const rankBtn = document.createElement('button');
         rankBtn.type = 'button';
-        rankBtn.className = `rank-text legal`;
-        appendRankContent(rankBtn, rank, rankColorClass(toCardId(suit, rank) as CardId));
+        rankBtn.className = 'rank-text legal';
+        appendRankContent(rankBtn, rank, rankColorClass(toCardId(suit, rank) as CardId), isEquivalent);
         rankBtn.onclick = () => runTurn({ seat, suit, rank });
         cards.appendChild(rankBtn);
       } else {
         const rankEl = document.createElement('span');
-        rankEl.className = `rank-text muted`;
-        appendRankContent(rankEl, rank, rankColorClass(toCardId(suit, rank) as CardId));
+        rankEl.className = 'rank-text muted';
+        appendRankContent(rankEl, rank, rankColorClass(toCardId(suit, rank) as CardId), isEquivalent);
         cards.appendChild(rankEl);
       }
     }
