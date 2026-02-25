@@ -73,7 +73,7 @@ root.style.setProperty('--trick-box-h', `${trickBoxSize}px`);
 root.style.setProperty('--table-gap-y', `${verticalGap}px`);
 root.style.setProperty('--table-gap-x', `${horizontalGap}px`);
 root.style.setProperty('--slot-offset', '12%');
-const busyBranching: 'strict' | 'sameLevel' | 'allBusy' = 'sameLevel';
+let busyBranching: 'strict' | 'sameLevel' | 'allBusy' = 'sameLevel';
 const threatDetail = false;
 const verboseCoverageDetail = false;
 
@@ -136,6 +136,7 @@ let replayMismatchCutoffIdx: number | null = null;
 let replaySuppressedForRun = false;
 const userEqClassByCardId = new Map<CardId, string>();
 const userEqRepByClassId = new Map<string, CardId>();
+let invEqVersion = 0;
 type DefenderEqInitRecord = {
   idx: number;
   seat: 'E' | 'W';
@@ -504,6 +505,11 @@ function computeEqcForAutoplayEvent(shadow: State, event: Extract<EngineEvent, {
     if (chosenBucket.startsWith('tier1')) return 'idle:tier1';
     if (chosenBucket.startsWith('tier2') || chosenBucket.startsWith('tier3')) return `busy:${card[0]}`;
     if (chosenBucket === 'tier4') return `other:${card[0]}`;
+    const labels = shadow.threatLabels as DefenderLabels | null;
+    if (labels) {
+      if (labels[event.play.seat].busy.has(card)) return `busy:${card[0]}`;
+      if (labels[event.play.seat].idle.has(card)) return 'idle:tier1';
+    }
     const mapped = policyClassByCard[card];
     if (mapped) return mapped;
     return classInfoForCard(shadow, event.play.seat, card).classId;
@@ -775,6 +781,51 @@ function formatDefenderInventoryEqBlock(s: State): string[] {
   ];
 }
 
+function formatDefenderInventoryEqSeat(s: State, seat: 'E' | 'W'): string {
+  const ctx = s.threat as ThreatContext | null;
+  const labels = s.threatLabels as DefenderLabels | null;
+  const idleSuitOrder: Suit[] = ['C', 'D', 'H', 'S'];
+  const busySuitOrder: Suit[] = ['S', 'H', 'D', 'C'];
+  const tierOrder = ['tier2a', 'tier2b', 'tier3a', 'tier3b'];
+  const threatSuits = busySuitOrder.filter((suit) => !!ctx?.threatsBySuit[suit]);
+
+  const idleParts: string[] = [];
+  for (const suit of idleSuitOrder) {
+    const cards = sortCardIdsDesc(
+      [...(labels?.[seat].idle ?? new Set<CardId>())].filter((card) => card[0] === suit)
+    );
+    if (cards.length > 0) idleParts.push(`idle:${suit}{${cards.join(' ')}}`);
+  }
+  const idleSummary = idleParts.length > 0 ? idleParts.join(' ') : 'idle:(None)';
+
+  const busyParts: string[] = [];
+  for (const suit of threatSuits) {
+    const cards = sortCardIdsDesc(
+      [...(labels?.[seat].busy ?? new Set<CardId>())].filter((card) => card[0] === suit)
+    );
+    if (cards.length === 0) {
+      busyParts.push(`busy:${suit}(None)`);
+      continue;
+    }
+    const threshold = ctx && labels ? getIdleThreatThresholdRank(suit, ctx, labels) : null;
+    const stopStatus = ctx?.threatsBySuit[suit]?.stopStatus;
+    const prefix = stopStatus === 'double' ? '2' : '3';
+    const tiers = new Map<string, CardId[]>();
+    for (const card of cards) {
+      const tier = threshold && isBelowThreshold(card, threshold) ? `tier${prefix}a` : `tier${prefix}b`;
+      const list = tiers.get(tier) ?? [];
+      list.push(card);
+      tiers.set(tier, list);
+    }
+    const tierParts = tierOrder
+      .filter((tier) => (tiers.get(tier)?.length ?? 0) > 0)
+      .map((tier) => `${tier.slice(4)}:{${sortCardIdsDesc(tiers.get(tier) ?? []).join(' ')}}`);
+    busyParts.push(`busy:${suit}(${tierParts.join(' ') || 'None'})`);
+  }
+
+  return `${idleSummary} | ${busyParts.join(' | ') || 'busy:(None)'}`;
+}
+
 function applyEventToShadow(s: State, event: EngineEvent): void {
   if (event.type === 'played' || event.type === 'autoplay') {
     const playedCard = toCardId(event.play.suit, event.play.rank) as CardId;
@@ -1007,6 +1058,13 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
   const shadow = cloneStateForLog(before);
   for (const event of events) {
     if (event.type === 'autoplay' && (event.play.seat === 'E' || event.play.seat === 'W') && event.decisionSig) {
+      invEqVersion += 1;
+      if (verboseLog) {
+        logs = [
+          ...logs,
+          `[INV_EQ:atDecision] idx=${currentRunTranscript.length} seat=${event.play.seat} invEq=${formatDefenderInventoryEqSeat(shadow, event.play.seat)}`
+        ].slice(-500);
+      }
       const eqRec = computeEqcForAutoplayEvent(shadow, event, currentRunTranscript.length);
       if (!eqRec) {
         applyEventToShadow(shadow, event);
@@ -1018,14 +1076,31 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
       const classOrder = [...eqRec.classes];
       const remainingClasses = [...eqRec.remaining];
       const bucketCards = event.bucketCards ? [...event.bucketCards] : [chosenCard];
+      const toDecisionClass = (card: CardId): string => {
+        if (eqRec.bucket.startsWith('tier1')) return 'idle:tier1';
+        if (eqRec.bucket.startsWith('tier2') || eqRec.bucket.startsWith('tier3')) return `busy:${card[0]}`;
+        if (eqRec.bucket === 'tier4') return `other:${card[0]}`;
+        const labels = shadow.threatLabels as DefenderLabels | null;
+        if (labels) {
+          if (labels[event.play.seat].busy.has(card)) return `busy:${card[0]}`;
+          if (labels[event.play.seat].idle.has(card)) return 'idle:tier1';
+        }
+        return event.policyClassByCard?.[card] ?? classInfoForCard(shadow, event.play.seat, card).classId;
+      };
       const representativeCardByClass: Record<string, CardId> = {};
       for (const card of bucketCards) {
-        const mapped = event.policyClassByCard?.[card] ?? classInfoForCard(shadow, event.play.seat, card).classId;
+        const mapped = toDecisionClass(card);
         if (!representativeCardByClass[mapped]) representativeCardByClass[mapped] = card;
       }
       if (classOrder.includes(chosenAltClassId)) {
         representativeCardByClass[chosenAltClassId] = chosenCard;
       }
+      const seatLabels = shadow.threatLabels as DefenderLabels | null;
+      const invEqIdleClasses = classOrder.filter((classId) => {
+        if (classId.startsWith('idle')) return true;
+        const classCards = bucketCards.filter((card) => toDecisionClass(card) === classId);
+        return classCards.length > 0 && !!seatLabels && classCards.every((card) => seatLabels[event.play.seat].idle.has(card));
+      });
       const sourceRec =
         event.replay?.action === 'forced' && shadow.replay.transcript && typeof event.replay.index === 'number'
           ? shadow.replay.transcript.decisions[event.replay.index]
@@ -1058,13 +1133,13 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
         }
       }
       const coveredCards = bucketCards.filter((card) => {
-        const mapped = event.policyClassByCard?.[card] ?? classInfoForCard(shadow, event.play.seat, card).classId;
+        const mapped = toDecisionClass(card);
         return mapped === chosenAltClassId;
       });
       if (verboseLog) {
         logs = [
           ...logs,
-          `[EQC] idx=${currentRunTranscript.length} seat=${event.play.seat} scope=${busyBranching} bucket=${eqRec.bucket} classes=${classOrder.join(',') || '-'} chosen=${chosenAltClassId} covers=${coveredCards.join(',') || '-'} remaining=${remainingClasses.join(',') || '-'}`
+          `[EQC] idx=${currentRunTranscript.length} seat=${event.play.seat} scope=${busyBranching} bucket=${eqRec.bucket} classes=${classOrder.join(',') || '-'} chosen=${chosenAltClassId} covers=${coveredCards.join(',') || '-'} remaining=${remainingClasses.join(',') || '-'} invEqVersion=${invEqVersion}`
         ].slice(-500);
       }
       const eqIdx = currentRunTranscript.length;
@@ -1090,6 +1165,7 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
         chosenCard,
         chosenClassId,
         chosenAltClassId,
+        invEqIdleClasses,
         chosenBucket: eqRec.bucket,
         bucketCards,
         sameBucketAlternativeClassIds: classOrder.filter((id) => id !== chosenAltClassId),
@@ -1122,6 +1198,58 @@ function unfreezeTrick(flushDeferredLogs: boolean): void {
     logs = [...logs, ...deferredLogLines].slice(-500);
     deferredLogLines = [];
   }
+}
+
+type BranchableCandidate = {
+  index: number;
+  seat: 'E' | 'W';
+  nodeKey: string;
+  avail: string[];
+  invEqIdle: string[];
+  branchableAvail: string[];
+  remainingKeys: string[];
+};
+
+function isIdleClassByRecord(rec: DecisionRecord, classId: string): boolean {
+  return classId.startsWith('idle') || rec.invEqIdleClasses.includes(classId);
+}
+
+function computeBranchableCandidates(
+  transcript: SuccessfulTranscript,
+  coverage: ReplayCoverage,
+  cutoff: number | null,
+  reason: string
+): { candidates: BranchableCandidate[]; logsOut: string[] } {
+  const allowedIndices = new Set(transcript.decisions.map((d) => d.index));
+  const raw = computeCoverageCandidates(coverage, allowedIndices, cutoff);
+  const logsOut: string[] = [];
+  const out: BranchableCandidate[] = [];
+
+  for (const rec of transcript.decisions) {
+    const avail = [rec.chosenAltClassId ?? rec.chosenClassId, ...rec.sameBucketAlternativeClassIds]
+      .filter((v, i, arr) => !!v && arr.indexOf(v) === i);
+    const invEqIdle = avail.filter((cls) => isIdleClassByRecord(rec, cls));
+    const branchableAvail = avail.filter((cls) => !isIdleClassByRecord(rec, cls));
+    const rawRemaining = raw.find((c) => c.index === rec.index)?.remainingKeys ?? [];
+    const remainingBranchable = rawRemaining.filter((cls) => !isIdleClassByRecord(rec, cls));
+    const branchable = branchableAvail.length >= 2 && remainingBranchable.length > 0;
+    logsOut.push(
+      `[PLAYAGAIN] candCheck idx=${rec.index} seat=${rec.seat} nodeKey=${rec.nodeKey || '-'} avail={${avail.join(',') || '-'}} invEqIdle={${invEqIdle.join(',') || '-'}} -> branchableAvail={${branchableAvail.join(',') || '-'}} branchable=${branchable} reason=${branchable ? reason : 'idleFiltered'}`
+    );
+    if (branchable) {
+      out.push({
+        index: rec.index,
+        seat: rec.seat,
+        nodeKey: rec.nodeKey || '-',
+        avail,
+        invEqIdle,
+        branchableAvail,
+        remainingKeys: remainingBranchable
+      });
+    }
+  }
+
+  return { candidates: out, logsOut };
 }
 
 function stateSingletonKey(s: State, play: Play): string {
@@ -1222,6 +1350,7 @@ function resetGame(seed: number, reason: string): void {
   logs = [...logs, `${reason} seed=${currentSeed}`].slice(-500);
   runStatus = 'running';
   runPlayCounter = 0;
+  invEqVersion = 0;
   replayMismatchCutoffIdx = null;
   replaySuppressedForRun = false;
   playAgainAvailable = false;
@@ -1249,6 +1378,7 @@ function selectProblem(problemId: string): void {
   state = init({ ...currentProblem, rngSeed: currentSeed });
   runStatus = 'running';
   runPlayCounter = 0;
+  invEqVersion = 0;
   replayMismatchCutoffIdx = null;
   replaySuppressedForRun = false;
   playAgainAvailable = false;
@@ -1367,8 +1497,12 @@ function runTurn(play: Play): void {
     for (const rec of lastSuccessfulTranscript.decisions) {
       markDecisionCoverage(replayCoverage, rec);
     }
-    const allowedIndices = new Set(lastSuccessfulTranscript.decisions.map((d) => d.index));
-    const candidates = computeCoverageCandidates(replayCoverage, allowedIndices, replayMismatchCutoffIdx);
+    const { candidates, logsOut } = computeBranchableCandidates(
+      lastSuccessfulTranscript,
+      replayCoverage,
+      replayMismatchCutoffIdx,
+      'endOfRunSuccess'
+    );
     playAgainAvailable = candidates.length > 0;
     playAgainUnavailableReason = playAgainAvailable
       ? null
@@ -1384,6 +1518,7 @@ function runTurn(play: Play): void {
       : null;
     logs = [
       ...logs,
+      ...logsOut,
       `[PLAYAGAIN] candidates=[${candidates.map((c) => c.index).join(',')}] cutoffIdx=${replayMismatchCutoffIdx ?? '-'}`,
       ...candidates.map((c) => `[PLAYAGAIN] idx=${c.index} remainingUntried=${c.remainingKeys.length} keys=${c.remainingKeys.join(',')}`),
       ...(offerLine ? [offerLine] : []),
@@ -1417,8 +1552,12 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
     render();
     return;
   }
-  const allowedIndices = new Set(lastSuccessfulTranscript.decisions.map((d) => d.index));
-  const candidates = computeCoverageCandidates(replayCoverage, allowedIndices, replayMismatchCutoffIdx);
+  const { candidates, logsOut } = computeBranchableCandidates(
+    lastSuccessfulTranscript,
+    replayCoverage,
+    replayMismatchCutoffIdx,
+    source === 'manual' ? 'manualRequest' : 'offerCheck'
+  );
   playAgainAvailable = candidates.length > 0;
   playAgainUnavailableReason = playAgainAvailable
     ? null
@@ -1426,6 +1565,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   playAgainLastCandidateIndex = playAgainAvailable ? candidates[candidates.length - 1].index : null;
   logs = [
     ...logs,
+    ...logsOut,
     `[PLAYAGAIN] candidates=[${candidates.map((c) => c.index).join(',')}] cutoffIdx=${replayMismatchCutoffIdx ?? '-'}`,
     ...candidates.map((c) => `[PLAYAGAIN] idx=${c.index} remainingUntried=${c.remainingKeys.length} keys=${c.remainingKeys.join(',')}`)
   ].slice(-500);
@@ -1435,6 +1575,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
     const offeredCard = replayCoverage.representativeByIdx.get(offered.index)?.get(offeredClass) ?? '-';
     logs = [
       ...logs,
+      `[PLAYAGAIN] offer shown candidates=[${candidates.map((c) => c.index).join(',')}] reason=${source === 'manual' ? 'manualRequest' : 'other'}`,
       `[PLAYAGAIN] offer available=true candidates=[${candidates.map((c) => c.index).join(',')}] chosenCandidate=${offered.index} forcedClass=${offeredClass} forcedCard=${offeredCard} reason=${source === 'manual' ? 'manualRequest' : 'other'}`
     ].slice(-500);
   }
@@ -1478,6 +1619,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   // Offer indicates replay is possible; selected indicates replay is actually starting.
   logs = [
     ...logs,
+    `[PLAYAGAIN] offer selected chosenCandidate=${divergenceIndex} divergenceIdx=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'} source=${source === 'manual' ? 'uiClick' : 'other'}`,
     `[PLAYAGAIN] ${source === 'manual' ? 'manual' : 'autoplay'} selected=true source=${source === 'manual' ? 'uiClick' : 'other'} -> starting replay divergenceIdx=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'}`
   ].slice(-500);
   state.replay = {
@@ -1501,6 +1643,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   currentSeed = seed;
   runStatus = 'running';
   runPlayCounter = 0;
+  invEqVersion = 0;
   replaySuppressedForRun = false;
   playAgainAvailable = false;
   playAgainUnavailableReason = null;
@@ -1512,14 +1655,15 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   resetDefenderEqInitSnapshot();
   deferredLogLines = [];
   unfreezeTrick(false);
-  const replayNodeLines: string[] = [];
+  const replayNodeLines: string[] = ['[PLAYAGAIN] replayStart candidates summary:'];
   for (const rec of lastSuccessfulTranscript.decisions) {
     const avail = [rec.chosenAltClassId ?? rec.chosenClassId, ...rec.sameBucketAlternativeClassIds]
       .filter((v, i, arr) => !!v && arr.indexOf(v) === i);
-    if (avail.length < 2) continue;
+    const branchableAvail = avail.filter((cls) => !isIdleClassByRecord(rec, cls));
+    if (branchableAvail.length < 2) continue;
     const forcing = rec.index === divergenceIndex ? ` FORCING=${forcedClass}` : '';
     replayNodeLines.push(
-      `[PLAYAGAIN] idx=${rec.index} seat=${rec.seat} nodeKey=${rec.nodeKey || '-'} avail={${avail.join(',')}} chosen=${rec.chosenAltClassId} remaining={${rec.sameBucketAlternativeClassIds.join(',') || '-'}}${forcing}`
+      `[PLAYAGAIN] idx=${rec.index} seat=${rec.seat} nodeKey=${rec.nodeKey || '-'} avail={${avail.join(',')}} branchableAvail={${branchableAvail.join(',')}} chosen=${rec.chosenAltClassId} remaining={${rec.sameBucketAlternativeClassIds.filter((cls) => !isIdleClassByRecord(rec, cls)).join(',') || '-'}}${forcing}`
     );
   }
   logs = [
@@ -1714,8 +1858,31 @@ function renderStatusPanel(view: State): HTMLElement {
     <div class="meta-row"><span class="k">Leader</span><span class="v turn-meta">${view.leader}</span></div>
     <div class="meta-row"><span class="k">Turn</span><span class="v turn-meta turn-emph">${view.turn}</span></div>
     <div class="meta-row"><span class="k">Seed</span><span class="v seed">${currentSeed}</span></div>
-    <div class="meta-row"><span class="k">Variations</span><span class="v turn-meta">${busyBranchingLabel[busyBranching]}</span></div>
   `;
+  const variationsRow = document.createElement('div');
+  variationsRow.className = 'meta-row';
+  const variationsKey = document.createElement('span');
+  variationsKey.className = 'k';
+  variationsKey.textContent = 'Variations';
+  const variationsValue = document.createElement('span');
+  variationsValue.className = 'v turn-meta';
+  const variationsSelect = document.createElement('select');
+  (['strict', 'sameLevel', 'allBusy'] as const).forEach((mode) => {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = busyBranchingLabel[mode];
+    if (mode === busyBranching) option.selected = true;
+    variationsSelect.appendChild(option);
+  });
+  variationsSelect.onchange = () => {
+    const nextMode = variationsSelect.value as 'strict' | 'sameLevel' | 'allBusy';
+    if (nextMode === busyBranching) return;
+    busyBranching = nextMode;
+    resetGame(currentSeed, `Variation mode changed: ${busyBranchingLabel[nextMode]}`);
+  };
+  variationsValue.appendChild(variationsSelect);
+  variationsRow.append(variationsKey, variationsValue);
+  facts.appendChild(variationsRow);
   panel.appendChild(facts);
 
   return panel;

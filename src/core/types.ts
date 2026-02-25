@@ -11,6 +11,7 @@ export type DecisionRecord = {
   chosenCard: CardId;
   chosenClassId: string;
   chosenAltClassId: string;
+  invEqIdleClasses: string[];
   chosenBucket: string;
   bucketCards: CardId[];
   sameBucketAlternativeClassIds: string[];
