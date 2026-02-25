@@ -115,6 +115,8 @@ type GameSnapshot = {
   playAgainUnavailableReason: string | null;
   playAgainLastCandidateIndex: number | null;
   replaySuppressedForRun: boolean;
+  teachingEvents: TeachingEvent[];
+  nextTeachingEventId: number;
 };
 const undoStack: GameSnapshot[] = [];
 let currentRunTranscript: DecisionRecord[] = [];
@@ -134,9 +136,19 @@ let playAgainLastCandidateIndex: number | null = null;
 let runPlayCounter = 0;
 let replayMismatchCutoffIdx: number | null = null;
 let replaySuppressedForRun = false;
+type TeachingEventKind = 'threatSummary' | 'recolor' | 'info';
+type TeachingEvent = { id: number; kind: TeachingEventKind; label: string; detail?: string; at?: string };
+let teachingEvents: TeachingEvent[] = [];
+let nextTeachingEventId = 1;
+let pulseUntilByCardKey = new Map<string, number>();
+let pulseTimer: ReturnType<typeof setTimeout> | null = null;
+const PULSE_MS = 360;
 const userEqClassByCardId = new Map<CardId, string>();
 const userEqRepByClassId = new Map<string, CardId>();
 let invEqVersion = 0;
+let currentLogRunId = 0;
+let skipNextThreatInitRunIncrement = false;
+const nodeVisitByRunKey = new Map<string, number>();
 type DefenderEqInitRecord = {
   idx: number;
   seat: 'E' | 'W';
@@ -156,6 +168,77 @@ function clearSingletonAutoplayTimer(): void {
     singletonAutoplayTimer = null;
   }
   singletonAutoplayKey = null;
+}
+
+function cardPulseKey(seat: Seat, cardId: CardId): string {
+  return `${seat}:${cardId}`;
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
+
+function clearPulseTimer(): void {
+  if (pulseTimer) {
+    clearTimeout(pulseTimer);
+    pulseTimer = null;
+  }
+}
+
+function schedulePulseRender(): void {
+  clearPulseTimer();
+  const now = Date.now();
+  let nextExpiry = Infinity;
+  for (const expiry of pulseUntilByCardKey.values()) {
+    if (expiry > now && expiry < nextExpiry) nextExpiry = expiry;
+  }
+  if (!Number.isFinite(nextExpiry)) return;
+  const delay = Math.max(16, nextExpiry - now + 8);
+  pulseTimer = setTimeout(() => {
+    const at = Date.now();
+    for (const [key, expiry] of pulseUntilByCardKey.entries()) {
+      if (expiry <= at) pulseUntilByCardKey.delete(key);
+    }
+    render();
+    schedulePulseRender();
+  }, delay);
+}
+
+function markCardPulse(seat: Seat, cardId: CardId): void {
+  if (prefersReducedMotion()) return;
+  pulseUntilByCardKey.set(cardPulseKey(seat, cardId), Date.now() + PULSE_MS);
+  schedulePulseRender();
+}
+
+function addTeachingEvent(event: Omit<TeachingEvent, 'id'>): void {
+  teachingEvents.push({ ...event, id: nextTeachingEventId++ });
+  if (teachingEvents.length > 120) {
+    teachingEvents = teachingEvents.slice(-120);
+  }
+}
+
+function clearTeachingEvents(): void {
+  teachingEvents = [];
+  nextTeachingEventId = 1;
+}
+
+function startNewLogRun(): void {
+  currentLogRunId += 1;
+}
+
+function nextVisitId(nodeKey: string): number {
+  const key = `${currentLogRunId}|${nodeKey}`;
+  const next = (nodeVisitByRunKey.get(key) ?? 0) + 1;
+  nodeVisitByRunKey.set(key, next);
+  return next;
+}
+
+function withRun(line: string): string {
+  return `run=${currentLogRunId} ${line}`;
+}
+
+function withRunVisit(nodeKey: string, line: string): string {
+  return `run=${currentLogRunId} visit=${nextVisitId(nodeKey)} ${line}`;
 }
 
 function sortRanksDesc(ranks: Rank[]): Rank[] {
@@ -354,7 +437,9 @@ function makeSnapshot(play: Play): GameSnapshot {
     playAgainAvailable,
     playAgainUnavailableReason,
     playAgainLastCandidateIndex,
-    replaySuppressedForRun
+    replaySuppressedForRun,
+    teachingEvents: teachingEvents.map((e) => ({ ...e })),
+    nextTeachingEventId
   };
 }
 
@@ -376,6 +461,8 @@ function restoreSnapshot(snapshot: GameSnapshot): void {
   playAgainUnavailableReason = snapshot.playAgainUnavailableReason;
   playAgainLastCandidateIndex = snapshot.playAgainLastCandidateIndex;
   replaySuppressedForRun = snapshot.replaySuppressedForRun;
+  teachingEvents = snapshot.teachingEvents.map((e) => ({ ...e }));
+  nextTeachingEventId = snapshot.nextTeachingEventId;
 }
 
 function totalCards(s: State, seat: Seat): number {
@@ -826,6 +913,120 @@ function formatDefenderInventoryEqSeat(s: State, seat: 'E' | 'W'): string {
   return `${idleSummary} | ${busyParts.join(' | ') || 'busy:(None)'}`;
 }
 
+function cardStatusSnapshot(
+  s: State,
+  ctx: ThreatContext | null,
+  labels: DefenderLabels | null
+): Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black'; role: string; seat: Seat }> {
+  const snap = new Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black'; role: string; seat: Seat }>();
+  for (const seat of seatOrder) {
+    for (const suit of suitOrder) {
+      for (const rank of s.hands[seat][suit]) {
+        const cardId = toCardId(suit, rank) as CardId;
+        const color = ctx && labels ? getCardRankColor(cardId, ctx, labels, teachingMode) : 'black';
+        const role = s.cardRoles[cardId] ?? 'default';
+        snap.set(cardId, { color, role, seat });
+      }
+    }
+  }
+  return snap;
+}
+
+function maybeEmitTeachingRecolorEvents(
+  triggerCardId: CardId,
+  beforeSnap: Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black'; role: string; seat: Seat }>,
+  afterSnap: Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black'; role: string; seat: Seat }>
+): void {
+  const changes: string[] = [];
+  const prettyCard = (cardId: CardId): string => `${cardId[0]}${displayRank(cardId.slice(1) as Rank)}`;
+  for (const [cardId, before] of beforeSnap.entries()) {
+    const after = afterSnap.get(cardId);
+    if (!after) continue;
+    if (before.color === after.color && before.role === after.role) continue;
+    if (before.color !== after.color) {
+      markCardPulse(before.seat, cardId);
+    }
+    if (after.role === 'idle' && before.role !== 'idle') {
+      changes.push(`${prettyCard(cardId)} idle`);
+      continue;
+    }
+    if (after.role === 'promotedWinner' && before.role !== 'promotedWinner') {
+      changes.push(`${prettyCard(cardId)} promoted`);
+      continue;
+    }
+    if (after.role === 'busy' && before.role !== 'busy') {
+      changes.push(`${prettyCard(cardId)} busy`);
+    }
+  }
+  if (changes.length === 0) return;
+  const shown = changes.slice(0, 6);
+  const extra = changes.length - shown.length;
+  addTeachingEvent({
+    kind: 'recolor',
+    label: `${prettyCard(triggerCardId)} -> ${shown.join(', ')}${extra > 0 ? ` (+${extra} more)` : ''}`
+  });
+}
+
+function collectTeachingRecolorEventsForTurn(
+  before: State,
+  events: EngineEvent[]
+): void {
+  const shadow = cloneStateForLog(before);
+  for (const event of events) {
+    if (event.type === 'played' || event.type === 'autoplay') {
+      const beforeSnap = cardStatusSnapshot(
+        shadow,
+        (shadow.threat as ThreatContext | null) ?? null,
+        (shadow.threatLabels as DefenderLabels | null) ?? null
+      );
+      applyEventToShadow(shadow, event);
+      const afterSnap = cardStatusSnapshot(
+        shadow,
+        (shadow.threat as ThreatContext | null) ?? null,
+        (shadow.threatLabels as DefenderLabels | null) ?? null
+      );
+      const triggerCardId = toCardId(event.play.suit, event.play.rank) as CardId;
+      maybeEmitTeachingRecolorEvents(triggerCardId, beforeSnap, afterSnap);
+      continue;
+    }
+    applyEventToShadow(shadow, event);
+  }
+}
+
+function addInitialThreatTeachingSummary(s: State): void {
+  const ctx = s.threat as ThreatContext | null;
+  const labels = s.threatLabels as DefenderLabels | null;
+  if (!ctx || !labels) {
+    addTeachingEvent({ kind: 'info', at: 'Start', label: 'No teaching events yet.' });
+    return;
+  }
+  const suits: Suit[] = ['S', 'H', 'D', 'C'];
+  const lines: string[] = [];
+  for (const suit of suits) {
+    const threat = ctx.threatsBySuit[suit];
+    if (!threat) continue;
+    const owner = seatName[threat.establishedOwner];
+    const card = `${suitSymbol[suit]}${displayRank(threat.threatRank)}`;
+    const busyE = [...labels.E.busy].some((id) => id[0] === suit);
+    const busyW = [...labels.W.busy].some((id) => id[0] === suit);
+    let stopText = 'unstopped';
+    if (busyE && busyW) stopText = 'stopped by both';
+    else if (busyW) stopText = 'stopped by West only';
+    else if (busyE) stopText = 'stopped by East only';
+    lines.push(`${owner} has ${card}, ${stopText}.`);
+  }
+  if (lines.length === 0) {
+    addTeachingEvent({ kind: 'info', at: 'Start', label: 'No teaching events yet.' });
+    return;
+  }
+  addTeachingEvent({
+    kind: 'threatSummary',
+    at: 'Start',
+    label: 'Threats:',
+    detail: lines.join('\n')
+  });
+}
+
 function applyEventToShadow(s: State, event: EngineEvent): void {
   if (event.type === 'played' || event.type === 'autoplay') {
     const playedCard = toCardId(event.play.suit, event.play.rank) as CardId;
@@ -1059,10 +1260,14 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
   for (const event of events) {
     if (event.type === 'autoplay' && (event.play.seat === 'E' || event.play.seat === 'W') && event.decisionSig) {
       invEqVersion += 1;
+      const nodeKey = currentRunEqTokens.join(' > ');
       if (verboseLog) {
         logs = [
           ...logs,
-          `[INV_EQ:atDecision] idx=${currentRunTranscript.length} seat=${event.play.seat} invEq=${formatDefenderInventoryEqSeat(shadow, event.play.seat)}`
+          withRunVisit(
+            nodeKey || '-',
+            `[INV_EQ:atDecision] idx=${currentRunTranscript.length} seat=${event.play.seat} nodeKey=${nodeKey || '-'} invEq=${formatDefenderInventoryEqSeat(shadow, event.play.seat)}`
+          )
         ].slice(-500);
       }
       const eqRec = computeEqcForAutoplayEvent(shadow, event, currentRunTranscript.length);
@@ -1126,9 +1331,20 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
           const runtimeText = runtimeRemainingForLog
             ? (runtimeRemainingForLog.join(',') || '-')
             : `unavailable:${runtimeRemainingReason ?? 'unknown'}`;
+          const availClasses = eqRec.classes;
+          const invEqIdleSet = new Set(sourceRec.invEqIdleClasses);
+          const branchableAvail = availClasses.filter((cls) => !cls.startsWith('idle') && !invEqIdleSet.has(cls));
+          const replayReason = runtimeRemainingReason ?? (runtimeRemainingForLog && runtimeRemainingForLog.length > 0 ? 'ok' : 'singleton');
           logs = [
             ...logs,
-            `[EQC:replay] idx=${event.replay.index} recordedRemaining=${sourceRec.sameBucketAlternativeClassIds.join(',') || '-'} runtimeRemaining=${runtimeText}`
+            withRunVisit(
+              sourceRec.nodeKey || '-',
+              `[EQC:replay] idx=${event.replay.index} recordedRemaining=${sourceRec.sameBucketAlternativeClassIds.join(',') || '-'} runtimeRemaining=${runtimeText}`
+            ),
+            withRunVisit(
+              sourceRec.nodeKey || '-',
+              `[EQC:replayRemaining] idx=${event.replay.index} seat=${event.play.seat} nodeKey=${sourceRec.nodeKey || '-'} policyScope=${busyBranching} availClasses={${availClasses.join(',') || '-'}} branchableAvail={${branchableAvail.join(',') || '-'}} chosenClass=${chosenAltClassId} computedRemaining={${runtimeRemainingForLog?.join(',') || '-'}} reason=${replayReason}`
+            )
           ].slice(-500);
         }
       }
@@ -1139,7 +1355,10 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
       if (verboseLog) {
         logs = [
           ...logs,
-          `[EQC] idx=${currentRunTranscript.length} seat=${event.play.seat} scope=${busyBranching} bucket=${eqRec.bucket} classes=${classOrder.join(',') || '-'} chosen=${chosenAltClassId} covers=${coveredCards.join(',') || '-'} remaining=${remainingClasses.join(',') || '-'} invEqVersion=${invEqVersion}`
+          withRunVisit(
+            nodeKey || '-',
+            `[EQC] idx=${currentRunTranscript.length} seat=${event.play.seat} nodeKey=${nodeKey || '-'} scope=${busyBranching} bucket=${eqRec.bucket} classes=${classOrder.join(',') || '-'} chosen=${chosenAltClassId} covers=${coveredCards.join(',') || '-'} remaining=${remainingClasses.join(',') || '-'} invEqVersion=${invEqVersion}`
+          )
         ].slice(-500);
       }
       const eqIdx = currentRunTranscript.length;
@@ -1160,7 +1379,7 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
       currentRunTranscript.push({
         index: currentRunTranscript.length,
         seat: event.play.seat,
-        nodeKey: currentRunEqTokens.join(' > '),
+        nodeKey,
         sig: event.decisionSig,
         chosenCard,
         chosenClassId,
@@ -1234,7 +1453,10 @@ function computeBranchableCandidates(
     const remainingBranchable = rawRemaining.filter((cls) => !isIdleClassByRecord(rec, cls));
     const branchable = branchableAvail.length >= 2 && remainingBranchable.length > 0;
     logsOut.push(
-      `[PLAYAGAIN] candCheck idx=${rec.index} seat=${rec.seat} nodeKey=${rec.nodeKey || '-'} avail={${avail.join(',') || '-'}} invEqIdle={${invEqIdle.join(',') || '-'}} -> branchableAvail={${branchableAvail.join(',') || '-'}} branchable=${branchable} reason=${branchable ? reason : 'idleFiltered'}`
+      withRunVisit(
+        rec.nodeKey || '-',
+        `[PLAYAGAIN] candCheck idx=${rec.index} seat=${rec.seat} nodeKey=${rec.nodeKey || '-'} avail={${avail.join(',') || '-'}} invEqIdle={${invEqIdle.join(',') || '-'}} -> branchableAvail={${branchableAvail.join(',') || '-'}} branchable=${branchable} reason=${branchable ? reason : 'idleFiltered'}`
+      )
     );
     if (branchable) {
       out.push({
@@ -1314,9 +1536,18 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
 
   threatCtx = (state.threat as ThreatContext | null) ?? null;
   threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
-  if (rawThreats.length === 0) return;
+  if (clearLogs) clearTeachingEvents();
+  if (rawThreats.length === 0) {
+    if (teachingEvents.length === 0) addTeachingEvent({ kind: 'info', at: 'Start', label: 'No teaching events yet.' });
+    return;
+  }
+  if (!teachingEvents.some((e) => e.kind === 'threatSummary')) {
+    addInitialThreatTeachingSummary(state);
+  }
 
   if (verboseLog) {
+    if (!skipNextThreatInitRunIncrement) startNewLogRun();
+    skipNextThreatInitRunIncrement = false;
     if (threatDetail) {
       logs = [
         ...logs,
@@ -1339,6 +1570,8 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
 
 function resetGame(seed: number, reason: string): void {
   clearSingletonAutoplayTimer();
+  clearPulseTimer();
+  pulseUntilByCardKey.clear();
   const nextSeed = seed >>> 0;
   if (nextSeed !== (currentSeed >>> 0)) {
     replayCoverage.triedByIdx.clear();
@@ -1359,6 +1592,7 @@ function resetGame(seed: number, reason: string): void {
   currentRunTranscript = [];
   currentRunUserPlays = [];
   currentRunEqTokens = [];
+  clearTeachingEvents();
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
   undoStack.length = 0;
@@ -1370,6 +1604,8 @@ function resetGame(seed: number, reason: string): void {
 
 function selectProblem(problemId: string): void {
   clearSingletonAutoplayTimer();
+  clearPulseTimer();
+  pulseUntilByCardKey.clear();
   const entry = demoProblems.find((p) => p.id === problemId);
   if (!entry) return;
   currentProblem = entry.problem;
@@ -1387,6 +1623,7 @@ function selectProblem(problemId: string): void {
   currentRunTranscript = [];
   currentRunUserPlays = [];
   currentRunEqTokens = [];
+  clearTeachingEvents();
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
   lastSuccessfulTranscript = null;
@@ -1405,6 +1642,8 @@ function backupLastUserPlay(): void {
   const snapshot = undoStack.pop();
   if (!snapshot) return;
   restoreSnapshot(snapshot);
+  clearPulseTimer();
+  pulseUntilByCardKey.clear();
   logs = [...logs, `[UNDO] restored snapshot before user play: ${snapshot.play.seat}:${toCardId(snapshot.play.suit, snapshot.play.rank)}`].slice(-500);
   render();
 }
@@ -1447,6 +1686,7 @@ function runTurn(play: Play): void {
   state = result.state;
   threatCtx = (state.threat as ThreatContext | null) ?? null;
   threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
+  collectTeachingRecolorEventsForTurn(before, result.events);
 
   const trickCompleteIndex = result.events.findIndex((event) => event.type === 'trickComplete');
   appendTranscriptDecisions(before, result.events);
@@ -1513,7 +1753,9 @@ function runTurn(play: Play): void {
           const offered = candidates[candidates.length - 1];
           const offeredClass = offered.remainingKeys[0] ?? '-';
           const offeredCard = replayCoverage.representativeByIdx.get(offered.index)?.get(offeredClass) ?? '-';
-          return `[PLAYAGAIN] offer available=true candidates=[${candidates.map((c) => c.index).join(',')}] chosenCandidate=${offered.index} forcedClass=${offeredClass} forcedCard=${offeredCard} reason=endOfRunSuccess`;
+          return withRun(
+            `[PLAYAGAIN] offer available=true candidates=[${candidates.map((c) => c.index).join(',')}] chosenCandidate=${offered.index} forcedClass=${offeredClass} forcedCard=${offeredCard} reason=endOfRunSuccess`
+          );
         })()
       : null;
     logs = [
@@ -1566,7 +1808,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   logs = [
     ...logs,
     ...logsOut,
-    `[PLAYAGAIN] candidates=[${candidates.map((c) => c.index).join(',')}] cutoffIdx=${replayMismatchCutoffIdx ?? '-'}`,
+    withRun(`[PLAYAGAIN] candidates=[${candidates.map((c) => c.index).join(',')}] cutoffIdx=${replayMismatchCutoffIdx ?? '-'}`),
     ...candidates.map((c) => `[PLAYAGAIN] idx=${c.index} remainingUntried=${c.remainingKeys.length} keys=${c.remainingKeys.join(',')}`)
   ].slice(-500);
   if (playAgainAvailable) {
@@ -1575,8 +1817,8 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
     const offeredCard = replayCoverage.representativeByIdx.get(offered.index)?.get(offeredClass) ?? '-';
     logs = [
       ...logs,
-      `[PLAYAGAIN] offer shown candidates=[${candidates.map((c) => c.index).join(',')}] reason=${source === 'manual' ? 'manualRequest' : 'other'}`,
-      `[PLAYAGAIN] offer available=true candidates=[${candidates.map((c) => c.index).join(',')}] chosenCandidate=${offered.index} forcedClass=${offeredClass} forcedCard=${offeredCard} reason=${source === 'manual' ? 'manualRequest' : 'other'}`
+      withRun(`[PLAYAGAIN] offer shown candidates=[${candidates.map((c) => c.index).join(',')}] reason=${source === 'manual' ? 'manualRequest' : 'other'}`),
+      withRun(`[PLAYAGAIN] offer available=true candidates=[${candidates.map((c) => c.index).join(',')}] chosenCandidate=${offered.index} forcedClass=${offeredClass} forcedCard=${offeredCard} reason=${source === 'manual' ? 'manualRequest' : 'other'}`)
     ].slice(-500);
   }
   if (!playAgainAvailable) {
@@ -1616,11 +1858,13 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
     render();
     return;
   }
+  startNewLogRun();
+  skipNextThreatInitRunIncrement = true;
   // Offer indicates replay is possible; selected indicates replay is actually starting.
   logs = [
     ...logs,
-    `[PLAYAGAIN] offer selected chosenCandidate=${divergenceIndex} divergenceIdx=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'} source=${source === 'manual' ? 'uiClick' : 'other'}`,
-    `[PLAYAGAIN] ${source === 'manual' ? 'manual' : 'autoplay'} selected=true source=${source === 'manual' ? 'uiClick' : 'other'} -> starting replay divergenceIdx=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'}`
+    withRun(`[PLAYAGAIN] offer selected chosenCandidate=${divergenceIndex} divergenceIdx=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'} source=${source === 'manual' ? 'uiClick' : 'other'}`),
+    withRun(`[PLAYAGAIN] ${source === 'manual' ? 'manual' : 'autoplay'} selected=true source=${source === 'manual' ? 'uiClick' : 'other'} -> starting replay divergenceIdx=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'}`)
   ].slice(-500);
   state.replay = {
     enabled: true,
@@ -1651,11 +1895,12 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   currentRunTranscript = [];
   currentRunUserPlays = [];
   currentRunEqTokens = [];
+  clearTeachingEvents();
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
   deferredLogLines = [];
   unfreezeTrick(false);
-  const replayNodeLines: string[] = ['[PLAYAGAIN] replayStart candidates summary:'];
+  const replayNodeLines: string[] = [withRun('[PLAYAGAIN] replayStart candidates summary:')];
   for (const rec of lastSuccessfulTranscript.decisions) {
     const avail = [rec.chosenAltClassId ?? rec.chosenClassId, ...rec.sameBucketAlternativeClassIds]
       .filter((v, i, arr) => !!v && arr.indexOf(v) === i);
@@ -1663,15 +1908,18 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
     if (branchableAvail.length < 2) continue;
     const forcing = rec.index === divergenceIndex ? ` FORCING=${forcedClass}` : '';
     replayNodeLines.push(
-      `[PLAYAGAIN] idx=${rec.index} seat=${rec.seat} nodeKey=${rec.nodeKey || '-'} avail={${avail.join(',')}} branchableAvail={${branchableAvail.join(',')}} chosen=${rec.chosenAltClassId} remaining={${rec.sameBucketAlternativeClassIds.filter((cls) => !isIdleClassByRecord(rec, cls)).join(',') || '-'}}${forcing}`
+      withRunVisit(
+        rec.nodeKey || '-',
+        `[PLAYAGAIN] idx=${rec.index} seat=${rec.seat} nodeKey=${rec.nodeKey || '-'} avail={${avail.join(',')}} branchableAvail={${branchableAvail.join(',')}} chosen=${rec.chosenAltClassId} remaining={${rec.sameBucketAlternativeClassIds.filter((cls) => !isIdleClassByRecord(rec, cls)).join(',') || '-'}}${forcing}`
+      )
     );
   }
   logs = [
     ...logs,
-    `[PLAYAGAIN] replayStart plan divergenceIdx=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'} source=${source}`,
+    withRun(`[PLAYAGAIN] replayStart plan divergenceIdx=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'} source=${source}`),
     ...replayNodeLines,
-    `===== PLAY AGAIN REPLAY ===== divergenceIdx=${divergenceIndex} forced=${forcedCard ?? '-'} forcedClass=${forcedClass}`,
-    '[PLAYAGAIN] replay enabled',
+    withRun(`===== PLAY AGAIN REPLAY ===== divergenceIdx=${divergenceIndex} forced=${forcedCard ?? '-'} forcedClass=${forcedClass}`),
+    withRun('[PLAYAGAIN] replay enabled'),
     ''
   ].slice(-500);
   refreshThreatModel(currentProblemId, false);
@@ -1709,12 +1957,18 @@ function renderSuitRow(view: State, seat: Seat, suit: Suit, legalSet: Set<string
         const rankBtn = document.createElement('button');
         rankBtn.type = 'button';
         rankBtn.className = 'rank-text legal';
+        if ((pulseUntilByCardKey.get(cardPulseKey(seat, toCardId(suit, rank) as CardId)) ?? 0) > Date.now()) {
+          rankBtn.classList.add('card-pulse');
+        }
         appendRankContent(rankBtn, rank, rankColorClass(toCardId(suit, rank) as CardId), isEquivalent);
         rankBtn.onclick = () => runTurn({ seat, suit, rank });
         cards.appendChild(rankBtn);
       } else {
         const rankEl = document.createElement('span');
         rankEl.className = 'rank-text muted';
+        if ((pulseUntilByCardKey.get(cardPulseKey(seat, toCardId(suit, rank) as CardId)) ?? 0) > Date.now()) {
+          rankEl.classList.add('card-pulse');
+        }
         appendRankContent(rankEl, rank, rankColorClass(toCardId(suit, rank) as CardId), isEquivalent);
         cards.appendChild(rankEl);
       }
@@ -1795,59 +2049,9 @@ function renderStatusPanel(view: State): HTMLElement {
   const panel = document.createElement('section');
   panel.className = 'status-panel';
 
-  const head = document.createElement('div');
-  head.className = 'status-head';
-
   const title = document.createElement('strong');
   title.textContent = 'Status';
-  head.appendChild(title);
-
-  const controls = document.createElement('div');
-  controls.className = 'controls';
-
-  const resetBtn = document.createElement('button');
-  resetBtn.type = 'button';
-  resetBtn.textContent = 'Reset';
-  resetBtn.onclick = () => resetGame(currentSeed, 'reset');
-  controls.appendChild(resetBtn);
-
-  const backupBtn = document.createElement('button');
-  backupBtn.type = 'button';
-  backupBtn.textContent = 'Backup';
-  backupBtn.disabled = undoStack.length === 0;
-  backupBtn.onclick = () => backupLastUserPlay();
-  controls.appendChild(backupBtn);
-
-  const seedBtn = document.createElement('button');
-  seedBtn.type = 'button';
-  seedBtn.textContent = 'New seed';
-  seedBtn.onclick = () => resetGame(Date.now() >>> 0, 'newSeed');
-  controls.appendChild(seedBtn);
-
-  const showLogLabel = document.createElement('label');
-  const showLogBox = document.createElement('input');
-  showLogBox.type = 'checkbox';
-  showLogBox.checked = showLog;
-  showLogBox.onchange = () => {
-    showLog = showLogBox.checked;
-    render();
-  };
-  showLogLabel.append(showLogBox, ' Show log');
-  controls.appendChild(showLogLabel);
-
-  const verboseLabel = document.createElement('label');
-  const verboseBox = document.createElement('input');
-  verboseBox.type = 'checkbox';
-  verboseBox.checked = verboseLog;
-  verboseBox.onchange = () => {
-    verboseLog = verboseBox.checked;
-    render();
-  };
-  verboseLabel.append(verboseBox, ' Verbose log');
-  controls.appendChild(verboseLabel);
-
-  head.appendChild(controls);
-  panel.appendChild(head);
+  panel.appendChild(title);
 
   const facts = document.createElement('div');
   facts.className = 'status-facts';
@@ -1888,18 +2092,12 @@ function renderStatusPanel(view: State): HTMLElement {
   return panel;
 }
 
-function render(): void {
-  const view = currentViewState();
+function renderControlsBanner(): HTMLElement {
+  const bar = document.createElement('section');
+  bar.className = 'controls-banner';
 
-  root.innerHTML = '';
-
-  const boardShell = document.createElement('section');
-  boardShell.className = 'board-shell';
-
-  const tableHost = document.createElement('div');
-  tableHost.className = 'table-host';
-  const tableTools = document.createElement('div');
-  tableTools.className = 'table-tools';
+  const row = document.createElement('div');
+  row.className = 'controls';
 
   const puzzleLabel = document.createElement('label');
   puzzleLabel.textContent = 'Puzzle: ';
@@ -1915,7 +2113,26 @@ function render(): void {
     selectProblem(puzzleSelect.value);
   };
   puzzleLabel.appendChild(puzzleSelect);
-  tableTools.appendChild(puzzleLabel);
+  row.appendChild(puzzleLabel);
+
+  const resetBtn = document.createElement('button');
+  resetBtn.type = 'button';
+  resetBtn.textContent = 'Reset';
+  resetBtn.onclick = () => resetGame(currentSeed, 'reset');
+  row.appendChild(resetBtn);
+
+  const backupBtn = document.createElement('button');
+  backupBtn.type = 'button';
+  backupBtn.textContent = 'Backup';
+  backupBtn.disabled = undoStack.length === 0;
+  backupBtn.onclick = () => backupLastUserPlay();
+  row.appendChild(backupBtn);
+
+  const seedBtn = document.createElement('button');
+  seedBtn.type = 'button';
+  seedBtn.textContent = 'New seed';
+  seedBtn.onclick = () => resetGame(Date.now() >>> 0, 'newSeed');
+  row.appendChild(seedBtn);
 
   const guidesLabel = document.createElement('label');
   const guidesBox = document.createElement('input');
@@ -1925,8 +2142,8 @@ function render(): void {
     showGuides = guidesBox.checked;
     render();
   };
-  guidesLabel.append(guidesBox, ' Show guides');
-  tableTools.appendChild(guidesLabel);
+  guidesLabel.append(guidesBox, ' Show boxes');
+  row.appendChild(guidesLabel);
 
   const teachLabel = document.createElement('label');
   const teachBox = document.createElement('input');
@@ -1937,7 +2154,7 @@ function render(): void {
     render();
   };
   teachLabel.append(teachBox, ' Teaching mode');
-  tableTools.appendChild(teachLabel);
+  row.appendChild(teachLabel);
 
   const singletonLabel = document.createElement('label');
   const singletonBox = document.createElement('input');
@@ -1949,8 +2166,89 @@ function render(): void {
     render();
   };
   singletonLabel.append(singletonBox, ' Autoplay singletons');
-  tableTools.appendChild(singletonLabel);
-  tableHost.appendChild(tableTools);
+  row.appendChild(singletonLabel);
+
+  const showLogLabel = document.createElement('label');
+  const showLogBox = document.createElement('input');
+  showLogBox.type = 'checkbox';
+  showLogBox.checked = showLog;
+  showLogBox.onchange = () => {
+    showLog = showLogBox.checked;
+    render();
+  };
+  showLogLabel.append(showLogBox, ' Show log');
+  row.appendChild(showLogLabel);
+
+  const verboseLabel = document.createElement('label');
+  const verboseBox = document.createElement('input');
+  verboseBox.type = 'checkbox';
+  verboseBox.checked = verboseLog;
+  verboseBox.onchange = () => {
+    verboseLog = verboseBox.checked;
+    render();
+  };
+  verboseLabel.append(verboseBox, ' Verbose log');
+  row.appendChild(verboseLabel);
+
+  bar.appendChild(row);
+  return bar;
+}
+
+function renderTeachingEventsPane(): HTMLElement {
+  const pane = document.createElement('aside');
+  pane.className = 'teaching-pane';
+
+  const title = document.createElement('strong');
+  title.textContent = 'Key teaching events';
+  pane.appendChild(title);
+
+  const list = document.createElement('div');
+  list.className = 'teaching-events';
+  const events =
+    teachingEvents.length > 0
+      ? teachingEvents
+      : [{ id: 0, kind: 'info' as const, label: 'No teaching events yet.' }];
+
+  for (const event of events) {
+    const row = document.createElement('div');
+    row.className = `teaching-event teaching-${event.kind}`;
+
+    const marker = document.createElement('span');
+    marker.className = 'teaching-at';
+    marker.textContent = event.at ?? '';
+    row.appendChild(marker);
+
+    const text = document.createElement('span');
+    text.className = 'teaching-text';
+    text.textContent = event.label;
+    row.appendChild(text);
+
+    if (event.detail) {
+      const detail = document.createElement('pre');
+      detail.className = 'teaching-detail';
+      detail.textContent = event.detail;
+      row.appendChild(detail);
+    }
+
+    list.appendChild(row);
+  }
+
+  pane.appendChild(list);
+  return pane;
+}
+
+function render(): void {
+  const view = currentViewState();
+
+  root.innerHTML = '';
+
+  root.appendChild(renderControlsBanner());
+
+  const mainRow = document.createElement('section');
+  mainRow.className = 'main-row';
+
+  const tableHost = document.createElement('div');
+  tableHost.className = 'table-host';
 
   const tableCanvas = document.createElement('main');
   tableCanvas.className = `table-canvas${showGuides ? ' show-guides' : ''}`;
@@ -1961,9 +2259,10 @@ function render(): void {
   tableCanvas.appendChild(renderSeatHand(view, 'S'));
 
   tableHost.appendChild(tableCanvas);
-  boardShell.appendChild(tableHost);
-  boardShell.appendChild(renderStatusPanel(view));
-  root.appendChild(boardShell);
+  mainRow.appendChild(renderTeachingEventsPane());
+  mainRow.appendChild(tableHost);
+  mainRow.appendChild(renderStatusPanel(view));
+  root.appendChild(mainRow);
 
   if (runStatus === 'success' || runStatus === 'failure') {
     const banner = document.createElement('div');
