@@ -98,6 +98,41 @@ function allHandsEmpty(hands: Record<Seat, Hand>): boolean {
   return TURN_ORDER.every((seat) => SUITS.every((suit) => hands[seat][suit].length === 0));
 }
 
+function threatCardOccurrenceCount(hands: Problem['hands'], cardId: CardId): number {
+  const { suit, rank } = parseCardId(cardId);
+  let count = 0;
+  for (const seat of TURN_ORDER) {
+    if (hands[seat][suit].includes(rank)) count += 1;
+  }
+  return count;
+}
+
+function assertValidExplicitThreats(problem: Problem): CardId[] {
+  const rawThreats = problem.threatCardIds;
+  if (!rawThreats || rawThreats.length === 0) {
+    throw new Error('ThreatProblem requires explicit threatCardIds.');
+  }
+
+  const invalidThreats: string[] = [];
+  for (const raw of rawThreats) {
+    try {
+      const { suit, rank } = parseCardId(raw);
+      const canonical = toCardId(suit, rank) as CardId;
+      if (threatCardOccurrenceCount(problem.hands, canonical) !== 1) {
+        invalidThreats.push(raw);
+      }
+    } catch {
+      invalidThreats.push(raw);
+    }
+  }
+
+  if (invalidThreats.length > 0) {
+    throw new Error(`Invalid threatCardIds: ${invalidThreats.join(', ')}`);
+  }
+
+  return [...rawThreats];
+}
+
 function evaluateGoal(goal: Goal, tricksWon: { NS: number; EW: number }): boolean {
   if (goal.type === 'minTricks') {
     return tricksWon[goal.side] >= goal.n;
@@ -552,15 +587,14 @@ export function init(problem: Problem): State {
   let threatLabels: State['threatLabels'] = null;
   let cardRoles: State['cardRoles'] = {};
   if (usesThreatAware) {
-    if (!problem.threatCardIds || problem.threatCardIds.length === 0) {
-      throw new Error(`Problem ${problem.id} uses threatAware policy but has no threatCardIds`);
-    }
-    const classification = initClassification({ hands: problem.hands }, problem.threatCardIds);
+    const explicitThreats = assertValidExplicitThreats(problem);
+    const classification = initClassification({ hands: problem.hands }, explicitThreats);
     threat = classification.threat as State['threat'];
     threatLabels = classification.labels as State['threatLabels'];
     cardRoles = { ...classification.perCardRole };
   } else if (problem.threatCardIds && problem.threatCardIds.length > 0) {
-    const classification = initClassification({ hands: problem.hands }, problem.threatCardIds);
+    const explicitThreats = assertValidExplicitThreats(problem);
+    const classification = initClassification({ hands: problem.hands }, explicitThreats);
     threat = classification.threat as State['threat'];
     threatLabels = classification.labels as State['threatLabels'];
     cardRoles = { ...classification.perCardRole };

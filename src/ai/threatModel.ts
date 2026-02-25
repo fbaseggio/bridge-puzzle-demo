@@ -73,8 +73,36 @@ function ownersOfCard(position: Position, cardId: CardId): Seat[] {
   return owners;
 }
 
+function partnerOf(seat: Seat): Seat {
+  if (seat === 'N') return 'S';
+  if (seat === 'S') return 'N';
+  if (seat === 'E') return 'W';
+  return 'E';
+}
+
+function defendersOf(owner: Seat): Seat[] {
+  return owner === 'N' || owner === 'S' ? ['E', 'W'] : ['N', 'S'];
+}
+
 function countThreatLength(position: Position, owner: Seat, suit: Suit, threatRank: Rank): number {
-  return position.hands[owner][suit].filter((r) => rankValue(r) >= rankValue(threatRank)).length;
+  const ownerSuitRanks = position.hands[owner][suit];
+  const threatValue = rankValue(threatRank);
+
+  const base = ownerSuitRanks.filter((r) => rankValue(r) >= threatValue).length;
+  const lowOwner = ownerSuitRanks.filter((r) => rankValue(r) < threatValue).length;
+
+  const defenders = defendersOf(owner);
+  let highestOpponentValue = 0;
+  for (const defender of defenders) {
+    for (const rank of position.hands[defender][suit]) {
+      highestOpponentValue = Math.max(highestOpponentValue, rankValue(rank));
+    }
+  }
+
+  const partner = partnerOf(owner);
+  const partnerWinners = position.hands[partner][suit].filter((r) => rankValue(r) > highestOpponentValue).length;
+
+  return base + Math.min(lowOwner, partnerWinners);
 }
 
 export function initThreatContext(position: Position, threatCardIds: CardId[]): ThreatContext {

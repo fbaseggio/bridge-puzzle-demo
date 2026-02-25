@@ -2102,7 +2102,8 @@ function renderControlsBanner(): HTMLElement {
   const puzzleLabel = document.createElement('label');
   puzzleLabel.textContent = 'Puzzle: ';
   const puzzleSelect = document.createElement('select');
-  for (const p of demoProblems) {
+  const puzzleOptions = [...demoProblems].sort((a, b) => Number(!!a.experimental) - Number(!!b.experimental));
+  for (const p of puzzleOptions) {
     const opt = document.createElement('option');
     opt.value = p.id;
     opt.textContent = p.label;

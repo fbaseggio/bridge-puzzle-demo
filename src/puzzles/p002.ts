@@ -1,5 +1,7 @@
 import type { Problem } from '../core';
 
+export const p002Experimental = true as const;
+
 // Source notes from user:
 // - title: "p002 — 8-card remainder, clubs trumps, NS needs 7/8"
 // - goal shape was mapped to v0.1 Goal ({ type:'minTricks', n:7 })
