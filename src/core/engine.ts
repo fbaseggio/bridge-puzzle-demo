@@ -79,7 +79,8 @@ function cloneState(state: State): State {
         : null,
       cursor: state.replay.cursor,
       divergenceIndex: state.replay.divergenceIndex,
-      forcedCard: state.replay.forcedCard
+      forcedCard: state.replay.forcedCard,
+      forcedClassId: state.replay.forcedClassId
     }
   };
 }
@@ -166,6 +167,7 @@ type AutoChoice = {
   chosenBucket?: string;
   bucketCards?: CardId[];
   policyClassByCard?: Record<string, string>;
+  tierBuckets?: Partial<Record<'tier2a' | 'tier2b' | 'tier3a' | 'tier3b', CardId[]>>;
   decisionSig?: string;
   replay?: { action: 'forced' | 'disabled'; index?: number; reason?: 'sig-mismatch' | 'card-not-legal'; card?: CardId };
 };
@@ -266,12 +268,34 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
       replayNote = { action: 'disabled', index: rec.index, reason: 'sig-mismatch', card: rec.chosenCard };
     } else {
       const legal = legalPlays(state);
-      const forceCard =
-        state.replay.divergenceIndex !== null && state.replay.cursor === state.replay.divergenceIndex && state.replay.forcedCard
-          ? state.replay.forcedCard
-          : rec.chosenCard;
-      const forced = legal.find((p) => toCardId(p.suit, p.rank) === forceCard);
-      if (!forced) {
+      const isDivergence = state.replay.divergenceIndex !== null && state.replay.cursor === state.replay.divergenceIndex;
+      const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank));
+      const altClassByCard = buildPolicyClassByCard(state, state.turn, rec.chosenBucket, legalCardIds);
+      let forced: Play | undefined;
+      let forceCard: CardId = rec.chosenCard;
+      let forcedClassFailed = false;
+      if (isDivergence && state.replay.forcedClassId) {
+        const match = legal.find((p) => altClassByCard[toCardId(p.suit, p.rank)] === state.replay.forcedClassId);
+        if (match) {
+          forced = match;
+          forceCard = toCardId(match.suit, match.rank);
+        } else {
+          state.replay.enabled = false;
+          replayNote = {
+            action: 'disabled',
+            index: rec.index,
+            reason: 'class-not-legal',
+            card: rec.chosenCard,
+            forcedClassId: state.replay.forcedClassId
+          };
+          forcedClassFailed = true;
+        }
+      }
+      if (!forced && !forcedClassFailed) {
+        forceCard = isDivergence && state.replay.forcedCard ? state.replay.forcedCard : rec.chosenCard;
+        forced = legal.find((p) => toCardId(p.suit, p.rank) === forceCard);
+      }
+      if (!forced && !forcedClassFailed) {
         const fallback = legal.find((p) => classInfoForCard(state, p.seat, toCardId(p.suit, p.rank)).classId === rec.chosenClassId);
         if (!fallback) {
           state.replay.enabled = false;
@@ -281,7 +305,6 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
           const chosenBucket = rec.chosenBucket;
           const bucketCards = [...rec.bucketCards];
           const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
-          const isDivergence = state.replay.divergenceIndex !== null && rec.index === state.replay.divergenceIndex;
           if (isDivergence) state.replay.enabled = false;
           return {
             play: fallback,
@@ -297,7 +320,6 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
         const chosenBucket = rec.chosenBucket;
         const bucketCards = [...rec.bucketCards];
         const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
-        const isDivergence = state.replay.divergenceIndex !== null && rec.index === state.replay.divergenceIndex;
         if (isDivergence) {
           state.replay.enabled = false;
         }
@@ -434,13 +456,22 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
   const idx = pickRandomIndex(chosenBucket.cards.length, state.rng);
   const chosen = chosenBucket.cards[idx] ?? chosenBucket.cards[0];
   const { suit, rank } = parseCardId(chosen);
-  const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket.name, chosenBucket.cards);
+  const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket.name, chosenBucket.cards) ?? {};
+  for (const card of [...tiers.tier2a, ...tiers.tier2b, ...tiers.tier3a, ...tiers.tier3b]) {
+    policyClassByCard[card] = `busy:${card[0]}`;
+  }
+  const tierBuckets: Partial<Record<'tier2a' | 'tier2b' | 'tier3a' | 'tier3b', CardId[]>> = {};
+  if (tiers.tier2a.length > 0) tierBuckets.tier2a = [...tiers.tier2a];
+  if (tiers.tier2b.length > 0) tierBuckets.tier2b = [...tiers.tier2b];
+  if (tiers.tier3a.length > 0) tierBuckets.tier3a = [...tiers.tier3a];
+  if (tiers.tier3b.length > 0) tierBuckets.tier3b = [...tiers.tier3b];
   return {
     play: { seat: state.turn, suit, rank },
     preferredDiscard: pref ?? undefined,
     chosenBucket: chosenBucket.name,
     bucketCards: [...chosenBucket.cards],
     policyClassByCard,
+    tierBuckets,
     decisionSig,
     replay: replayNote
   };
@@ -455,6 +486,7 @@ function applyOnePlay(
   chosenBucket?: string,
   bucketCards?: CardId[],
   policyClassByCard?: Record<string, string>,
+  tierBuckets?: Partial<Record<'tier2a' | 'tier2b' | 'tier3a' | 'tier3b', CardId[]>>,
   decisionSig?: string,
   replay?: { action: 'forced' | 'disabled'; index?: number; reason?: 'sig-mismatch' | 'card-not-legal'; card?: CardId }
 ): EngineEvent[] {
@@ -470,7 +502,7 @@ function applyOnePlay(
   state.trick.push({ ...play });
   state.trickClassIds.push(`${play.seat}:${playedClass}`);
   if (eventType === 'autoplay') {
-    events.push({ type: eventType, play: { ...play }, preferredDiscard, chosenBucket, bucketCards, policyClassByCard, decisionSig, replay });
+    events.push({ type: eventType, play: { ...play }, preferredDiscard, chosenBucket, bucketCards, policyClassByCard, tierBuckets, decisionSig, replay });
   } else {
     events.push({ type: eventType, play: { ...play } });
   }
@@ -558,7 +590,7 @@ export function init(problem: Problem): State {
     policies: { ...problem.policies },
     preferredDiscards: normalizePreferred(problem),
     preferredDiscardUsed: {},
-    replay: { enabled: false, transcript: null, cursor: 0, divergenceIndex: null, forcedCard: null }
+    replay: { enabled: false, transcript: null, cursor: 0, divergenceIndex: null, forcedCard: null, forcedClassId: null }
   };
 
   if (allHandsEmpty(state.hands)) {
@@ -643,6 +675,7 @@ export function apply(state: State, play: Play): { state: State; events: EngineE
         auto.chosenBucket,
         auto.bucketCards,
         auto.policyClassByCard,
+        auto.tierBuckets,
         auto.decisionSig,
         auto.replay
       )

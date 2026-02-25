@@ -6,6 +6,7 @@ export type CardRole = 'promotedWinner' | 'threat' | 'busy' | 'idle' | 'default'
 export type DecisionRecord = {
   index: number;
   seat: 'E' | 'W';
+  nodeKey: string;
   sig: string;
   chosenCard: CardId;
   chosenClassId: string;
@@ -28,6 +29,7 @@ export type ReplayState = {
   cursor: number;
   divergenceIndex: number | null;
   forcedCard: CardId | null;
+  forcedClassId: string | null;
 };
 
 export type Hand = {
@@ -121,8 +123,15 @@ export type EngineEvent =
       chosenBucket?: string;
       bucketCards?: CardId[];
       policyClassByCard?: Record<string, string>;
+      tierBuckets?: Partial<Record<'tier2a' | 'tier2b' | 'tier3a' | 'tier3b', CardId[]>>;
       decisionSig?: string;
-      replay?: { action: 'forced' | 'disabled'; index?: number; reason?: 'sig-mismatch' | 'card-not-legal'; card?: CardId };
+      replay?: {
+        action: 'forced' | 'disabled';
+        index?: number;
+        reason?: 'sig-mismatch' | 'card-not-legal' | 'class-not-legal';
+        card?: CardId;
+        forcedClassId?: string;
+      };
     }
   | { type: 'illegal'; reason: string }
   | { type: 'trickComplete'; winner: Seat; trick: Play[] }

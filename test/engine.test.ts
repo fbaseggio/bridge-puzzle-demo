@@ -2,9 +2,10 @@ import { describe, expect, test } from 'vitest';
 import { apply, classInfoForCard, init, legalPlays, type CardId, type Problem, type SuccessfulTranscript } from '../src/core';
 import { chooseDiscard, computeDiscardTiers } from '../src/ai/defenderDiscard';
 import { computeDefenderLabels, initThreatContext, type DefenderLabels } from '../src/ai/threatModel';
-import { hasUntriedAlternatives, triedAltKey } from '../src/demo/playAgain';
+import { computeCoverageCandidates, divergenceCandidates, hasUntriedAlternatives, markDecisionCoverage, triedAltKey, type ReplayCoverage } from '../src/demo/playAgain';
 import { p001 } from '../src/puzzles/p001';
 import { p002 } from '../src/puzzles/p002';
+import { p004 } from '../src/puzzles/p004';
 
 describe('bridge engine v0.1', () => {
   test('follow suit enforcement', () => {
@@ -415,6 +416,52 @@ describe('bridge engine v0.1', () => {
     expect(sameBucketAlternativeClassIds).toEqual([]);
   });
 
+  test('p004 first west discard has heart/diamond busy classes in sameLevel exploration', () => {
+    const start = init(p004);
+    const step = apply(start, { seat: 'S', suit: 'C', rank: 'A' });
+    const wAuto = step.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
+    expect(wAuto && wAuto.type === 'autoplay').toBe(true);
+    if (!wAuto || wAuto.type !== 'autoplay') return;
+
+    expect(wAuto.chosenBucket).toBe('tier2a');
+    const tierBuckets = wAuto.tierBuckets ?? {};
+    expect(tierBuckets.tier2a && tierBuckets.tier2a.length > 0).toBe(true);
+    expect(tierBuckets.tier2b && tierBuckets.tier2b.length > 0).toBe(true);
+    expect((tierBuckets.tier2b ?? []).some((c) => c.startsWith('H'))).toBe(true);
+    expect((tierBuckets.tier2b ?? []).some((c) => c.startsWith('D'))).toBe(true);
+
+    const chosenCard = `${wAuto.play.suit}${wAuto.play.rank}` as CardId;
+    const altClass = (card: CardId) => wAuto.policyClassByCard?.[card] ?? classInfoForCard(start, 'W', card).classId;
+    const chooseClasses = (mode: 'strict' | 'sameLevel') => {
+      const base = wAuto.bucketCards ? [...wAuto.bucketCards] : [chosenCard];
+      let exploration = [...base];
+      if (mode === 'sameLevel') {
+        const merged: CardId[] = [];
+        for (const key of ['tier2a', 'tier2b'] as const) {
+          for (const card of tierBuckets[key] ?? []) {
+            if (!merged.includes(card)) merged.push(card);
+          }
+        }
+        if (merged.length > 0) exploration = merged;
+      }
+      const classOrder: string[] = [];
+      for (const card of exploration) {
+        const cls = altClass(card);
+        if (!classOrder.includes(cls)) classOrder.push(cls);
+      }
+      const chosenAltClassId = altClass(chosenCard);
+      const sameBucketAlternativeClassIds = classOrder.filter((id) => id !== chosenAltClassId);
+      return { classOrder, sameBucketAlternativeClassIds };
+    };
+
+    const strict = chooseClasses('strict');
+    const sameLevel = chooseClasses('sameLevel');
+    expect(strict.classOrder).toEqual(['busy:D']);
+    expect(strict.sameBucketAlternativeClassIds).toEqual([]);
+    expect(sameLevel.classOrder.sort()).toEqual(['busy:D', 'busy:H']);
+    expect(sameLevel.sameBucketAlternativeClassIds.length).toBe(1);
+  });
+
   test('coordinated busy suit feeds tier2 before solo tiers', () => {
     const position = {
       hands: {
@@ -632,7 +679,7 @@ describe('bridge engine v0.1', () => {
     };
 
     const replayed = init(p001);
-    replayed.replay = { enabled: true, transcript, cursor: 0, divergenceIndex: null, forcedCard: null };
+    replayed.replay = { enabled: true, transcript, cursor: 0, divergenceIndex: null, forcedCard: null, forcedClassId: null };
     const replayStep = apply(replayed, { seat: 'S', suit: 'C', rank: 'A' });
     const replayAuto = replayStep.events.find((e) => e.type === 'autoplay' && (e.play.seat === 'E' || e.play.seat === 'W'));
     expect(replayAuto && replayAuto.type === 'autoplay' ? replayAuto.replay?.action : null).toBe('forced');
@@ -740,6 +787,7 @@ describe('bridge engine v0.1', () => {
           chosenCard: 'DA',
           chosenClassId: 'E:D:A-A',
           chosenAltClassId: 'busy:D',
+          chosenBucket: 'tier2b',
           sameBucketAlternativeClassIds: ['busy:S'],
           representativeCardByClass: { 'busy:S': 'ST', 'busy:D': 'DA' }
         }
@@ -750,5 +798,178 @@ describe('bridge engine v0.1', () => {
     }
 
     expect(hasUntriedAlternatives(forcedRun, tried).ok).toBe(false);
+  });
+
+  test('play-again DFS backtracks from deeper exhausted index to earlier remaining index', () => {
+    const transcript: SuccessfulTranscript = {
+      problemId: 'p004',
+      seed: 101,
+      decisions: [
+        {
+          index: 0,
+          seat: 'W',
+          sig: 'sig-0',
+          chosenCard: 'D7',
+          chosenClassId: 'W:D:7-7',
+          chosenAltClassId: 'busy:D',
+          chosenBucket: 'tier2a',
+          bucketCards: ['D7'],
+          sameBucketAlternativeClassIds: ['busy:H'],
+          representativeCardByClass: { 'busy:D': 'D7', 'busy:H': 'HK' }
+        },
+        {
+          index: 6,
+          seat: 'E',
+          sig: 'sig-6',
+          chosenCard: 'C4',
+          chosenClassId: 'E:C:4-4',
+          chosenAltClassId: 'raw:C4',
+          chosenBucket: 'follow:baseline',
+          bucketCards: ['C4'],
+          sameBucketAlternativeClassIds: ['raw:DQ'],
+          representativeCardByClass: { 'raw:C4': 'C4', 'raw:DQ': 'DQ' }
+        }
+      ],
+      userPlays: []
+    };
+    const tried = new Set<string>([
+      triedAltKey('p004', 0, 'tier2a', 'busy:D'),
+      triedAltKey('p004', 6, 'follow:baseline', 'raw:C4')
+    ]);
+
+    let candidates = divergenceCandidates(transcript, tried);
+    expect(candidates.map((c) => c.index)).toEqual([0, 6]);
+
+    tried.add(triedAltKey('p004', 6, 'follow:baseline', 'raw:DQ'));
+    candidates = divergenceCandidates(transcript, tried);
+    expect(candidates.map((c) => c.index)).toEqual([0]);
+  });
+
+  test('p004 replay forcing busy:H at idx0 yields CA-heart branch', () => {
+    const initial = init(p004);
+    const baselineStep = apply(initial, { seat: 'S', suit: 'C', rank: 'A' });
+    const firstAuto = baselineStep.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
+    expect(firstAuto && firstAuto.type === 'autoplay').toBe(true);
+    if (!firstAuto || firstAuto.type !== 'autoplay') return;
+
+    const chosenCard = `${firstAuto.play.suit}${firstAuto.play.rank}` as CardId;
+    const chosenClassId = classInfoForCard(initial, 'W', chosenCard).classId;
+    const transcript: SuccessfulTranscript = {
+      problemId: p004.id,
+      seed: p004.rngSeed,
+      decisions: [
+        {
+          index: 0,
+          seat: 'W',
+          sig: firstAuto.decisionSig ?? '',
+          chosenCard,
+          chosenClassId,
+          chosenAltClassId: firstAuto.policyClassByCard?.[chosenCard] ?? `busy:${chosenCard[0]}`,
+          chosenBucket: firstAuto.chosenBucket ?? 'tier2a',
+          bucketCards: firstAuto.bucketCards ? [...firstAuto.bucketCards] : [chosenCard],
+          sameBucketAlternativeClassIds: ['busy:H'],
+          representativeCardByClass: { 'busy:D': chosenCard, 'busy:H': 'HK' }
+        }
+      ],
+      userPlays: []
+    };
+
+    const replayed = init(p004);
+    replayed.replay = {
+      enabled: true,
+      transcript,
+      cursor: 0,
+      divergenceIndex: 0,
+      forcedCard: null,
+      forcedClassId: 'busy:H'
+    };
+    const replayStep = apply(replayed, { seat: 'S', suit: 'C', rank: 'A' });
+    const replayAuto = replayStep.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
+    expect(replayAuto && replayAuto.type === 'autoplay').toBe(true);
+    if (!replayAuto || replayAuto.type !== 'autoplay') return;
+    expect(replayAuto.play.suit).toBe('H');
+  });
+
+  test('coverage bookkeeping terminates after all (idx, choiceKey) pairs are tried', () => {
+    const coverage: ReplayCoverage = {
+      triedByIdx: new Map(),
+      recordedRemainingByIdx: new Map(),
+      representativeByIdx: new Map()
+    };
+    const rec0 = {
+      index: 0,
+      seat: 'W',
+      sig: 'sig-0',
+      chosenCard: 'D7' as CardId,
+      chosenClassId: 'W:D:7-7',
+      chosenAltClassId: 'busy:D',
+      chosenBucket: 'tier2a',
+      bucketCards: ['D7' as CardId],
+      sameBucketAlternativeClassIds: ['busy:H'],
+      representativeCardByClass: { 'busy:D': 'D7' as CardId, 'busy:H': 'HK' as CardId }
+    };
+    const rec6 = {
+      index: 6,
+      seat: 'E',
+      sig: 'sig-6',
+      chosenCard: 'C4' as CardId,
+      chosenClassId: 'E:C:4-4',
+      chosenAltClassId: 'raw:C4',
+      chosenBucket: 'follow:baseline',
+      bucketCards: ['C4' as CardId],
+      sameBucketAlternativeClassIds: ['raw:DQ'],
+      representativeCardByClass: { 'raw:C4': 'C4' as CardId, 'raw:DQ': 'DQ' as CardId }
+    };
+    markDecisionCoverage(coverage, rec0);
+    markDecisionCoverage(coverage, rec6);
+
+    let candidates = computeCoverageCandidates(coverage);
+    expect(candidates.map((c) => c.index)).toEqual([0, 6]);
+
+    coverage.triedByIdx.get(6)?.add('raw:DQ');
+    candidates = computeCoverageCandidates(coverage);
+    expect(candidates.map((c) => c.index)).toEqual([0]);
+
+    coverage.triedByIdx.get(0)?.add('busy:H');
+    candidates = computeCoverageCandidates(coverage);
+    expect(candidates).toEqual([]);
+  });
+
+  test('coverage candidates respect mismatch cutoff and exclude unreachable later indices', () => {
+    const coverage: ReplayCoverage = {
+      triedByIdx: new Map(),
+      recordedRemainingByIdx: new Map(),
+      representativeByIdx: new Map()
+    };
+    markDecisionCoverage(coverage, {
+      index: 0,
+      seat: 'W',
+      sig: 'sig-0',
+      chosenCard: 'D7',
+      chosenClassId: 'W:D:7-7',
+      chosenAltClassId: 'busy:D',
+      chosenBucket: 'tier2a',
+      bucketCards: ['D7'],
+      sameBucketAlternativeClassIds: ['busy:H'],
+      representativeCardByClass: { 'busy:D': 'D7', 'busy:H': 'HK' }
+    });
+    markDecisionCoverage(coverage, {
+      index: 6,
+      seat: 'E',
+      sig: 'sig-6',
+      chosenCard: 'C4',
+      chosenClassId: 'E:C:4-4',
+      chosenAltClassId: 'raw:C4',
+      chosenBucket: 'follow:baseline',
+      bucketCards: ['C4'],
+      sameBucketAlternativeClassIds: ['raw:DQ'],
+      representativeCardByClass: { 'raw:C4': 'C4', 'raw:DQ': 'DQ' }
+    });
+    const noCutoff = computeCoverageCandidates(coverage);
+    expect(noCutoff.map((c) => c.index)).toEqual([0, 6]);
+
+    const withCutoff = computeCoverageCandidates(coverage, undefined, 6);
+    expect(withCutoff.map((c) => c.index)).toEqual([0]);
+    expect(withCutoff.every((c) => c.index < 6)).toBe(true);
   });
 });

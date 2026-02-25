@@ -27,7 +27,7 @@ import {
 } from '../ai/threatModel';
 import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock, formatInitBlock } from '../ai/threatModelVerbose';
 import { getCardRankColor } from '../ui/annotations';
-import { hasUntriedAlternatives, triedAltKey } from './playAgain';
+import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
 import { demoProblems } from './problems';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -41,6 +41,11 @@ const suitOrder: Suit[] = ['S', 'H', 'D', 'C'];
 const rankOrder: Rank[] = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
 const suitSymbol: Record<Suit, string> = { S: '♠', H: '♥', D: '♦', C: '♣' };
 const seatName: Record<Seat, string> = { N: 'North', E: 'East', S: 'South', W: 'West' };
+const busyBranchingLabel: Record<'strict' | 'sameLevel' | 'allBusy', string> = {
+  strict: 'Strict',
+  sameLevel: 'Same level',
+  allBusy: 'All busy'
+};
 type ProblemWithThreats = typeof demoProblems[number]['problem'] & { threatCardIds?: CardId[] };
 
 const maxSuitLineLen = Math.max(
@@ -68,6 +73,9 @@ root.style.setProperty('--trick-box-h', `${trickBoxSize}px`);
 root.style.setProperty('--table-gap-y', `${verticalGap}px`);
 root.style.setProperty('--table-gap-x', `${horizontalGap}px`);
 root.style.setProperty('--slot-offset', '12%');
+const busyBranching: 'strict' | 'sameLevel' | 'allBusy' = 'sameLevel';
+const threatDetail = false;
+const verboseCoverageDetail = false;
 
 let currentProblem = demoProblems[0].problem;
 let currentProblemId = demoProblems[0].id;
@@ -106,17 +114,40 @@ type GameSnapshot = {
   playAgainAvailable: boolean;
   playAgainUnavailableReason: string | null;
   playAgainLastCandidateIndex: number | null;
+  replaySuppressedForRun: boolean;
 };
 const undoStack: GameSnapshot[] = [];
 let currentRunTranscript: DecisionRecord[] = [];
 let lastSuccessfulTranscript: SuccessfulTranscript | null = null;
-const triedAltClass = new Set<string>();
+const replayCoverage: ReplayCoverage = {
+  triedByIdx: new Map<number, Set<string>>(),
+  recordedRemainingByIdx: new Map<number, Set<string>>(),
+  representativeByIdx: new Map<number, Map<string, CardId>>()
+};
 let currentRunUserPlays: UserPlayRecord[] = [];
+let currentRunEqTokens: string[] = [];
 type RunStatus = 'running' | 'success' | 'failure';
 let runStatus: RunStatus = 'running';
 let playAgainAvailable = false;
 let playAgainUnavailableReason: string | null = null;
 let playAgainLastCandidateIndex: number | null = null;
+let runPlayCounter = 0;
+let replayMismatchCutoffIdx: number | null = null;
+let replaySuppressedForRun = false;
+const userEqClassByCardId = new Map<CardId, string>();
+const userEqRepByClassId = new Map<string, CardId>();
+type DefenderEqInitRecord = {
+  idx: number;
+  seat: 'E' | 'W';
+  bucket: string;
+  classes: string[];
+  remaining: string[];
+  chosen: string;
+  eqByTier: string;
+};
+const defenderEqInitByKey = new Map<string, DefenderEqInitRecord>();
+let defenderEqInitPrinted = false;
+rebuildUserEqClassMapping(state);
 
 function clearSingletonAutoplayTimer(): void {
   if (singletonAutoplayTimer) {
@@ -259,6 +290,7 @@ function cloneStateForLog(src: State): State {
           cursor: src.replay.cursor,
           divergenceIndex: src.replay.divergenceIndex,
           forcedCard: src.replay.forcedCard,
+          forcedClassId: src.replay.forcedClassId,
           transcript: {
             problemId: src.replay.transcript.problemId,
             seed: src.replay.transcript.seed,
@@ -276,6 +308,7 @@ function cloneStateForLog(src: State): State {
           cursor: src.replay.cursor,
           divergenceIndex: src.replay.divergenceIndex,
           forcedCard: src.replay.forcedCard,
+          forcedClassId: src.replay.forcedClassId,
           transcript: null
         }
   };
@@ -319,7 +352,8 @@ function makeSnapshot(play: Play): GameSnapshot {
     runStatus,
     playAgainAvailable,
     playAgainUnavailableReason,
-    playAgainLastCandidateIndex
+    playAgainLastCandidateIndex,
+    replaySuppressedForRun
   };
 }
 
@@ -340,6 +374,7 @@ function restoreSnapshot(snapshot: GameSnapshot): void {
   playAgainAvailable = snapshot.playAgainAvailable;
   playAgainUnavailableReason = snapshot.playAgainUnavailableReason;
   playAgainLastCandidateIndex = snapshot.playAgainLastCandidateIndex;
+  replaySuppressedForRun = snapshot.replaySuppressedForRun;
 }
 
 function totalCards(s: State, seat: Seat): number {
@@ -360,6 +395,384 @@ function snapshotText(s: State): string {
     `rem=N:${totalCards(s, 'N')} E:${totalCards(s, 'E')} S:${totalCards(s, 'S')} W:${totalCards(s, 'W')}`,
     `won=NS:${s.tricksWon.NS} EW:${s.tricksWon.EW}`
   ].join(' ');
+}
+
+function resetDefenderEqInitSnapshot(): void {
+  defenderEqInitByKey.clear();
+  defenderEqInitPrinted = false;
+}
+
+function maybeLogDefenderEqInitSnapshot(): void {
+  if (!verboseLog || defenderEqInitPrinted || defenderEqInitByKey.size === 0) return;
+  const entries = [...defenderEqInitByKey.values()].sort(
+    (a, b) => a.idx - b.idx || (a.seat < b.seat ? -1 : a.seat > b.seat ? 1 : 0)
+  );
+  logs = [
+    ...logs,
+    '',
+    '================= DEFENDER EQ (initial snapshot, first EQCs observed) =================',
+    ...entries.map(
+      (r) =>
+        `idx=${r.idx} seat=${r.seat} bucket=${r.bucket} classes={${r.classes.join(',')}} remaining={${r.remaining.join(',')}} chosen=${r.chosen}`
+    ),
+    '=========================================================================================',
+    ''
+  ].slice(-500);
+  defenderEqInitPrinted = true;
+}
+
+function formatUserEqClassLabels(s: State, seat: Seat): string[] {
+  const labels: string[] = [];
+  for (const suit of suitOrder) {
+    for (const cls of getSuitEquivalenceClasses(s, seat, suit)) {
+      labels.push(`${suit}${cls.join('')}`);
+    }
+  }
+  return labels;
+}
+
+function rebuildUserEqClassMapping(s: State): void {
+  userEqClassByCardId.clear();
+  userEqRepByClassId.clear();
+  for (const seat of s.userControls) {
+    for (const suit of suitOrder) {
+      const classes = getSuitEquivalenceClasses(s, seat, suit);
+      for (const cls of classes) {
+        if (cls.length === 0) continue;
+        const rep = toCardId(suit, cls[0]) as CardId;
+        const repInfo = classInfoForCard(s, seat, rep);
+        const classId = repInfo.classId;
+        if (!userEqRepByClassId.has(classId)) {
+          userEqRepByClassId.set(classId, rep);
+        }
+        for (const rank of cls) {
+          const cardId = toCardId(suit, rank) as CardId;
+          userEqClassByCardId.set(cardId, classId);
+        }
+      }
+    }
+  }
+}
+
+function getImmutableUserEqClass(seat: Seat, cardId: CardId): string {
+  if (seat !== 'N' && seat !== 'S') {
+    return classInfoForCard(state, seat, cardId).classId;
+  }
+  return userEqClassByCardId.get(cardId) ?? classInfoForCard(state, seat, cardId).classId;
+}
+
+function getImmutableUserEqRep(classId: string, fallback: CardId): CardId {
+  return userEqRepByClassId.get(classId) ?? fallback;
+}
+
+function formatUserEqInitBlock(s: State): string[] {
+  const lines: string[] = [
+    '',
+    '================= USER EQ (initial) ================='
+  ];
+  for (const seat of s.userControls) {
+    const labels = formatUserEqClassLabels(s, seat);
+    lines.push(`seat=${seat} classes: ${labels.join('  ') || '-'}`);
+  }
+  lines.push('=====================================================');
+  lines.push('');
+  return lines;
+}
+
+function computeEqcForAutoplayEvent(shadow: State, event: Extract<EngineEvent, { type: 'autoplay' }>, idx: number): DefenderEqInitRecord | null {
+  if ((event.play.seat !== 'E' && event.play.seat !== 'W') || !event.decisionSig) return null;
+  const chosenCard = toCardId(event.play.suit, event.play.rank);
+  const bucketCards = event.bucketCards ? [...event.bucketCards] : [chosenCard];
+  const policyClassByCard = event.policyClassByCard ?? {};
+  const chosenBucket = event.chosenBucket ?? 'unknown';
+  const tierBuckets = event.tierBuckets ?? {};
+  let explorationCards = [...bucketCards];
+  if ((chosenBucket.startsWith('tier2') || chosenBucket.startsWith('tier3')) && busyBranching !== 'strict') {
+    const orderedKeys =
+      busyBranching === 'sameLevel'
+        ? ([`tier${chosenBucket.startsWith('tier2') ? '2' : '3'}a`, `tier${chosenBucket.startsWith('tier2') ? '2' : '3'}b`] as const)
+        : (['tier2a', 'tier2b', 'tier3a', 'tier3b'] as const);
+    const merged: CardId[] = [];
+    for (const key of orderedKeys) {
+      for (const card of tierBuckets[key] ?? []) {
+        if (!merged.includes(card)) merged.push(card);
+      }
+    }
+    if (merged.length > 0) explorationCards = merged;
+  }
+  const toAltClassId = (card: CardId): string => {
+    if (chosenBucket.startsWith('tier1')) return 'idle:tier1';
+    if (chosenBucket.startsWith('tier2') || chosenBucket.startsWith('tier3')) return `busy:${card[0]}`;
+    if (chosenBucket === 'tier4') return `other:${card[0]}`;
+    const mapped = policyClassByCard[card];
+    if (mapped) return mapped;
+    return classInfoForCard(shadow, event.play.seat, card).classId;
+  };
+  const classOrder: string[] = [];
+  const chosenAltClassId = toAltClassId(chosenCard);
+  for (const card of explorationCards) {
+    const classId = toAltClassId(card);
+    if (!classOrder.includes(classId)) classOrder.push(classId);
+  }
+  const remaining = classOrder.filter((id) => id !== chosenAltClassId);
+  return {
+    idx,
+    seat: event.play.seat,
+    bucket: chosenBucket,
+    classes: classOrder,
+    remaining,
+    chosen: chosenAltClassId,
+    eqByTier: computeEqByTierSummary(shadow, event)
+  };
+}
+
+function chooseDeterministicUserRepPlay(s: State): Play | null {
+  const legal = legalPlays(s).filter((p) => p.seat === s.turn);
+  if (legal.length === 0) return null;
+  const legalByCard = new Map(legal.map((p) => [toCardId(p.suit, p.rank), p] as const));
+  const byClass = new Map<string, Play>();
+  for (const p of legal) {
+    const cardId = toCardId(p.suit, p.rank);
+    const info = classInfoForCard(s, p.seat, cardId);
+    const repPlay = legalByCard.get(info.representative as CardId);
+    if (!byClass.has(info.classId)) {
+      byClass.set(info.classId, repPlay ?? p);
+    }
+  }
+  const classIds = [...byClass.keys()].sort();
+  return byClass.get(classIds[0]) ?? legal[0];
+}
+
+function prefetchDefenderEqInitSummary(problem: ProblemWithThreats, seed: number): DefenderEqInitRecord[] {
+  // PREFETCH EQ DEBUG: shadow dry-run, no real-state/log mutations.
+  let shadowState = init({ ...problem, rngSeed: seed });
+  const firstByIdx = new Map<number, DefenderEqInitRecord>();
+  let idxCounter = 0;
+  let plies = 0;
+  const maxPlies = 50;
+
+  while (shadowState.phase !== 'end' && plies < maxPlies) {
+    const before = cloneStateForLog(shadowState);
+    const play = shadowState.userControls.includes(shadowState.turn)
+      ? chooseDeterministicUserRepPlay(shadowState)
+      : legalPlays(shadowState)[0] ?? null;
+    if (!play) break;
+
+    const result = apply(shadowState, play);
+    shadowState = result.state;
+
+    const eventShadow = cloneStateForLog(before);
+    for (const event of result.events) {
+      if (event.type === 'autoplay' && (event.play.seat === 'E' || event.play.seat === 'W')) {
+        const rec = computeEqcForAutoplayEvent(eventShadow, event, idxCounter);
+        if (rec && !firstByIdx.has(idxCounter)) {
+          firstByIdx.set(idxCounter, rec);
+        }
+        idxCounter += 1;
+      }
+      applyEventToShadow(eventShadow, event);
+    }
+
+    plies += result.events.filter((e) => e.type === 'played' || e.type === 'autoplay').length;
+  }
+
+  return [...firstByIdx.values()].sort((a, b) => a.idx - b.idx || (a.seat < b.seat ? -1 : a.seat > b.seat ? 1 : 0));
+}
+
+function formatDefenderEqPrefetchBlock(records: DefenderEqInitRecord[]): string[] {
+  return [
+    '',
+    '================= DEFENDER ACTION EQ (prefetch, before play) =================',
+    ...records.map(
+      (r) =>
+        `idx=${r.idx} seat=${r.seat} bucket=${r.bucket} classes={${r.classes.join(',')}} remaining={${r.remaining.join(',')}} chosen=${r.chosen} | eqByTier: ${r.eqByTier}`
+    ),
+    '=============================================================================',
+    ''
+  ];
+}
+
+function sortCardIdsDesc(cards: CardId[]): CardId[] {
+  const suitStrength: Record<Suit, number> = { S: 0, H: 1, D: 2, C: 3 };
+  return [...cards].sort((a, b) => {
+    const ra = rankOrder.indexOf(a[1] as Rank);
+    const rb = rankOrder.indexOf(b[1] as Rank);
+    if (ra !== rb) return ra - rb;
+    return suitStrength[a[0] as Suit] - suitStrength[b[0] as Suit];
+  });
+}
+
+function tierOrderKey(tier: string): number {
+  const order = ['tier1a', 'tier1b', 'tier1c', 'tier2a', 'tier2b', 'tier3a', 'tier3b', 'tier4', 'follow:below', 'follow:above', 'follow:baseline', 'lead:none', 'legal', 'preferred'];
+  const idx = order.indexOf(tier);
+  return idx >= 0 ? idx : 999;
+}
+
+function compactTierName(tier: string): string {
+  if (tier.startsWith('tier')) return tier.slice(4);
+  if (tier.startsWith('follow:')) return tier.slice(7);
+  if (tier === 'lead:none') return 'lead';
+  return tier;
+}
+
+function computeTierByCardForDecision(shadow: State, event: Extract<EngineEvent, { type: 'autoplay' }>): Map<CardId, string> {
+  const out = new Map<CardId, string>();
+  const legal = legalPlays(shadow).filter((p) => p.seat === event.play.seat).map((p) => toCardId(p.suit, p.rank));
+  const leadSuit = shadow.trick[0]?.suit ?? null;
+
+  if (!leadSuit) {
+    for (const c of legal) out.set(c, 'lead:none');
+    return out;
+  }
+
+  const isVoidDiscard = shadow.hands[shadow.turn][leadSuit].length === 0;
+  if (isVoidDiscard && shadow.threat && shadow.threatLabels) {
+    const tiers = computeDiscardTiers(shadow.turn, positionFromState(shadow), leadSuit, shadow.threat as ThreatContext, shadow.threatLabels as DefenderLabels);
+    const priority: Array<[string, CardId[]]> = [
+      ['tier1a', tiers.tier1a],
+      ['tier1b', tiers.tier1b],
+      ['tier1c', tiers.tier1c],
+      ['tier2a', tiers.tier2a],
+      ['tier2b', tiers.tier2b],
+      ['tier3a', tiers.tier3a],
+      ['tier3b', tiers.tier3b],
+      ['tier4', tiers.tier4]
+    ];
+    // Best-tier only assignment to keep the debug cross-tab compact.
+    for (const [tier, cards] of priority) {
+      for (const c of cards) {
+        if (!out.has(c)) out.set(c, tier);
+      }
+    }
+    return out;
+  }
+
+  if (shadow.hands[shadow.turn][leadSuit].length > 0) {
+    const inSuit = legalPlays(shadow).filter((p) => p.seat === shadow.turn).map((p) => toCardId(p.suit, p.rank));
+    if (!shadow.threat || !shadow.threatLabels) {
+      for (const c of inSuit) out.set(c, 'follow:baseline');
+      return out;
+    }
+    const threshold = getIdleThreatThresholdRank(leadSuit, shadow.threat as ThreatContext, shadow.threatLabels as DefenderLabels);
+    if (!threshold) {
+      for (const c of inSuit) out.set(c, 'follow:baseline');
+      return out;
+    }
+    for (const c of inSuit) {
+      const r = c[1] as Rank;
+      out.set(c, rankOrder.indexOf(r) > rankOrder.indexOf(threshold) ? 'follow:below' : 'follow:above');
+    }
+    return out;
+  }
+
+  for (const c of legal) out.set(c, event.chosenBucket ?? 'unknown');
+  return out;
+}
+
+function computeEqByTierSummary(shadow: State, event: Extract<EngineEvent, { type: 'autoplay' }>): string {
+  const tierByCard = computeTierByCardForDecision(shadow, event);
+  const eqToTier = new Map<string, Map<string, CardId[]>>();
+  for (const [card, tier] of tierByCard.entries()) {
+    let eqClass = event.policyClassByCard?.[card];
+    if (!eqClass) {
+      if (tier.startsWith('tier1')) eqClass = 'idle:tier1';
+      else if (tier.startsWith('tier2') || tier.startsWith('tier3')) eqClass = `busy:${card[0]}`;
+      else if (tier === 'tier4') eqClass = `other:${card[0]}`;
+      else eqClass = classInfoForCard(shadow, event.play.seat, card).classId;
+    }
+    const tierMap = eqToTier.get(eqClass) ?? new Map<string, CardId[]>();
+    const cards = tierMap.get(tier) ?? [];
+    cards.push(card);
+    tierMap.set(tier, cards);
+    eqToTier.set(eqClass, tierMap);
+  }
+
+  const busyOrder = ['busy:S', 'busy:H', 'busy:D', 'busy:C'];
+  const all = [...eqToTier.entries()];
+  const idle = all.find(([k]) => k.startsWith('idle'));
+  const busy = busyOrder
+    .map((k) => all.find(([ek]) => ek === k))
+    .filter((v): v is [string, Map<string, CardId[]>] => !!v);
+  const others = all
+    .filter(([k]) => !k.startsWith('idle') && !busyOrder.includes(k))
+    .sort((a, b) => a[0].localeCompare(b[0]));
+
+  const renderEq = (k: string, tiers: Map<string, CardId[]>) => {
+    const parts = [...tiers.entries()]
+      .sort((a, b) => tierOrderKey(a[0]) - tierOrderKey(b[0]))
+      .map(([t, cards]) => `${compactTierName(t)}:{${sortCardIdsDesc(cards).join(' ')}}`)
+      .join(' ');
+    return `${k}(${parts})`;
+  };
+
+  const out: string[] = [];
+  if (idle) out.push(renderEq(idle[0], idle[1]));
+  else out.push('idle:None');
+  for (const [k, tiers] of [...busy, ...others]) out.push(renderEq(k, tiers));
+  return out.join(', ');
+}
+
+function isBelowThreshold(cardId: CardId, threshold: Rank): boolean {
+  const rank = cardId[1] as Rank;
+  return rankOrder.indexOf(rank) > rankOrder.indexOf(threshold);
+}
+
+function formatDefenderInventoryEqBlock(s: State): string[] {
+  const ctx = s.threat as ThreatContext | null;
+  const labels = s.threatLabels as DefenderLabels | null;
+  const seatRows: string[] = [];
+  const defenderOrder: Array<'E' | 'W'> = ['E', 'W'];
+  const idleSuitOrder: Suit[] = ['C', 'D', 'H', 'S'];
+  const busySuitOrder: Suit[] = ['S', 'H', 'D', 'C'];
+  const tierOrder = ['tier2a', 'tier2b', 'tier3a', 'tier3b'];
+
+  for (const seat of defenderOrder) {
+    const threatSuits = busySuitOrder.filter((suit) => !!ctx?.threatsBySuit[suit]);
+    const idleParts: string[] = [];
+    for (const suit of idleSuitOrder) {
+      if (threatSuits.includes(suit)) continue;
+      const cards = sortCardIdsDesc(s.hands[seat][suit].map((rank) => toCardId(suit, rank) as CardId));
+      if (cards.length > 0) idleParts.push(`idle:${suit}{${cards.join(' ')}}`);
+    }
+    const idleSummary = idleParts.length > 0 ? idleParts.join(' ') : 'idle:(None)';
+
+    const busyParts: string[] = [];
+    for (const suit of threatSuits) {
+      const cards = sortCardIdsDesc(s.hands[seat][suit].map((rank) => toCardId(suit, rank) as CardId));
+      if (cards.length === 0) {
+        busyParts.push(`busy:${suit}(None)`);
+        continue;
+      }
+
+      const threshold = ctx && labels ? getIdleThreatThresholdRank(suit, ctx, labels) : null;
+      const stopStatus = ctx?.threatsBySuit[suit]?.stopStatus;
+      const prefix = stopStatus === 'double' ? '2' : '3';
+      const tiers = new Map<string, CardId[]>();
+      for (const card of cards) {
+        const tier =
+          threshold && isBelowThreshold(card, threshold)
+            ? `tier${prefix}a`
+            : `tier${prefix}b`;
+        const list = tiers.get(tier) ?? [];
+        list.push(card);
+        tiers.set(tier, list);
+      }
+      const tierParts = tierOrder
+        .filter((tier) => (tiers.get(tier)?.length ?? 0) > 0)
+        .map((tier) => `${tier.slice(4)}:{${sortCardIdsDesc(tiers.get(tier) ?? []).join(' ')}}`);
+      busyParts.push(`busy:${suit}(${tierParts.join(' ') || 'None'})`);
+    }
+
+    seatRows.push(`seat=${seat} | ${idleSummary} | ${busyParts.join(' | ') || 'busy:(None)'}`);
+  }
+
+  return [
+    '',
+    '================= DEFENDER INVENTORY EQ (initial) =================',
+    ...seatRows,
+    '===================================================================',
+    ''
+  ];
 }
 
 function applyEventToShadow(s: State, event: EngineEvent): void {
@@ -407,12 +820,41 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
   const shadow = cloneStateForLog(before);
 
   for (const event of events) {
+    if (event.type === 'played' || event.type === 'autoplay') {
+      if (runPlayCounter > 0) {
+        lines.push('');
+      }
+      runPlayCounter += 1;
+      lines.push(`----- PLAY ${runPlayCounter} -----`);
+      const cardId = toCardId(event.play.suit, event.play.rank) as CardId;
+      let playLine = `play ${event.play.seat}:${cardId} (${event.type === 'played' ? 'user' : 'auto'})`;
+      if (event.type === 'played') {
+        const userEqClass = getImmutableUserEqClass(event.play.seat, cardId);
+        playLine += ` | eq=${userEqClass}`;
+      } else {
+        const eqRec = computeEqcForAutoplayEvent(shadow, event, -1);
+        if (eqRec) {
+          playLine += ` | eq=${eqRec.chosen} (card=${cardId}; bucket=${eqRec.bucket}; remaining=${eqRec.remaining.join(',') || '-'})`;
+        } else {
+          const classId = classInfoForCard(shadow, event.play.seat, cardId).classId;
+          playLine += ` | eq=${classId}${event.chosenBucket ? ` (card=${cardId}; bucket=${event.chosenBucket})` : ''}`;
+        }
+      }
+      lines.push(playLine);
+    }
+
     if (verboseLog && event.type === 'autoplay') {
       if (event.replay?.action === 'forced') {
         lines.push(`[PLAYAGAIN] forcing index=${event.replay.index ?? '?'} card=${event.replay.card ?? `${event.play.suit}${event.play.rank}`}`);
       }
       if (event.replay?.action === 'disabled') {
-        lines.push(`[PLAYAGAIN] replay disabled due to ${event.replay.reason ?? 'mismatch'}`);
+        if (event.replay.reason === 'class-not-legal') {
+          lines.push(
+            `[PLAYAGAIN] force failed idx=${event.replay.index ?? '?'} forcedClass=${event.replay.forcedClassId ?? '-'} reason=class-not-legal; continuing unforced`
+          );
+        } else {
+          lines.push(`[PLAYAGAIN] replay disabled due to ${event.replay.reason ?? 'mismatch'}`);
+        }
       }
       if (event.preferredDiscard) {
         const pref = event.preferredDiscard;
@@ -424,9 +866,11 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
           );
         }
       }
-      const leadSuit = shadow.trick[0]?.suit ?? 'none';
-      const legalCount = legalPlays(shadow).length;
-      lines.push(`autoplayDecision seat=${shadow.turn} leadSuit=${leadSuit} legal=${legalCount} chosen=${playText(event.play)}`);
+      if (threatDetail) {
+        const leadSuit = shadow.trick[0]?.suit ?? 'none';
+        const legalCount = legalPlays(shadow).length;
+        lines.push(`autoplayDecision seat=${shadow.turn} leadSuit=${leadSuit} legal=${legalCount} chosen=${playText(event.play)}`);
+      }
 
       const policy = shadow.policies[shadow.turn];
       if (
@@ -440,12 +884,15 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
           ? getIdleThreatThresholdRank(ls, shadow.threat as ThreatContext, shadow.threatLabels as DefenderLabels)
           : null;
         if (threshold) {
-          const below = legalPlays(shadow).filter((p) => rankOrder.indexOf(p.rank) > rankOrder.indexOf(threshold)).map((p) => `${p.suit}${p.rank}`);
-          const above = legalPlays(shadow).filter((p) => rankOrder.indexOf(p.rank) <= rankOrder.indexOf(threshold)).map((p) => `${p.suit}${p.rank}`);
-          lines.push(`[THREAT:follow] defender=${shadow.turn} ledSuit=${ls} threshold=${threshold}`);
-          lines.push(`inSuit=${inSuit.join(' ') || '-'} below=${below.join(' ') || '-'} above=${above.join(' ') || '-'} chosen=${event.play.suit}${event.play.rank}`);
+          const below = legalPlays(shadow).filter((p) => rankOrder.indexOf(p.rank) > rankOrder.indexOf(threshold));
+          const above = legalPlays(shadow).filter((p) => rankOrder.indexOf(p.rank) <= rankOrder.indexOf(threshold));
+          lines.push(
+            `[THREAT] follow seat=${shadow.turn} ledSuit=${ls} threshold=${threshold} inSuit=${inSuit.length} chosen=${event.play.suit}${event.play.rank} below=${below.length} above=${above.length}`
+          );
         } else {
-          lines.push(`[THREAT:follow] defender=${shadow.turn} ledSuit=${ls} threshold=- inSuit=${inSuit.join(' ') || '-'} chosen=${event.play.suit}${event.play.rank} (baseline)`);
+          lines.push(
+            `[THREAT] follow seat=${shadow.turn} ledSuit=${ls} threshold=- inSuit=${inSuit.length} chosen=${event.play.suit}${event.play.rank} mode=baseline`
+          );
         }
       }
 
@@ -460,32 +907,45 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
         const localCtx = shadow.threat as ThreatContext;
         const localLabels = shadow.threatLabels as DefenderLabels;
         const tiers = computeDiscardTiers(shadow.turn, positionFromState(shadow), ledSuit, localCtx, localLabels);
+        const tierCounts = [
+          ['t2a', tiers.tier2a.length],
+          ['t2b', tiers.tier2b.length],
+          ['t3a', tiers.tier3a.length],
+          ['t3b', tiers.tier3b.length]
+        ].filter(([, count]) => count > 0).map(([name, count]) => `${name}:${count}`).join(' ');
         lines.push(
-          formatDiscardDecisionBlock({
-            defender: shadow.turn,
-            ledSuit,
-            trumpStrain: shadow.contract.strain,
-            ctx: localCtx,
-            labels: localLabels,
-            legal: tiers.legal,
-            tier1a: tiers.tier1a,
-            tier1b: tiers.tier1b,
-            tier1c: tiers.tier1c,
-            tier2a: tiers.tier2a,
-            tier2b: tiers.tier2b,
-            tier3a: tiers.tier3a,
-            tier3b: tiers.tier3b,
-            tier4: tiers.tier4,
-            chosen: toCardId(event.play.suit, event.play.rank),
-            rngState: { seed: after.rng.seed, counter: after.rng.counter }
-          })
+          `[THREAT] discard seat=${shadow.turn} ledSuit=${ledSuit} legal=${tiers.legal.length} chosen=${event.play.suit}${event.play.rank} bucket=${event.chosenBucket ?? '-'} tiers=${tierCounts || '-'}`
         );
+        if (threatDetail) {
+          lines.push(
+            formatDiscardDecisionBlock({
+              defender: shadow.turn,
+              ledSuit,
+              trumpStrain: shadow.contract.strain,
+              ctx: localCtx,
+              labels: localLabels,
+              legal: tiers.legal,
+              tier1a: tiers.tier1a,
+              tier1b: tiers.tier1b,
+              tier1c: tiers.tier1c,
+              tier2a: tiers.tier2a,
+              tier2b: tiers.tier2b,
+              tier3a: tiers.tier3a,
+              tier3b: tiers.tier3b,
+              tier4: tiers.tier4,
+              chosen: toCardId(event.play.suit, event.play.rank),
+              rngState: { seed: after.rng.seed, counter: after.rng.counter }
+            })
+          );
+        }
       }
     }
 
-    lines.push(eventText(event));
+    if (event.type === 'illegal' || event.type === 'handComplete') {
+      lines.push(eventText(event));
+    }
 
-    if (verboseLog && (event.type === 'played' || event.type === 'autoplay')) {
+    if (verboseLog && threatDetail && (event.type === 'played' || event.type === 'autoplay')) {
       const beforeCtx = shadow.threat as ThreatContext | null;
       const beforeLabels = shadow.threatLabels as DefenderLabels | null;
       applyEventToShadow(shadow, event);
@@ -515,24 +975,28 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
       );
     }
 
-    if (event.type === 'trickComplete' && verboseLog && shadow.threat && shadow.threatLabels) {
-      const trickIndex = shadow.tricksWon.NS + shadow.tricksWon.EW + 1;
-      lines.push(
-        formatAfterTrickBlock({
-          trickIndex,
-          leader: shadow.leader,
-          trick: event.trick,
-          beforeCtx: shadow.threat as ThreatContext,
-          afterCtx: shadow.threat as ThreatContext,
-          beforeLabels: shadow.threatLabels as DefenderLabels,
-          afterLabels: shadow.threatLabels as DefenderLabels,
-          position: positionFromState(shadow)
-        })
-      );
+    if (event.type === 'trickComplete') {
+      lines.push(`----- TRICK COMPLETE ----- winner=${event.winner} trick=${event.trick.map(playText).join(' ')}`);
+      lines.push('');
+      if (verboseLog && threatDetail && shadow.threat && shadow.threatLabels) {
+        const trickIndex = shadow.tricksWon.NS + shadow.tricksWon.EW + 1;
+        lines.push(
+          formatAfterTrickBlock({
+            trickIndex,
+            leader: shadow.leader,
+            trick: event.trick,
+            beforeCtx: shadow.threat as ThreatContext,
+            afterCtx: shadow.threat as ThreatContext,
+            beforeLabels: shadow.threatLabels as DefenderLabels,
+            afterLabels: shadow.threatLabels as DefenderLabels,
+            position: positionFromState(shadow)
+          })
+        );
+      }
     }
   }
 
-  if (verboseLog) {
+  if (verboseLog && threatDetail) {
     lines.push(snapshotText(after));
   }
 
@@ -543,50 +1007,95 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
   const shadow = cloneStateForLog(before);
   for (const event of events) {
     if (event.type === 'autoplay' && (event.play.seat === 'E' || event.play.seat === 'W') && event.decisionSig) {
+      const eqRec = computeEqcForAutoplayEvent(shadow, event, currentRunTranscript.length);
+      if (!eqRec) {
+        applyEventToShadow(shadow, event);
+        continue;
+      }
       const chosenCard = toCardId(event.play.suit, event.play.rank);
-      const bucketCards = event.bucketCards ? [...event.bucketCards] : [chosenCard];
-      const policyClassByCard = event.policyClassByCard ?? {};
-      const chosenBucket = event.chosenBucket ?? 'unknown';
-      const toAltClassId = (card: CardId): string => {
-        const mapped = policyClassByCard[card];
-        if (mapped) return mapped;
-        if (chosenBucket.startsWith('tier1')) return 'idle:tier1';
-        if (chosenBucket.startsWith('tier2') || chosenBucket.startsWith('tier3')) return `busy:${card[0]}`;
-        if (chosenBucket.startsWith('tier4')) return `other:${card[0]}`;
-        return classInfoForCard(shadow, event.play.seat, card).classId;
-      };
-      const classOrder: string[] = [];
-      const representativeCardByClass: Record<string, CardId> = {};
       const chosenClassId = classInfoForCard(shadow, event.play.seat, chosenCard).classId;
-      const chosenAltClassId = toAltClassId(chosenCard);
+      const chosenAltClassId = eqRec.chosen;
+      const classOrder = [...eqRec.classes];
+      const remainingClasses = [...eqRec.remaining];
+      const bucketCards = event.bucketCards ? [...event.bucketCards] : [chosenCard];
+      const representativeCardByClass: Record<string, CardId> = {};
       for (const card of bucketCards) {
-        const classId = toAltClassId(card);
-        if (!classOrder.includes(classId)) classOrder.push(classId);
-        if (!representativeCardByClass[classId]) representativeCardByClass[classId] = card;
+        const mapped = event.policyClassByCard?.[card] ?? classInfoForCard(shadow, event.play.seat, card).classId;
+        if (!representativeCardByClass[mapped]) representativeCardByClass[mapped] = card;
       }
       if (classOrder.includes(chosenAltClassId)) {
         representativeCardByClass[chosenAltClassId] = chosenCard;
       }
-      const coveredCards = bucketCards.filter((card) => toAltClassId(card) === chosenAltClassId);
-      const remainingClasses = classOrder.filter((id) => id !== chosenAltClassId);
+      const sourceRec =
+        event.replay?.action === 'forced' && shadow.replay.transcript && typeof event.replay.index === 'number'
+          ? shadow.replay.transcript.decisions[event.replay.index]
+          : null;
+      const runtimeRemainingForLog: string[] | null = [...eqRec.remaining];
+      const runtimeRemainingReason: string | null = null;
+      if (sourceRec && sourceRec.seat === event.play.seat) {
+        const recordedClasses = [sourceRec.chosenAltClassId ?? sourceRec.chosenClassId, ...sourceRec.sameBucketAlternativeClassIds]
+          .filter((v, idx, arr) => v && arr.indexOf(v) === idx);
+        classOrder.splice(0, classOrder.length, ...recordedClasses);
+        for (const [cls, card] of Object.entries(sourceRec.representativeCardByClass)) {
+          representativeCardByClass[cls] = card;
+        }
+        if (!classOrder.includes(chosenAltClassId)) classOrder.push(chosenAltClassId);
+        representativeCardByClass[chosenAltClassId] = chosenCard;
+        if (
+          verboseLog &&
+          (
+            (runtimeRemainingForLog && runtimeRemainingForLog.join(',') !== sourceRec.sameBucketAlternativeClassIds.join(','))
+            || (!runtimeRemainingForLog && runtimeRemainingReason)
+          )
+        ) {
+          const runtimeText = runtimeRemainingForLog
+            ? (runtimeRemainingForLog.join(',') || '-')
+            : `unavailable:${runtimeRemainingReason ?? 'unknown'}`;
+          logs = [
+            ...logs,
+            `[EQC:replay] idx=${event.replay.index} recordedRemaining=${sourceRec.sameBucketAlternativeClassIds.join(',') || '-'} runtimeRemaining=${runtimeText}`
+          ].slice(-500);
+        }
+      }
+      const coveredCards = bucketCards.filter((card) => {
+        const mapped = event.policyClassByCard?.[card] ?? classInfoForCard(shadow, event.play.seat, card).classId;
+        return mapped === chosenAltClassId;
+      });
       if (verboseLog) {
         logs = [
           ...logs,
-          `[EQC] idx=${currentRunTranscript.length} seat=${event.play.seat} bucket=${chosenBucket} classes=${classOrder.join(',') || '-'} chosen=${chosenAltClassId} covers=${coveredCards.join(',') || '-'} remaining=${remainingClasses.join(',') || '-'}`
+          `[EQC] idx=${currentRunTranscript.length} seat=${event.play.seat} scope=${busyBranching} bucket=${eqRec.bucket} classes=${classOrder.join(',') || '-'} chosen=${chosenAltClassId} covers=${coveredCards.join(',') || '-'} remaining=${remainingClasses.join(',') || '-'}`
         ].slice(-500);
       }
+      const eqIdx = currentRunTranscript.length;
+      const eqSeat = event.play.seat;
+      const eqKey = `${eqIdx}:${eqSeat}`;
+      if (!defenderEqInitByKey.has(eqKey)) {
+        defenderEqInitByKey.set(eqKey, {
+          idx: eqIdx,
+          seat: eqSeat,
+          bucket: eqRec.bucket,
+          classes: [...classOrder],
+          remaining: [...remainingClasses],
+          chosen: chosenAltClassId,
+          eqByTier: eqRec.eqByTier
+        });
+      }
+      maybeLogDefenderEqInitSnapshot();
       currentRunTranscript.push({
         index: currentRunTranscript.length,
         seat: event.play.seat,
+        nodeKey: currentRunEqTokens.join(' > '),
         sig: event.decisionSig,
         chosenCard,
         chosenClassId,
         chosenAltClassId,
-        chosenBucket,
+        chosenBucket: eqRec.bucket,
         bucketCards,
         sameBucketAlternativeClassIds: classOrder.filter((id) => id !== chosenAltClassId),
         representativeCardByClass
       });
+      currentRunEqTokens.push(chosenAltClassId);
     }
     applyEventToShadow(shadow, event);
   }
@@ -680,17 +1189,23 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
   if (rawThreats.length === 0) return;
 
   if (verboseLog) {
-    logs = [
-      ...logs,
-      formatInitBlock({
-        problemId,
-        threatCardIdsRaw: rawThreats,
-        position: positionFromState(state),
-        ctx: threatCtx,
-        labels: threatLabels
-      }),
-      ...seatOrder.map((seat) => `[HAND:init] ${formatHandInitSummary(state, seat)}`)
-    ].slice(-500);
+    if (threatDetail) {
+      logs = [
+        ...logs,
+        formatInitBlock({
+          problemId,
+          threatCardIdsRaw: rawThreats,
+          position: positionFromState(state),
+          ctx: threatCtx,
+          labels: threatLabels
+        }),
+        ...seatOrder.map((seat) => `[HAND:init] ${formatHandInitSummary(state, seat)}`)
+      ].slice(-500);
+    } else {
+      logs = [...logs, `[THREAT:init] problem=${problemId} raw=${rawThreats.join(',')} validation=OK`].slice(-500);
+    }
+    logs = [...logs, ...formatUserEqInitBlock(state)].slice(-500);
+    logs = [...logs, ...formatDefenderInventoryEqBlock(state)].slice(-500);
   }
 }
 
@@ -698,17 +1213,25 @@ function resetGame(seed: number, reason: string): void {
   clearSingletonAutoplayTimer();
   const nextSeed = seed >>> 0;
   if (nextSeed !== (currentSeed >>> 0)) {
-    triedAltClass.clear();
+    replayCoverage.triedByIdx.clear();
+    replayCoverage.recordedRemainingByIdx.clear();
+    replayCoverage.representativeByIdx.clear();
   }
   currentSeed = nextSeed;
   state = init({ ...currentProblem, rngSeed: currentSeed });
   logs = [...logs, `${reason} seed=${currentSeed}`].slice(-500);
   runStatus = 'running';
+  runPlayCounter = 0;
+  replayMismatchCutoffIdx = null;
+  replaySuppressedForRun = false;
   playAgainAvailable = false;
   playAgainUnavailableReason = null;
   playAgainLastCandidateIndex = null;
   currentRunTranscript = [];
   currentRunUserPlays = [];
+  currentRunEqTokens = [];
+  rebuildUserEqClassMapping(state);
+  resetDefenderEqInitSnapshot();
   undoStack.length = 0;
   deferredLogLines = [];
   unfreezeTrick(false);
@@ -725,13 +1248,21 @@ function selectProblem(problemId: string): void {
   currentSeed = currentProblem.rngSeed >>> 0;
   state = init({ ...currentProblem, rngSeed: currentSeed });
   runStatus = 'running';
+  runPlayCounter = 0;
+  replayMismatchCutoffIdx = null;
+  replaySuppressedForRun = false;
   playAgainAvailable = false;
   playAgainUnavailableReason = null;
   playAgainLastCandidateIndex = null;
   currentRunTranscript = [];
   currentRunUserPlays = [];
+  currentRunEqTokens = [];
+  rebuildUserEqClassMapping(state);
+  resetDefenderEqInitSnapshot();
   lastSuccessfulTranscript = null;
-  triedAltClass.clear();
+  replayCoverage.triedByIdx.clear();
+  replayCoverage.recordedRemainingByIdx.clear();
+  replayCoverage.representativeByIdx.clear();
   undoStack.length = 0;
   deferredLogLines = [];
   unfreezeTrick(false);
@@ -752,20 +1283,29 @@ function runTurn(play: Play): void {
   clearSingletonAutoplayTimer();
   if (state.replay.enabled && state.replay.transcript && (play.seat === 'N' || play.seat === 'S')) {
     const playId = toCardId(play.suit, play.rank) as CardId;
-    const actualClass = classInfoForCard(state, play.seat, playId).classId;
+    const actualClass = getImmutableUserEqClass(play.seat, playId);
     const expected = state.replay.transcript.userPlays[currentRunUserPlays.length];
     if (expected && expected.playClassId !== actualClass) {
+      // Replay semantics: user divergence is allowed. Stop forcing future decisions,
+      // continue this run normally, and only mark coverage if this run later succeeds.
+      const divergedAt = state.replay.cursor;
       state.replay.enabled = false;
-      logs = [...logs, `[PLAYAGAIN] replay disabled due to user class mismatch expected=${expected.playClassId} actual=${actualClass}`].slice(-500);
+      replaySuppressedForRun = true;
+      logs = [
+        ...logs,
+        `[PLAYAGAIN] user diverged at decisionIdx=${divergedAt} expectedClass=${expected.playClassId} actualClass=${actualClass}; continuing without forcing further decisions`
+      ].slice(-500);
     } else if (verboseLog) {
-      const info = classInfoForCard(state, play.seat, playId);
-      logs = [...logs, `[EQ] seat=${play.seat} played=${playId} class=${info.classId} rep=${info.representative}`].slice(-500);
+      const classId = getImmutableUserEqClass(play.seat, playId);
+      const rep = getImmutableUserEqRep(classId, playId);
+      logs = [...logs, `[EQ] seat=${play.seat} played=${playId} class=${classId} rep=${rep}`].slice(-500);
     }
   }
   if (play.seat === 'N' || play.seat === 'S') {
     const playId = toCardId(play.suit, play.rank) as CardId;
-    const cls = classInfoForCard(state, play.seat, playId).classId;
+    const cls = getImmutableUserEqClass(play.seat, playId);
     currentRunUserPlays.push({ index: currentRunUserPlays.length, seat: play.seat, playClassId: cls });
+    currentRunEqTokens.push(cls);
   }
   undoStack.push(makeSnapshot(play));
   if (trickFrozen) {
@@ -825,17 +1365,30 @@ function runTurn(play: Play): void {
     };
     logs = [...logs, `[PLAYAGAIN] recorded transcript ${lastSuccessfulTranscript.decisions.length} decisions`].slice(-500);
     for (const rec of lastSuccessfulTranscript.decisions) {
-      const chosenAltClassId = rec.chosenAltClassId || rec.chosenClassId;
-      triedAltClass.add(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, chosenAltClassId));
+      markDecisionCoverage(replayCoverage, rec);
     }
-    const availability = hasUntriedAlternatives(lastSuccessfulTranscript, triedAltClass);
-    playAgainAvailable = availability.ok;
-    playAgainUnavailableReason = availability.ok ? null : (availability.reason ?? 'no-untried-same-bucket-alternatives');
-    playAgainLastCandidateIndex = availability.lastCandidateIndex ?? null;
+    const allowedIndices = new Set(lastSuccessfulTranscript.decisions.map((d) => d.index));
+    const candidates = computeCoverageCandidates(replayCoverage, allowedIndices, replayMismatchCutoffIdx);
+    playAgainAvailable = candidates.length > 0;
+    playAgainUnavailableReason = playAgainAvailable
+      ? null
+      : (replayMismatchCutoffIdx !== null ? 'user-mismatch-exhausted' : 'exhausted-all-variations');
+    playAgainLastCandidateIndex = playAgainAvailable ? candidates[candidates.length - 1].index : null;
+    const offerLine = playAgainAvailable
+      ? (() => {
+          const offered = candidates[candidates.length - 1];
+          const offeredClass = offered.remainingKeys[0] ?? '-';
+          const offeredCard = replayCoverage.representativeByIdx.get(offered.index)?.get(offeredClass) ?? '-';
+          return `[PLAYAGAIN] offer available=true candidates=[${candidates.map((c) => c.index).join(',')}] chosenCandidate=${offered.index} forcedClass=${offeredClass} forcedCard=${offeredCard} reason=endOfRunSuccess`;
+        })()
+      : null;
     logs = [
       ...logs,
-      availability.ok
-        ? `[PLAYAGAIN] availability ok=true lastCandidateIndex=${availability.lastCandidateIndex}`
+      `[PLAYAGAIN] candidates=[${candidates.map((c) => c.index).join(',')}] cutoffIdx=${replayMismatchCutoffIdx ?? '-'}`,
+      ...candidates.map((c) => `[PLAYAGAIN] idx=${c.index} remainingUntried=${c.remainingKeys.length} keys=${c.remainingKeys.join(',')}`),
+      ...(offerLine ? [offerLine] : []),
+      playAgainAvailable
+        ? `[PLAYAGAIN] availability ok=true lastCandidateIndex=${playAgainLastCandidateIndex}`
         : `[PLAYAGAIN] availability ok=false reason=${playAgainUnavailableReason}`
     ].slice(-500);
   }
@@ -854,13 +1407,38 @@ function runTurn(play: Play): void {
   render();
 }
 
-function startPlayAgain(): void {
+function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   clearSingletonAutoplayTimer();
-  const availability = hasUntriedAlternatives(lastSuccessfulTranscript, triedAltClass);
-  playAgainAvailable = availability.ok;
-  playAgainUnavailableReason = availability.ok ? null : (availability.reason ?? 'no-untried-same-bucket-alternatives');
-  playAgainLastCandidateIndex = availability.lastCandidateIndex ?? null;
-  if (!availability.ok || !lastSuccessfulTranscript) {
+  if (!lastSuccessfulTranscript) {
+    playAgainAvailable = false;
+    playAgainUnavailableReason = 'exhausted-all-variations';
+    playAgainLastCandidateIndex = null;
+    logs = [...logs, `[PLAYAGAIN] availability ok=false reason=${playAgainUnavailableReason}`].slice(-500);
+    render();
+    return;
+  }
+  const allowedIndices = new Set(lastSuccessfulTranscript.decisions.map((d) => d.index));
+  const candidates = computeCoverageCandidates(replayCoverage, allowedIndices, replayMismatchCutoffIdx);
+  playAgainAvailable = candidates.length > 0;
+  playAgainUnavailableReason = playAgainAvailable
+    ? null
+    : (replayMismatchCutoffIdx !== null ? 'user-mismatch-exhausted' : 'exhausted-all-variations');
+  playAgainLastCandidateIndex = playAgainAvailable ? candidates[candidates.length - 1].index : null;
+  logs = [
+    ...logs,
+    `[PLAYAGAIN] candidates=[${candidates.map((c) => c.index).join(',')}] cutoffIdx=${replayMismatchCutoffIdx ?? '-'}`,
+    ...candidates.map((c) => `[PLAYAGAIN] idx=${c.index} remainingUntried=${c.remainingKeys.length} keys=${c.remainingKeys.join(',')}`)
+  ].slice(-500);
+  if (playAgainAvailable) {
+    const offered = candidates[candidates.length - 1];
+    const offeredClass = offered.remainingKeys[0] ?? '-';
+    const offeredCard = replayCoverage.representativeByIdx.get(offered.index)?.get(offeredClass) ?? '-';
+    logs = [
+      ...logs,
+      `[PLAYAGAIN] offer available=true candidates=[${candidates.map((c) => c.index).join(',')}] chosenCandidate=${offered.index} forcedClass=${offeredClass} forcedCard=${offeredCard} reason=${source === 'manual' ? 'manualRequest' : 'other'}`
+    ].slice(-500);
+  }
+  if (!playAgainAvailable) {
     logs = [...logs, `[PLAYAGAIN] availability ok=false reason=${playAgainUnavailableReason}`].slice(-500);
     render();
     return;
@@ -869,44 +1447,39 @@ function startPlayAgain(): void {
   const seed = lastSuccessfulTranscript?.seed ?? currentSeed;
   state = init({ ...currentProblem, rngSeed: seed });
   let divergenceIndex: number | null = null;
+  let forcedClass: string | null = null;
   let forcedCard: CardId | null = null;
-  for (let i = lastSuccessfulTranscript.decisions.length - 1; i >= 0; i -= 1) {
-    const rec = lastSuccessfulTranscript.decisions[i];
-    if (verboseLog) {
-      const allClasses = [rec.chosenAltClassId ?? rec.chosenClassId, ...rec.sameBucketAlternativeClassIds].filter(
-        (v, idx, arr) => v && arr.indexOf(v) === idx
-      );
-      const triedClasses = allClasses.filter((classId) =>
-        triedAltClass.has(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, classId))
-      );
-      const remainingClasses = rec.sameBucketAlternativeClassIds.filter(
-        (classId) => !triedAltClass.has(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, classId))
-      );
-      logs = [
-        ...logs,
-        `[EQC:playagain] idx=${rec.index} tried=${triedClasses.join(',') || '-'} remaining=${remainingClasses.join(',') || '-'}`
-      ].slice(-500);
-    }
-    const altClass = rec.sameBucketAlternativeClassIds.find(
-      (classId) => !triedAltClass.has(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, classId))
-    );
-    if (altClass) {
-      divergenceIndex = rec.index;
-      forcedCard = rec.representativeCardByClass[altClass] ?? null;
-      triedAltClass.add(triedAltKey(lastSuccessfulTranscript.problemId, rec.index, rec.chosenBucket, altClass));
-      if (!forcedCard) continue;
-      logs = [...logs, `[PLAYAGAIN] divergenceIndex=${divergenceIndex} forcedCard=${forcedCard}`].slice(-500);
-      break;
+  const coverageLines: string[] = [];
+  for (const c of candidates) {
+    if (verboseCoverageDetail || c.remainingKeys.length > 0) {
+      coverageLines.push(`[EQC:playagain] idx=${c.index} remaining=${c.remainingKeys.join(',') || '-'}`);
     }
   }
-  if (!forcedCard || divergenceIndex === null) {
+  const chosenCandidate = candidates[candidates.length - 1];
+  divergenceIndex = chosenCandidate.index;
+  forcedClass = chosenCandidate.remainingKeys[0] ?? null;
+  if (forcedClass) {
+    const rep = replayCoverage.representativeByIdx.get(divergenceIndex);
+    forcedCard = rep?.get(forcedClass) ?? null;
+    logs = [...logs, `[PLAYAGAIN] candidates=[${candidates.map((c) => c.index).join(',')}] chosen=${divergenceIndex}`].slice(-500);
+    logs = [...logs, `[PLAYAGAIN] divergenceIndex=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'}`].slice(-500);
+  }
+  if (verboseLog) {
+    logs = [...logs, '----- PLAY AGAIN COVERAGE -----', ...(coverageLines.length > 0 ? coverageLines : ['[EQC:playagain] none'])].slice(-500);
+  }
+  if (!forcedClass || divergenceIndex === null) {
     playAgainAvailable = false;
-    playAgainUnavailableReason = 'no-untried-same-bucket-alternatives';
+    playAgainUnavailableReason = 'exhausted-all-variations';
     playAgainLastCandidateIndex = null;
     logs = [...logs, `[PLAYAGAIN] availability ok=false reason=${playAgainUnavailableReason}`].slice(-500);
     render();
     return;
   }
+  // Offer indicates replay is possible; selected indicates replay is actually starting.
+  logs = [
+    ...logs,
+    `[PLAYAGAIN] ${source === 'manual' ? 'manual' : 'autoplay'} selected=true source=${source === 'manual' ? 'uiClick' : 'other'} -> starting replay divergenceIdx=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'}`
+  ].slice(-500);
   state.replay = {
     enabled: true,
     transcript: {
@@ -922,19 +1495,42 @@ function startPlayAgain(): void {
     },
     cursor: 0,
     divergenceIndex,
-    forcedCard
+    forcedCard,
+    forcedClassId: forcedClass
   };
   currentSeed = seed;
   runStatus = 'running';
+  runPlayCounter = 0;
+  replaySuppressedForRun = false;
   playAgainAvailable = false;
   playAgainUnavailableReason = null;
   playAgainLastCandidateIndex = null;
   currentRunTranscript = [];
   currentRunUserPlays = [];
+  currentRunEqTokens = [];
+  rebuildUserEqClassMapping(state);
+  resetDefenderEqInitSnapshot();
   deferredLogLines = [];
   unfreezeTrick(false);
+  const replayNodeLines: string[] = [];
+  for (const rec of lastSuccessfulTranscript.decisions) {
+    const avail = [rec.chosenAltClassId ?? rec.chosenClassId, ...rec.sameBucketAlternativeClassIds]
+      .filter((v, i, arr) => !!v && arr.indexOf(v) === i);
+    if (avail.length < 2) continue;
+    const forcing = rec.index === divergenceIndex ? ` FORCING=${forcedClass}` : '';
+    replayNodeLines.push(
+      `[PLAYAGAIN] idx=${rec.index} seat=${rec.seat} nodeKey=${rec.nodeKey || '-'} avail={${avail.join(',')}} chosen=${rec.chosenAltClassId} remaining={${rec.sameBucketAlternativeClassIds.join(',') || '-'}}${forcing}`
+    );
+  }
+  logs = [
+    ...logs,
+    `[PLAYAGAIN] replayStart plan divergenceIdx=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'} source=${source}`,
+    ...replayNodeLines,
+    `===== PLAY AGAIN REPLAY ===== divergenceIdx=${divergenceIndex} forced=${forcedCard ?? '-'} forcedClass=${forcedClass}`,
+    '[PLAYAGAIN] replay enabled',
+    ''
+  ].slice(-500);
   refreshThreatModel(currentProblemId, false);
-  logs = [...logs, '[PLAYAGAIN] replay enabled'].slice(-500);
   render();
 }
 
@@ -1118,6 +1714,7 @@ function renderStatusPanel(view: State): HTMLElement {
     <div class="meta-row"><span class="k">Leader</span><span class="v turn-meta">${view.leader}</span></div>
     <div class="meta-row"><span class="k">Turn</span><span class="v turn-meta turn-emph">${view.turn}</span></div>
     <div class="meta-row"><span class="k">Seed</span><span class="v seed">${currentSeed}</span></div>
+    <div class="meta-row"><span class="k">Variations</span><span class="v turn-meta">${busyBranchingLabel[busyBranching]}</span></div>
   `;
   panel.appendChild(facts);
 
@@ -1211,7 +1808,7 @@ function render(): void {
     const playAgainBtn = document.createElement('button');
     playAgainBtn.type = 'button';
     playAgainBtn.textContent = 'Play Again';
-    playAgainBtn.onclick = () => startPlayAgain();
+    playAgainBtn.onclick = () => startPlayAgain('manual');
     root.appendChild(playAgainBtn);
   }
   if (runStatus === 'success' && !playAgainAvailable) {
