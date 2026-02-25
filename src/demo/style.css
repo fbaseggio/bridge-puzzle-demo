@@ -17,6 +17,7 @@ body {
   max-width: 1040px;
   margin: 0 auto;
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -33,17 +34,15 @@ body {
 .main-row {
   --play-area-height: calc(var(--hand-box-h) * 2 + var(--trick-box-h) + var(--table-gap-y, 8px) * 2);
   display: grid;
-  grid-template-columns: 285px minmax(0, 1fr) 220px;
+  grid-template-columns: 300px minmax(0, 1fr) 240px;
   gap: 8px;
   align-items: start;
 }
 
 .table-host {
-  display: flex;
+  display: block;
   width: 100%;
-  height: var(--play-area-height);
-  justify-content: center;
-  align-items: start;
+  align-self: start;
 }
 
 .teaching-pane {
@@ -51,9 +50,11 @@ body {
   border-radius: 8px;
   background: #f8fafc;
   padding: 3px 8px 6px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
   gap: 2px;
-  align-content: stretch;
+  align-self: start;
   height: var(--play-area-height);
   max-height: var(--play-area-height);
   overflow: hidden;
@@ -66,7 +67,9 @@ body {
 }
 
 .teaching-events {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
   gap: 0;
   overflow-y: auto;
   min-height: 0;
@@ -106,6 +109,7 @@ body {
 }
 
 .table-canvas {
+  display: block;
   margin: 0 auto;
 }
 
@@ -392,6 +396,7 @@ body {
   display: grid;
   gap: 6px;
   align-content: start;
+  align-self: start;
 }
 
 .status-head {
