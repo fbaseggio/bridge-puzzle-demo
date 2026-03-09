@@ -1,6 +1,6 @@
 import type { EngineEvent, Goal, Hand, Play, Policy, Problem, Rank, Seat, State, Suit } from './types';
-import { computeDiscardTiers, getIdleThreatThresholdRank } from '../ai/defenderDiscard';
-import { initClassification, parseCardId, toCardId, updateClassificationAfterPlay, type CardId, type DefenderLabels } from '../ai/threatModel';
+import { evaluatePolicy } from '../ai/evaluatePolicy';
+import { initClassification, parseCardId, toCardId, updateClassificationAfterPlay, type CardId } from '../ai/threatModel';
 import { classInfoForCard } from './equivalence';
 
 const TURN_ORDER: Seat[] = ['N', 'E', 'S', 'W'];
@@ -382,16 +382,38 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
   }
 
   if (policy.kind === 'randomLegal') {
+    if (!isDefender) {
+      const legal = legalPlays(state);
+      const chosenBucket = 'legal';
+      const bucketCards = legal.map((p) => toCardId(p.suit, p.rank));
+      return {
+        play: chooseUniformLegal(state),
+        preferredDiscard: pref ?? undefined,
+        chosenBucket,
+        bucketCards,
+        decisionSig,
+        replay: replayNote
+      };
+    }
+    const evaluated = evaluatePolicy({
+      policy,
+      seat: state.turn,
+      hands: state.hands,
+      trick: state.trick,
+      threat: state.threat as any,
+      threatLabels: state.threatLabels as any,
+      rng: state.rng
+    });
+    state.rng = { ...evaluated.rngAfter };
+    if (!evaluated.chosenCardId) return { play: null, preferredDiscard: pref ?? undefined, decisionSig, replay: replayNote };
+    const { suit, rank } = parseCardId(evaluated.chosenCardId);
     const legal = legalPlays(state);
-    const chosenBucket = 'legal';
-    const bucketCards = legal.map((p) => toCardId(p.suit, p.rank));
-    const policyClassByCard = isDefender ? buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards) : undefined;
     return {
-      play: chooseUniformLegal(state),
+      play: { seat: state.turn, suit, rank },
       preferredDiscard: pref ?? undefined,
-      chosenBucket,
-      bucketCards,
-      policyClassByCard,
+      chosenBucket: evaluated.chosenBucket ?? 'legal',
+      bucketCards: evaluated.bucketCards ?? legal.map((p) => toCardId(p.suit, p.rank)),
+      policyClassByCard: evaluated.policyClassByCard,
       decisionSig,
       replay: replayNote
     };
@@ -399,114 +421,27 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
 
   if (policy.kind !== 'threatAware') return { play: null, preferredDiscard: pref ?? undefined, decisionSig, replay: replayNote };
   if (state.turn !== 'E' && state.turn !== 'W') return { play: chooseUniformLegal(state), preferredDiscard: pref ?? undefined, decisionSig, replay: replayNote };
-
-  const leadSuit = state.trick[0]?.suit ?? null;
-  if (!leadSuit) {
-    const legal = legalPlays(state);
-    const chosenBucket = 'lead:none';
-    const bucketCards = legal.map((p) => toCardId(p.suit, p.rank));
-    const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
-    return {
-      play: chooseUniformLegal(state),
-      preferredDiscard: pref ?? undefined,
-      chosenBucket,
-      bucketCards,
-      policyClassByCard,
-      decisionSig,
-      replay: replayNote
-    };
-  }
-  if (state.hands[state.turn][leadSuit].length > 0) {
-    const inSuit = legalPlays(state);
-    if (!state.threat || !state.threatLabels) {
-      const chosenBucket = 'follow:baseline';
-      const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank));
-      const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
-      return {
-        play: chooseUniformLegal(state),
-        preferredDiscard: pref ?? undefined,
-        chosenBucket,
-        bucketCards,
-        policyClassByCard,
-        decisionSig,
-        replay: replayNote
-      };
-    }
-    const threshold = getIdleThreatThresholdRank(leadSuit, state.threat, state.threatLabels as DefenderLabels);
-    if (!threshold) {
-      const chosenBucket = 'follow:baseline';
-      const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank));
-      const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
-      return {
-        play: chooseUniformLegal(state),
-        preferredDiscard: pref ?? undefined,
-        chosenBucket,
-        bucketCards,
-        policyClassByCard,
-        decisionSig,
-        replay: replayNote
-      };
-    }
-    const below = inSuit.filter((p) => RANK_STRENGTH[p.rank] < RANK_STRENGTH[threshold]);
-    const above = inSuit.filter((p) => RANK_STRENGTH[p.rank] >= RANK_STRENGTH[threshold]);
-    const bucket = below.length > 0 ? below : above;
-    const idx = pickRandomIndex(bucket.length, state.rng);
-    const selected = bucket[idx] ?? bucket[0] ?? inSuit[0] ?? null;
-    const chosenBucket = below.length > 0 ? 'follow:below' : 'follow:above';
-    const bucketCards = bucket.map((p) => toCardId(p.suit, p.rank));
-    const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket, bucketCards);
-    return {
-      play: selected,
-      preferredDiscard: pref ?? undefined,
-      chosenBucket,
-      bucketCards,
-      policyClassByCard,
-      decisionSig,
-      replay: replayNote
-    };
-  }
-
-  if (!state.threat) {
+  const evaluated = evaluatePolicy({
+    policy,
+    seat: state.turn,
+    hands: state.hands,
+    trick: state.trick,
+    threat: state.threat as any,
+    threatLabels: state.threatLabels as any,
+    rng: state.rng
+  });
+  state.rng = { ...evaluated.rngAfter };
+  if (!evaluated.chosenCardId) {
     return { play: null, preferredDiscard: pref ?? undefined, decisionSig, replay: replayNote };
   }
-
-  const labels: DefenderLabels =
-    state.threatLabels ??
-    {
-      E: { busy: new Set(), idle: new Set() },
-      W: { busy: new Set(), idle: new Set() }
-    };
-  const tiers = computeDiscardTiers(state.turn, { hands: state.hands }, leadSuit, state.threat, labels);
-  const ordered: Array<{ name: string; cards: CardId[] }> = [
-    { name: 'tier1a', cards: tiers.tier1a },
-    { name: 'tier1b', cards: tiers.tier1b },
-    { name: 'tier1c', cards: tiers.tier1c },
-    { name: 'tier2a', cards: tiers.tier2a },
-    { name: 'tier2b', cards: tiers.tier2b },
-    { name: 'tier3a', cards: tiers.tier3a },
-    { name: 'tier3b', cards: tiers.tier3b },
-    { name: 'tier4', cards: tiers.tier4 }
-  ];
-  const chosenBucket = ordered.find((o) => o.cards.length > 0) ?? { name: 'tier4', cards: tiers.tier4 };
-  const idx = pickRandomIndex(chosenBucket.cards.length, state.rng);
-  const chosen = chosenBucket.cards[idx] ?? chosenBucket.cards[0];
-  const { suit, rank } = parseCardId(chosen);
-  const policyClassByCard = buildPolicyClassByCard(state, state.turn, chosenBucket.name, chosenBucket.cards) ?? {};
-  for (const card of [...tiers.tier2a, ...tiers.tier2b, ...tiers.tier3a, ...tiers.tier3b]) {
-    policyClassByCard[card] = `busy:${card[0]}`;
-  }
-  const tierBuckets: Partial<Record<'tier2a' | 'tier2b' | 'tier3a' | 'tier3b', CardId[]>> = {};
-  if (tiers.tier2a.length > 0) tierBuckets.tier2a = [...tiers.tier2a];
-  if (tiers.tier2b.length > 0) tierBuckets.tier2b = [...tiers.tier2b];
-  if (tiers.tier3a.length > 0) tierBuckets.tier3a = [...tiers.tier3a];
-  if (tiers.tier3b.length > 0) tierBuckets.tier3b = [...tiers.tier3b];
+  const { suit, rank } = parseCardId(evaluated.chosenCardId);
   return {
     play: { seat: state.turn, suit, rank },
     preferredDiscard: pref ?? undefined,
-    chosenBucket: chosenBucket.name,
-    bucketCards: [...chosenBucket.cards],
-    policyClassByCard,
-    tierBuckets,
+    chosenBucket: evaluated.chosenBucket,
+    bucketCards: evaluated.bucketCards,
+    policyClassByCard: evaluated.policyClassByCard,
+    tierBuckets: evaluated.tierBuckets,
     decisionSig,
     replay: replayNote
   };
