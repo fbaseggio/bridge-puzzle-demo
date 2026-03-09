@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "test": "vitest run",
-    "policy:cli": "vite-node src/cli/policy_cli.ts"
+    "policy:cli": "vite-node src/cli/policy_cli.ts",
+    "policy:serve": "vite-node src/cli/policy_server.ts",
+    "threat:serve": "vite-node src/cli/threat_state_server.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -233,34 +233,121 @@ def update_threat_state(hands: Dict[str, Dict[str, List[str]]], state: Dict[str,
     return out["state"]
 
 
-def call_policy_cli(
-    seat: str,
-    policy_kind: str,
-    hands: Dict[str, Dict[str, List[str]]],
-    trick: List[Play],
-    rng_state: Dict[str, int],
-    threat_state: Optional[Dict[str, Any]],
-) -> Tuple[str, Dict[str, int], Dict[str, Any]]:
-    payload = {
-        "schemaVersion": 1,
-        "policyVersion": 1,
-        "input": {
-            "policy": {"kind": policy_kind},
-            "seat": seat,
-            "hands": hands,
-            "trick": [{"seat": p.seat, "suit": p.suit, "rank": p.rank} for p in trick],
-            "threat": threat_state["threat"] if threat_state else None,
-            "threatLabels": threat_state["labels"] if threat_state else None,
-            "rng": rng_state,
-        },
-    }
-    out = run_json_cli(["npm", "run", "-s", "policy:cli"], payload)
-    result = out["result"]
-    chosen = result["chosenCardId"]
-    next_rng = result["rngAfter"]
-    if not chosen:
-        raise RuntimeError("policy:cli returned null chosenCardId")
-    return chosen, next_rng, result
+class PersistentPolicyClient:
+    def __init__(self) -> None:
+        self.proc: Optional[subprocess.Popen[str]] = None
+
+    def start(self) -> None:
+        self.proc = subprocess.Popen(
+            ["npm", "run", "-s", "policy:serve"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+    def stop(self) -> None:
+        if not self.proc:
+            return
+        if self.proc.stdin:
+            self.proc.stdin.close()
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+        self.proc = None
+
+    def query(
+        self,
+        seat: str,
+        policy_kind: str,
+        hands: Dict[str, Dict[str, List[str]]],
+        trick: List[Play],
+        rng_state: Dict[str, int],
+        threat_state: Optional[Dict[str, Any]],
+    ) -> Tuple[str, Dict[str, int], Dict[str, Any]]:
+        if not self.proc or not self.proc.stdin or not self.proc.stdout:
+            raise RuntimeError("Policy server is not running")
+        payload = {
+            "schemaVersion": 1,
+            "policyVersion": 1,
+            "input": {
+                "policy": {"kind": policy_kind},
+                "seat": seat,
+                "hands": hands,
+                "trick": [{"seat": p.seat, "suit": p.suit, "rank": p.rank} for p in trick],
+                "threat": threat_state["threat"] if threat_state else None,
+                "threatLabels": threat_state["labels"] if threat_state else None,
+                "rng": rng_state,
+            },
+        }
+        self.proc.stdin.write(json.dumps(payload) + "\n")
+        self.proc.stdin.flush()
+        line = self.proc.stdout.readline()
+        if not line:
+            stderr_text = self.proc.stderr.read() if self.proc.stderr else ""
+            raise RuntimeError(f"policy:serve returned EOF. stderr={stderr_text.strip()}")
+        out = json.loads(line.strip())
+        if not out.get("ok"):
+            raise RuntimeError(f"policy:serve error: {out.get('error', {}).get('message', 'unknown')}")
+        result = out["result"]
+        chosen = result["chosenCardId"]
+        next_rng = result["rngAfter"]
+        if not chosen:
+            raise RuntimeError("policy:serve returned null chosenCardId")
+        return chosen, next_rng, result
+
+
+class PersistentThreatStateClient:
+    def __init__(self) -> None:
+        self.proc: Optional[subprocess.Popen[str]] = None
+
+    def start(self) -> None:
+        self.proc = subprocess.Popen(
+            ["npm", "run", "-s", "threat:serve"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+    def stop(self) -> None:
+        if not self.proc:
+            return
+        if self.proc.stdin:
+            self.proc.stdin.close()
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+        self.proc = None
+
+    def _query(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.proc or not self.proc.stdin or not self.proc.stdout:
+            raise RuntimeError("Threat server is not running")
+        self.proc.stdin.write(json.dumps(payload) + "\n")
+        self.proc.stdin.flush()
+        line = self.proc.stdout.readline()
+        if not line:
+            stderr_text = self.proc.stderr.read() if self.proc.stderr else ""
+            raise RuntimeError(f"threat:serve returned EOF. stderr={stderr_text.strip()}")
+        out = json.loads(line.strip())
+        if not out.get("ok"):
+            raise RuntimeError(f"threat:serve error: {out.get('error', {}).get('message', 'unknown')}")
+        state = out.get("state")
+        if not isinstance(state, dict):
+            raise RuntimeError("threat:serve response missing state")
+        return state
+
+    def init_state(self, hands: Dict[str, Dict[str, List[str]]], threat_card_ids: List[str]) -> Dict[str, Any]:
+        return self._query({"mode": "init", "position": {"hands": hands}, "threatCardIds": threat_card_ids})
+
+    def update_state(self, hands: Dict[str, Dict[str, List[str]]], state: Dict[str, Any], played_card_id: str) -> Dict[str, Any]:
+        return self._query({"mode": "update", "position": {"hands": hands}, "state": state, "playedCardId": played_card_id})
 
 
 def all_hands_empty(hands: Dict[str, Dict[str, List[str]]]) -> bool:
@@ -283,8 +370,6 @@ def run_movie(puzzle: Dict, ns_script: List[str], ns_random_seed: int) -> None:
     prev_policy_obs: Optional[Dict[str, Any]] = None
     threat_state: Optional[Dict[str, Any]] = None
     threat_card_ids = list(puzzle.get("threatCardIds", []))
-    if threat_card_ids:
-        threat_state = init_threat_state(hands, threat_card_ids)
 
     print(f"Movie start: problem={puzzle.get('id', '?')} nsScript={','.join(ns_script) if ns_script else '-'} nsSeed={ns_random_seed}")
     print("Initial deal:")
@@ -292,84 +377,96 @@ def run_movie(puzzle: Dict, ns_script: List[str], ns_random_seed: int) -> None:
     print("")
     trick_details: List[str] = []
 
-    while not all_hands_empty(hands):
-        legal = legal_cards(hands, turn, trick)
-        if not legal:
-            raise RuntimeError(f"No legal cards for seat {turn}")
+    policy_client = PersistentPolicyClient()
+    policy_client.start()
+    threat_client: Optional[PersistentThreatStateClient] = None
+    if threat_card_ids:
+        threat_client = PersistentThreatStateClient()
+        threat_client.start()
+        threat_state = threat_client.init_state(hands, threat_card_ids)
+    try:
+        while not all_hands_empty(hands):
+            legal = legal_cards(hands, turn, trick)
+            if not legal:
+                raise RuntimeError(f"No legal cards for seat {turn}")
 
-        if turn in ("N", "S"):
-            if ns_script_idx < len(ns_script):
-                chosen = ns_script[ns_script_idx]
-                ns_script_idx += 1
+            if turn in ("N", "S"):
+                if ns_script_idx < len(ns_script):
+                    chosen = ns_script[ns_script_idx]
+                    ns_script_idx += 1
+                    if chosen not in legal:
+                        raise RuntimeError(
+                            f"Scripted card {chosen} for {turn} is illegal. Legal: {', '.join(legal)}"
+                        )
+                    detail = f"{SUIT_SYMBOL[chosen[0]]}{chosen[1:]}  [script]"
+                else:
+                    chosen = ns_rng.choice(legal)
+                    detail = f"{SUIT_SYMBOL[chosen[0]]}{chosen[1:]}  [random-ns seed={ns_random_seed}]"
+            else:
+                policy = puzzle["policies"][turn]["kind"]
+                chosen, policy_rng, policy_result = policy_client.query(turn, policy, hands, trick, policy_rng, threat_state)
                 if chosen not in legal:
                     raise RuntimeError(
-                        f"Scripted card {chosen} for {turn} is illegal. Legal: {', '.join(legal)}"
+                        f"Policy chose illegal card {chosen} for {turn}. Legal: {', '.join(legal)}"
                     )
-                detail = f"{SUIT_SYMBOL[chosen[0]]}{chosen[1:]}  [script]"
-            else:
-                chosen = ns_rng.choice(legal)
-                detail = f"{SUIT_SYMBOL[chosen[0]]}{chosen[1:]}  [random-ns seed={ns_random_seed}]"
-        else:
-            policy = puzzle["policies"][turn]["kind"]
-            chosen, policy_rng, policy_result = call_policy_cli(turn, policy, hands, trick, policy_rng, threat_state)
-            if chosen not in legal:
-                raise RuntimeError(
-                    f"Policy chose illegal card {chosen} for {turn}. Legal: {', '.join(legal)}"
+                chosen_bucket = policy_result.get("chosenBucket", "?")
+                chosen_class = policy_result.get("policyClassByCard", {}).get(chosen, "?")
+                rng_before = policy_result.get("rngBefore", {})
+                rng_after = policy_result.get("rngAfter", {})
+                if isinstance(policy_result.get("discardTiers"), dict):
+                    legal_count = len(policy_result["discardTiers"].get("legal", []))
+                else:
+                    legal_count = len(policy_result.get("bucketCards", []))
+                notes: List[str] = []
+                if prev_policy_obs is not None:
+                    if prev_policy_obs.get("bucket") != chosen_bucket:
+                        notes.append(f"Δbucket {prev_policy_obs.get('bucket')}->{chosen_bucket}")
+                    if prev_policy_obs.get("class") != chosen_class:
+                        notes.append(f"Δclass {prev_policy_obs.get('class')}->{chosen_class}")
+                    if prev_policy_obs.get("legal") != legal_count:
+                        notes.append(f"Δlegal {prev_policy_obs.get('legal')}->{legal_count}")
+                if isinstance(rng_before.get("counter"), int) and isinstance(rng_after.get("counter"), int):
+                    notes.append(f"rngΔ={rng_after['counter'] - rng_before['counter']}")
+                note_text = f" {'; '.join(notes)}" if notes else ""
+                detail = (
+                    f"{SUIT_SYMBOL[chosen[0]]}{chosen[1:]}  "
+                    f"[policy bucket={chosen_bucket} class={chosen_class} "
+                    f"rng={rng_before.get('seed')}:{rng_before.get('counter')}->{rng_after.get('counter')} legal={legal_count}]"
+                    f"{note_text}"
                 )
-            chosen_bucket = policy_result.get("chosenBucket", "?")
-            chosen_class = policy_result.get("policyClassByCard", {}).get(chosen, "?")
-            rng_before = policy_result.get("rngBefore", {})
-            rng_after = policy_result.get("rngAfter", {})
-            if isinstance(policy_result.get("discardTiers"), dict):
-                legal_count = len(policy_result["discardTiers"].get("legal", []))
-            else:
-                legal_count = len(policy_result.get("bucketCards", []))
-            notes: List[str] = []
-            if prev_policy_obs is not None:
-                if prev_policy_obs.get("bucket") != chosen_bucket:
-                    notes.append(f"Δbucket {prev_policy_obs.get('bucket')}->{chosen_bucket}")
-                if prev_policy_obs.get("class") != chosen_class:
-                    notes.append(f"Δclass {prev_policy_obs.get('class')}->{chosen_class}")
-                if prev_policy_obs.get("legal") != legal_count:
-                    notes.append(f"Δlegal {prev_policy_obs.get('legal')}->{legal_count}")
-            if isinstance(rng_before.get("counter"), int) and isinstance(rng_after.get("counter"), int):
-                notes.append(f"rngΔ={rng_after['counter'] - rng_before['counter']}")
-            note_text = f" {'; '.join(notes)}" if notes else ""
-            detail = (
-                f"{SUIT_SYMBOL[chosen[0]]}{chosen[1:]}  "
-                f"[policy bucket={chosen_bucket} class={chosen_class} "
-                f"rng={rng_before.get('seed')}:{rng_before.get('counter')}->{rng_after.get('counter')} legal={legal_count}]"
-                f"{note_text}"
-            )
-            prev_policy_obs = {"bucket": chosen_bucket, "class": chosen_class, "legal": legal_count}
+                prev_policy_obs = {"bucket": chosen_bucket, "class": chosen_class, "legal": legal_count}
 
-        suit, rank = parse_card(chosen)
-        remove_card(hands, turn, chosen)
-        trick.append(Play(turn, suit, rank))
-        trick_details.append(detail)
-        if threat_state is not None:
-            threat_state = update_threat_state(hands, threat_state, chosen)
+            suit, rank = parse_card(chosen)
+            remove_card(hands, turn, chosen)
+            trick.append(Play(turn, suit, rank))
+            trick_details.append(detail)
+            if threat_state is not None and threat_client is not None:
+                threat_state = threat_client.update_state(hands, threat_state, chosen)
 
-        if len(trick) < 4:
-            turn = next_seat(turn)
-            continue
+            if len(trick) < 4:
+                turn = next_seat(turn)
+                continue
 
-        trick_no += 1
-        leader_seat = trick[0].seat
-        winner = resolve_trick_winner(trick, puzzle["contract"]["strain"])
-        tricks_won[side_of(winner)] += 1
-        trick_text = " ".join(f"{p.seat}:{p.card_id}" for p in trick)
-        print(f"Trick {trick_no}: {trick_text}")
-        print(f"Winner: {winner}")
-        print_newspaper_with_trick(hands, trick, leader_seat)
-        print("Play details:")
-        for line in trick_details:
-            print(f"  {line}")
-        print("")
-        leader = winner
-        turn = leader
-        trick = []
-        trick_details = []
+            trick_no += 1
+            leader_seat = trick[0].seat
+            winner = resolve_trick_winner(trick, puzzle["contract"]["strain"])
+            tricks_won[side_of(winner)] += 1
+            trick_text = " ".join(f"{p.seat}:{p.card_id}" for p in trick)
+            print(f"Trick {trick_no}: {trick_text}")
+            print(f"Winner: {winner}")
+            print_newspaper_with_trick(hands, trick, leader_seat)
+            print("Play details:")
+            for line in trick_details:
+                print(f"  {line}")
+            print("")
+            leader = winner
+            turn = leader
+            trick = []
+            trick_details = []
+    finally:
+        policy_client.stop()
+        if threat_client is not None:
+            threat_client.stop()
 
     print(f"Final tricks: NS {tricks_won['NS']} - EW {tricks_won['EW']}")
 
