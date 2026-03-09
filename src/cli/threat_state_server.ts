@@ -1,6 +1,7 @@
 /// <reference types="node" />
 
 import { initClassification, updateClassificationAfterPlay, type CardId, type ClassificationState, type Position } from '../ai/threatModel';
+import { buildFeatureStateFromClassification, diffFeatureStates } from '../ai/features';
 import type { Hand, Rank, Seat, Suit } from '../core';
 
 type JsonLabels = {
@@ -68,13 +69,18 @@ function normalizePosition(position: Position): Position {
   return { hands: out };
 }
 
-function handleRequest(req: Request): { ok: true; state: JsonState } {
+function handleRequest(req: Request): { ok: true; state: JsonState; features: ReturnType<typeof buildFeatureStateFromClassification>; featureDiff?: ReturnType<typeof diffFeatureStates> } {
   if (req.mode === 'init') {
     const state = initClassification(normalizePosition(req.position), req.threatCardIds);
-    return { ok: true, state: toJsonState(state) };
+    const features = buildFeatureStateFromClassification(state);
+    return { ok: true, state: toJsonState(state), features };
   }
-  const next = updateClassificationAfterPlay(fromJsonState(req.state), normalizePosition(req.position), req.playedCardId);
-  return { ok: true, state: toJsonState(next) };
+  const prev = fromJsonState(req.state);
+  const next = updateClassificationAfterPlay(prev, normalizePosition(req.position), req.playedCardId);
+  const beforeFeatures = buildFeatureStateFromClassification(prev);
+  const features = buildFeatureStateFromClassification(next);
+  const featureDiff = diffFeatureStates(beforeFeatures, features);
+  return { ok: true, state: toJsonState(next), features, featureDiff };
 }
 
 async function main(): Promise<void> {

@@ -26,7 +26,7 @@ import {
   type ThreatContext,
 } from '../ai/threatModel';
 import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock, formatInitBlock } from '../ai/threatModelVerbose';
-import { getCardRankColor } from '../ui/annotations';
+import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/features';
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
 import { demoProblems } from './problems';
 
@@ -278,9 +278,13 @@ function formatHandInitSummary(s: State, seat: Seat): string {
   return `${seat}: ${suitParts.join('/')}`;
 }
 
-function rankColorClass(cardId: CardId): string {
-  if (!threatCtx || !threatLabels) return 'rank--black';
-  const color = getCardRankColor(cardId, threatCtx, threatLabels, teachingMode);
+function rankColorClass(cardId: CardId, featureSource: Pick<State, 'cardRoles' | 'threat' | 'threatLabels'> = state): string {
+  const features = buildFeatureStateFromRuntime({
+    threat: (featureSource.threat as ThreatContext | null) ?? null,
+    threatLabels: featureSource.threatLabels,
+    cardRoles: featureSource.cardRoles
+  });
+  const color = getRankColorForFeatureRole(features.cardRoleById[cardId] ?? 'default', teachingMode);
   return color === 'purple'
     ? 'rank--purple'
     : color === 'green'
@@ -918,12 +922,19 @@ function cardStatusSnapshot(
   ctx: ThreatContext | null,
   labels: DefenderLabels | null
 ): Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black'; role: string; seat: Seat }> {
+  void ctx;
+  void labels;
   const snap = new Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black'; role: string; seat: Seat }>();
+  const features = buildFeatureStateFromRuntime({
+    threat: (s.threat as ThreatContext | null) ?? null,
+    threatLabels: s.threatLabels,
+    cardRoles: s.cardRoles
+  });
   for (const seat of seatOrder) {
     for (const suit of suitOrder) {
       for (const rank of s.hands[seat][suit]) {
         const cardId = toCardId(suit, rank) as CardId;
-        const color = ctx && labels ? getCardRankColor(cardId, ctx, labels, teachingMode) : 'black';
+        const color = getRankColorForFeatureRole(features.cardRoleById[cardId] ?? 'default', teachingMode);
         const role = s.cardRoles[cardId] ?? 'default';
         snap.set(cardId, { color, role, seat });
       }
@@ -1960,7 +1971,7 @@ function renderSuitRow(view: State, seat: Seat, suit: Suit, legalSet: Set<string
         if ((pulseUntilByCardKey.get(cardPulseKey(seat, toCardId(suit, rank) as CardId)) ?? 0) > Date.now()) {
           rankBtn.classList.add('card-pulse');
         }
-        appendRankContent(rankBtn, rank, rankColorClass(toCardId(suit, rank) as CardId), isEquivalent);
+        appendRankContent(rankBtn, rank, rankColorClass(toCardId(suit, rank) as CardId, view), isEquivalent);
         rankBtn.onclick = () => runTurn({ seat, suit, rank });
         cards.appendChild(rankBtn);
       } else {
@@ -1969,7 +1980,7 @@ function renderSuitRow(view: State, seat: Seat, suit: Suit, legalSet: Set<string
         if ((pulseUntilByCardKey.get(cardPulseKey(seat, toCardId(suit, rank) as CardId)) ?? 0) > Date.now()) {
           rankEl.classList.add('card-pulse');
         }
-        appendRankContent(rankEl, rank, rankColorClass(toCardId(suit, rank) as CardId), isEquivalent);
+        appendRankContent(rankEl, rank, rankColorClass(toCardId(suit, rank) as CardId, view), isEquivalent);
         cards.appendChild(rankEl);
       }
     }
@@ -2035,7 +2046,7 @@ function renderTrickTable(view: State): HTMLElement {
       suitEl.textContent = suitSymbol[play.suit];
       const rankEl = document.createElement('span');
       rankEl.className = 'played-rank';
-      appendRankContent(rankEl, play.rank, rankColorClass(toCardId(play.suit, play.rank) as CardId));
+      appendRankContent(rankEl, play.rank, rankColorClass(toCardId(play.suit, play.rank) as CardId, view));
       text.append(suitEl, rankEl);
       slot.appendChild(text);
     }

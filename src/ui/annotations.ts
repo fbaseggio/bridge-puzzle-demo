@@ -1,4 +1,5 @@
 import type { CardId, DefenderLabels, ThreatContext } from '../ai/threatModel';
+import { getRankColorForFeatureRole, type FeatureCardRole, type FeatureState } from '../ai/features';
 
 export type RankColor = 'purple' | 'green' | 'blue' | 'black';
 
@@ -29,9 +30,18 @@ export function getCardRankColor(
   labels: DefenderLabels,
   teachingMode: boolean
 ): RankColor {
-  if (!teachingMode) return 'black';
-  if (isPromotedWinner(cardId, ctx, labels)) return 'purple';
-  if (isDesignatedThreat(cardId, ctx)) return 'green';
-  if (isBusy(cardId, labels)) return 'blue';
-  return 'black';
+  let role: FeatureCardRole = 'default';
+  if (isPromotedWinner(cardId, ctx, labels)) role = 'promotedWinner';
+  else if (isDesignatedThreat(cardId, ctx)) role = 'threat';
+  else if (isBusy(cardId, labels)) role = 'busy';
+  return getRankColorForFeatureRole(role, teachingMode);
+}
+
+export function getCardRankColorFromFeatures(
+  cardId: CardId,
+  features: Pick<FeatureState, 'cardRoleById'> | null,
+  teachingMode: boolean
+): RankColor {
+  const role = features?.cardRoleById[cardId] ?? 'default';
+  return getRankColorForFeatureRole(role, teachingMode);
 }

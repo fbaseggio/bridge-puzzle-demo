@@ -1,6 +1,7 @@
 /// <reference types="node" />
 
 import { initClassification, updateClassificationAfterPlay, type CardId, type ClassificationState, type Position } from '../ai/threatModel';
+import { buildFeatureStateFromClassification, diffFeatureStates } from '../ai/features';
 import type { Hand, Rank, Seat, Suit } from '../core';
 
 type JsonLabels = {
@@ -82,15 +83,20 @@ async function main(): Promise<void> {
     const req = JSON.parse(await readStdin()) as Request;
     if (req.mode === 'init') {
       const state = initClassification(normalizePosition(req.position), req.threatCardIds);
-      process.stdout.write(`${JSON.stringify({ ok: true, state: toJsonState(state) })}\n`);
+      const features = buildFeatureStateFromClassification(state);
+      process.stdout.write(`${JSON.stringify({ ok: true, state: toJsonState(state), features })}\n`);
       return;
     }
+    const prev = fromJsonState(req.state);
     const next = updateClassificationAfterPlay(
-      fromJsonState(req.state),
+      prev,
       normalizePosition(req.position),
       req.playedCardId
     );
-    process.stdout.write(`${JSON.stringify({ ok: true, state: toJsonState(next) })}\n`);
+    const beforeFeatures = buildFeatureStateFromClassification(prev);
+    const features = buildFeatureStateFromClassification(next);
+    const featureDiff = diffFeatureStates(beforeFeatures, features);
+    process.stdout.write(`${JSON.stringify({ ok: true, state: toJsonState(next), features, featureDiff })}\n`);
   } catch (error) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { message: error instanceof Error ? error.message : String(error) } })}\n`

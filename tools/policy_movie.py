@@ -303,6 +303,8 @@ class PersistentPolicyClient:
 class PersistentThreatStateClient:
     def __init__(self) -> None:
         self.proc: Optional[subprocess.Popen[str]] = None
+        self.last_features: Optional[Dict[str, Any]] = None
+        self.last_feature_diff: Optional[Dict[str, Any]] = None
 
     def start(self) -> None:
         self.proc = subprocess.Popen(
@@ -338,6 +340,8 @@ class PersistentThreatStateClient:
         out = json.loads(line.strip())
         if not out.get("ok"):
             raise RuntimeError(f"threat:serve error: {out.get('error', {}).get('message', 'unknown')}")
+        self.last_features = out.get("features")
+        self.last_feature_diff = out.get("featureDiff")
         state = out.get("state")
         if not isinstance(state, dict):
             raise RuntimeError("threat:serve response missing state")
