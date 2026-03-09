@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "policy:cli": "vite-node src/cli/policy_cli.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

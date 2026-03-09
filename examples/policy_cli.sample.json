@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "policyVersion": 1,
+  "input": {
+    "policy": { "kind": "threatAware" },
+    "seat": "W",
+    "hands": {
+      "N": { "S": ["A"], "H": ["8", "5"], "D": [], "C": ["A"] },
+      "E": { "S": ["7"], "H": ["7"], "D": ["A"], "C": ["K"] },
+      "S": { "S": ["8", "5"], "H": ["A"], "D": [], "C": ["2"] },
+      "W": { "S": ["K", "J"], "H": ["K", "J"], "D": [], "C": [] }
+    },
+    "trick": [{ "seat": "S", "suit": "C", "rank": "2" }],
+    "threat": {
+      "threatCardIds": ["H8", "S8"],
+      "threatsBySuit": {
+        "S": {
+          "suit": "S",
+          "threatCardId": "S8",
+          "threatRank": "8",
+          "establishedOwner": "S",
+          "active": true,
+          "threatLength": 1,
+          "stopStatus": "single"
+        },
+        "H": {
+          "suit": "H",
+          "threatCardId": "H8",
+          "threatRank": "8",
+          "establishedOwner": "N",
+          "active": true,
+          "threatLength": 2,
+          "stopStatus": "single"
+        }
+      }
+    },
+    "threatLabels": {
+      "E": { "busy": [], "idle": ["S7", "H7", "DA", "CK"] },
+      "W": { "busy": ["SK", "HK"], "idle": ["SJ", "HJ"] }
+    },
+    "rng": { "seed": 409, "counter": 0 }
+  }
+}
