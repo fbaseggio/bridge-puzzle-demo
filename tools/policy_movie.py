@@ -37,6 +37,11 @@ def parse_card(card_id: str) -> Tuple[str, str]:
     return card_id[0], card_id[1:]
 
 
+def pretty_card(card_id: str) -> str:
+    suit, rank = parse_card(card_id)
+    return f"{SUIT_SYMBOL[suit]}{rank}"
+
+
 def legal_cards(hands: Dict[str, Dict[str, List[str]]], seat: str, trick: List[Play]) -> List[str]:
     hand = hands[seat]
     if trick:
@@ -354,6 +359,71 @@ class PersistentThreatStateClient:
         return self._query({"mode": "update", "position": {"hands": hands}, "state": state, "playedCardId": played_card_id})
 
 
+def format_feature_updates(feature_diff: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not feature_diff:
+        return None
+
+    reasoning_roles = {"busy", "threat", "promotedWinner", "idle"}
+    impactful_removed_roles = {"busy", "threat", "promotedWinner"}
+    updates: List[str] = []
+
+    role_changes = feature_diff.get("roleChanges")
+    if isinstance(role_changes, list):
+        for change in role_changes:
+            if not isinstance(change, dict):
+                continue
+            card_id = change.get("cardId")
+            from_role = change.get("from")
+            to_role = change.get("to")
+            if not isinstance(card_id, str):
+                continue
+            if from_role == to_role:
+                continue
+
+            # Suppress trivial removal noise: only report removals when card previously mattered.
+            if to_role is None:
+                if from_role in impactful_removed_roles:
+                    updates.append(f"{pretty_card(card_id)} {from_role} -> -")
+                continue
+
+            if (from_role in reasoning_roles) or (to_role in reasoning_roles):
+                updates.append(f"{pretty_card(card_id)} {from_role or '-'} -> {to_role or '-'}")
+
+    suit_changes = feature_diff.get("suitChanges")
+    if isinstance(suit_changes, list):
+        for change in suit_changes:
+            if not isinstance(change, dict):
+                continue
+            suit = change.get("suit")
+            before = change.get("before")
+            after = change.get("after")
+            if not isinstance(suit, str):
+                continue
+            if not isinstance(before, dict) and not isinstance(after, dict):
+                continue
+            parts: List[str] = []
+            if isinstance(before, dict) and isinstance(after, dict):
+                b_active, a_active = before.get("active"), after.get("active")
+                b_len, a_len = before.get("threatLength"), after.get("threatLength")
+                b_stop, a_stop = before.get("stopStatus"), after.get("stopStatus")
+                if b_active != a_active:
+                    parts.append(f"active {b_active}->{a_active}")
+                if b_len != a_len:
+                    parts.append(f"len {b_len}->{a_len}")
+                if b_stop != a_stop:
+                    parts.append(f"stop {b_stop}->{a_stop}")
+            elif isinstance(before, dict):
+                parts.append("removed")
+            elif isinstance(after, dict):
+                parts.append("added")
+            if parts:
+                updates.append(f"{SUIT_SYMBOL.get(suit, suit)} threat " + " ".join(parts))
+
+    if not updates:
+        return None
+    return "; ".join(updates)
+
+
 def all_hands_empty(hands: Dict[str, Dict[str, List[str]]]) -> bool:
     return all(len(hands[seat][suit]) == 0 for seat in SEAT_ORDER for suit in SUIT_ORDER)
 
@@ -371,7 +441,6 @@ def run_movie(puzzle: Dict, ns_script: List[str], ns_random_seed: int) -> None:
     trick_no = 0
     ns_rng = random.Random(ns_random_seed)
     policy_rng = {"seed": int(puzzle["rngSeed"]), "counter": 0}
-    prev_policy_obs: Optional[Dict[str, Any]] = None
     threat_state: Optional[Dict[str, Any]] = None
     threat_card_ids = list(puzzle.get("threatCardIds", []))
 
@@ -379,7 +448,7 @@ def run_movie(puzzle: Dict, ns_script: List[str], ns_random_seed: int) -> None:
     print("Initial deal:")
     print_newspaper(hands)
     print("")
-    trick_details: List[str] = []
+    trick_details: List[Tuple[str, str]] = []
 
     policy_client = PersistentPolicyClient()
     policy_client.start()
@@ -414,38 +483,23 @@ def run_movie(puzzle: Dict, ns_script: List[str], ns_random_seed: int) -> None:
                         f"Policy chose illegal card {chosen} for {turn}. Legal: {', '.join(legal)}"
                     )
                 chosen_bucket = policy_result.get("chosenBucket", "?")
-                chosen_class = policy_result.get("policyClassByCard", {}).get(chosen, "?")
                 rng_before = policy_result.get("rngBefore", {})
                 rng_after = policy_result.get("rngAfter", {})
-                if isinstance(policy_result.get("discardTiers"), dict):
-                    legal_count = len(policy_result["discardTiers"].get("legal", []))
-                else:
-                    legal_count = len(policy_result.get("bucketCards", []))
-                notes: List[str] = []
-                if prev_policy_obs is not None:
-                    if prev_policy_obs.get("bucket") != chosen_bucket:
-                        notes.append(f"Δbucket {prev_policy_obs.get('bucket')}->{chosen_bucket}")
-                    if prev_policy_obs.get("class") != chosen_class:
-                        notes.append(f"Δclass {prev_policy_obs.get('class')}->{chosen_class}")
-                    if prev_policy_obs.get("legal") != legal_count:
-                        notes.append(f"Δlegal {prev_policy_obs.get('legal')}->{legal_count}")
-                if isinstance(rng_before.get("counter"), int) and isinstance(rng_after.get("counter"), int):
-                    notes.append(f"rngΔ={rng_after['counter'] - rng_before['counter']}")
-                note_text = f" {'; '.join(notes)}" if notes else ""
+                chosen_class = policy_result.get("policyClassByCard", {}).get(chosen, "?")
                 detail = (
                     f"{SUIT_SYMBOL[chosen[0]]}{chosen[1:]}  "
                     f"[policy bucket={chosen_bucket} class={chosen_class} "
-                    f"rng={rng_before.get('seed')}:{rng_before.get('counter')}->{rng_after.get('counter')} legal={legal_count}]"
-                    f"{note_text}"
+                    f"rng={rng_before.get('seed')}:{rng_before.get('counter')}->{rng_after.get('counter')}]"
                 )
-                prev_policy_obs = {"bucket": chosen_bucket, "class": chosen_class, "legal": legal_count}
 
             suit, rank = parse_card(chosen)
             remove_card(hands, turn, chosen)
             trick.append(Play(turn, suit, rank))
-            trick_details.append(detail)
+            feature_line: Optional[str] = None
             if threat_state is not None and threat_client is not None:
                 threat_state = threat_client.update_state(hands, threat_state, chosen)
+                feature_line = format_feature_updates(threat_client.last_feature_diff)
+            trick_details.append((detail, feature_line))
 
             if len(trick) < 4:
                 turn = next_seat(turn)
@@ -460,8 +514,10 @@ def run_movie(puzzle: Dict, ns_script: List[str], ns_random_seed: int) -> None:
             print(f"Winner: {winner}")
             print_newspaper_with_trick(hands, trick, leader_seat)
             print("Play details:")
-            for line in trick_details:
+            for line, feature_line in trick_details:
                 print(f"  {line}")
+                if feature_line:
+                    print(f"    features: {feature_line}")
             print("")
             leader = winner
             turn = leader
