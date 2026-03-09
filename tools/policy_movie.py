@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import copy
 import json
 import random
 import subprocess
@@ -24,6 +25,18 @@ class Play:
         return f"{self.suit}{self.rank}"
 
 
+@dataclass
+class EnumState:
+    hands: Dict[str, Dict[str, List[str]]]
+    trick: List[Play]
+    leader: str
+    turn: str
+    tricks_won: Dict[str, int]
+    policy_rng: Dict[str, int]
+    threat_state: Optional[Dict[str, Any]]
+    line: List[Tuple[str, str]]
+
+
 def next_seat(seat: str) -> str:
     i = SEAT_ORDER.index(seat)
     return SEAT_ORDER[(i + 1) % 4]
@@ -40,6 +53,17 @@ def parse_card(card_id: str) -> Tuple[str, str]:
 def pretty_card(card_id: str) -> str:
     suit, rank = parse_card(card_id)
     return f"{SUIT_SYMBOL[suit]}{rank}"
+
+
+def card_sort_key(card_id: str) -> Tuple[int, int]:
+    suit, rank = parse_card(card_id)
+    suit_idx = SUIT_ORDER.index(suit) if suit in SUIT_ORDER else 99
+    rank_val = RANK_STRENGTH.get(rank, 0)
+    return suit_idx, -rank_val
+
+
+def sorted_cards(cards: List[str]) -> List[str]:
+    return sorted(cards, key=card_sort_key)
 
 
 def legal_cards(hands: Dict[str, Dict[str, List[str]]], seat: str, trick: List[Play]) -> List[str]:
@@ -428,7 +452,132 @@ def all_hands_empty(hands: Dict[str, Dict[str, List[str]]]) -> bool:
     return all(len(hands[seat][suit]) == 0 for seat in SEAT_ORDER for suit in SUIT_ORDER)
 
 
-def run_movie(puzzle: Dict, ns_script: List[str], ns_random_seed: int) -> None:
+def policy_candidates(policy_result: Dict[str, Any], chosen_card: str) -> List[str]:
+    raw = policy_result.get("bucketCards")
+    if isinstance(raw, list):
+        cards = [c for c in raw if isinstance(c, str)]
+    else:
+        cards = [chosen_card]
+    if chosen_card not in cards:
+        cards.append(chosen_card)
+    dedup: List[str] = []
+    seen = set()
+    for c in cards:
+        if c in seen:
+            continue
+        seen.add(c)
+        dedup.append(c)
+    return sorted_cards(dedup)
+
+
+def format_compact_line(line: List[Tuple[str, str]]) -> str:
+    chunks: List[str] = []
+    for i in range(0, len(line), 4):
+        trick_chunk = line[i : i + 4]
+        chunks.append(" ".join(f"{seat}:{card}" for seat, card in trick_chunk))
+    return " / ".join(chunks)
+
+
+def enumerate_runs(
+    puzzle: Dict[str, Any],
+    policy_client: PersistentPolicyClient,
+    threat_client: Optional[PersistentThreatStateClient],
+    show_run: Optional[int],
+) -> Tuple[int, Optional[List[Tuple[str, str]]]]:
+    hands = {seat: {suit: list(ranks) for suit, ranks in puzzle["hands"][seat].items()} for seat in SEAT_ORDER}
+    threat_state: Optional[Dict[str, Any]] = None
+    threat_card_ids = list(puzzle.get("threatCardIds", []))
+    if threat_client is not None and threat_card_ids:
+        threat_state = threat_client.init_state(hands, threat_card_ids)
+
+    run_no = 0
+    selected_line: Optional[List[Tuple[str, str]]] = None
+    stack: List[EnumState] = [
+        EnumState(
+            hands=hands,
+            trick=[],
+            leader=puzzle["leader"],
+            turn=puzzle["leader"],
+            tricks_won={"NS": 0, "EW": 0},
+            policy_rng={"seed": int(puzzle["rngSeed"]), "counter": 0},
+            threat_state=threat_state,
+            line=[],
+        )
+    ]
+
+    while stack:
+        node = stack.pop()
+        if all_hands_empty(node.hands):
+            run_no += 1
+            line_text = format_compact_line(node.line)
+            print(f"Run {run_no}  NS {node.tricks_won['NS']}-{node.tricks_won['EW']} EW  line: {line_text}")
+            if show_run is not None and run_no == show_run:
+                selected_line = list(node.line)
+            continue
+
+        legal = legal_cards(node.hands, node.turn, node.trick)
+        if not legal:
+            raise RuntimeError(f"No legal cards for seat {node.turn}")
+
+        choices_with_rng: List[Tuple[str, Dict[str, Any], Optional[Dict[str, Any]]]] = []
+        # tuple: (cardId, nextPolicyRng, policyResult)
+        if node.turn in ("N", "S"):
+            for c in sorted_cards(legal):
+                choices_with_rng.append((c, node.policy_rng, None))
+        else:
+            policy = puzzle["policies"][node.turn]["kind"]
+            chosen, next_rng, policy_result = policy_client.query(
+                node.turn, policy, node.hands, node.trick, node.policy_rng, node.threat_state
+            )
+            candidates = [c for c in policy_candidates(policy_result, chosen) if c in legal]
+            for c in candidates:
+                choices_with_rng.append((c, next_rng, policy_result))
+
+        # DFS: push in reverse so smallest deterministic choice is visited first.
+        for chosen, next_rng, _policy_result in reversed(choices_with_rng):
+            next_hands = copy.deepcopy(node.hands)
+            remove_card(next_hands, node.turn, chosen)
+            suit, rank = parse_card(chosen)
+            next_trick = node.trick + [Play(node.turn, suit, rank)]
+            next_line = node.line + [(node.turn, chosen)]
+            next_turn = node.turn
+            next_leader = node.leader
+            next_tricks_won = {"NS": node.tricks_won["NS"], "EW": node.tricks_won["EW"]}
+            next_threat_state = node.threat_state
+            if next_threat_state is not None and threat_client is not None:
+                next_threat_state = threat_client.update_state(next_hands, next_threat_state, chosen)
+
+            if len(next_trick) == 4:
+                winner = resolve_trick_winner(next_trick, puzzle["contract"]["strain"])
+                next_tricks_won[side_of(winner)] += 1
+                next_leader = winner
+                next_turn = winner
+                next_trick = []
+            else:
+                next_turn = next_seat(node.turn)
+
+            stack.append(
+                EnumState(
+                    hands=next_hands,
+                    trick=next_trick,
+                    leader=next_leader,
+                    turn=next_turn,
+                    tricks_won=next_tricks_won,
+                    policy_rng={"seed": int(next_rng["seed"]), "counter": int(next_rng["counter"])},
+                    threat_state=copy.deepcopy(next_threat_state) if next_threat_state is not None else None,
+                    line=next_line,
+                )
+            )
+
+    return run_no, selected_line
+
+
+def run_movie(
+    puzzle: Dict,
+    ns_script: List[str],
+    ns_random_seed: int,
+    forced_line: Optional[List[Tuple[str, str]]] = None,
+) -> None:
     hands = {
         seat: {suit: list(ranks) for suit, ranks in puzzle["hands"][seat].items()}
         for seat in SEAT_ORDER
@@ -449,6 +598,7 @@ def run_movie(puzzle: Dict, ns_script: List[str], ns_random_seed: int) -> None:
     print_newspaper(hands)
     print("")
     trick_details: List[Tuple[str, str]] = []
+    forced_idx = 0
 
     policy_client = PersistentPolicyClient()
     policy_client.start()
@@ -463,7 +613,39 @@ def run_movie(puzzle: Dict, ns_script: List[str], ns_random_seed: int) -> None:
             if not legal:
                 raise RuntimeError(f"No legal cards for seat {turn}")
 
-            if turn in ("N", "S"):
+            if forced_line is not None:
+                if forced_idx >= len(forced_line):
+                    raise RuntimeError("Forced replay line ended before hand completion")
+                expected_seat, forced_card = forced_line[forced_idx]
+                forced_idx += 1
+                if expected_seat != turn:
+                    raise RuntimeError(f"Forced replay seat mismatch at ply {forced_idx}: expected {expected_seat}, got {turn}")
+                chosen = forced_card
+                if chosen not in legal:
+                    raise RuntimeError(
+                        f"Forced replay card {chosen} for {turn} is illegal. Legal: {', '.join(legal)}"
+                    )
+                if turn in ("N", "S"):
+                    detail = f"{SUIT_SYMBOL[chosen[0]]}{chosen[1:]}  [replay]"
+                else:
+                    policy = puzzle["policies"][turn]["kind"]
+                    _picked, policy_rng, policy_result = policy_client.query(turn, policy, hands, trick, policy_rng, threat_state)
+                    candidates = policy_candidates(policy_result, _picked)
+                    if chosen not in candidates:
+                        raise RuntimeError(
+                            f"Forced replay card {chosen} for {turn} is not policy-consistent. "
+                            f"Candidates: {', '.join(candidates)}"
+                        )
+                    chosen_bucket = policy_result.get("chosenBucket", "?")
+                    rng_before = policy_result.get("rngBefore", {})
+                    rng_after = policy_result.get("rngAfter", {})
+                    chosen_class = policy_result.get("policyClassByCard", {}).get(chosen, "?")
+                    detail = (
+                        f"{SUIT_SYMBOL[chosen[0]]}{chosen[1:]}  "
+                        f"[policy bucket={chosen_bucket} class={chosen_class} "
+                        f"rng={rng_before.get('seed')}:{rng_before.get('counter')}->{rng_after.get('counter')}]"
+                    )
+            elif turn in ("N", "S"):
                 if ns_script_idx < len(ns_script):
                     chosen = ns_script[ns_script_idx]
                     ns_script_idx += 1
@@ -528,6 +710,9 @@ def run_movie(puzzle: Dict, ns_script: List[str], ns_random_seed: int) -> None:
         if threat_client is not None:
             threat_client.stop()
 
+    if forced_line is not None and forced_idx != len(forced_line):
+        raise RuntimeError("Forced replay line has remaining unused plies")
+
     print(f"Final tricks: NS {tricks_won['NS']} - EW {tricks_won['EW']}")
 
 
@@ -540,10 +725,37 @@ def main() -> None:
         help="Comma-separated NS card ids in play order for NS turns, e.g. ST,SK,HT",
     )
     parser.add_argument("--ns-seed", type=int, default=1, help="Seed for random NS fallback moves")
+    parser.add_argument("--enumerate", action="store_true", help="Enumerate all deterministic runs (DFS)")
+    parser.add_argument("--show-run", type=int, default=None, help="When used with --enumerate, replay this run number")
     args = parser.parse_args()
 
     ns_script = [c.strip().upper() for c in args.ns_script.split(",") if c.strip()]
     puzzle = load_problem(args.problem_id)
+    if args.show_run is not None and args.show_run <= 0:
+        raise RuntimeError("--show-run must be >= 1")
+
+    if args.enumerate:
+        policy_client = PersistentPolicyClient()
+        threat_client: Optional[PersistentThreatStateClient] = None
+        policy_client.start()
+        if puzzle.get("threatCardIds"):
+            threat_client = PersistentThreatStateClient()
+            threat_client.start()
+        try:
+            total, selected = enumerate_runs(puzzle, policy_client, threat_client, args.show_run)
+        finally:
+            policy_client.stop()
+            if threat_client is not None:
+                threat_client.stop()
+        print(f"Total runs: {total}")
+        if args.show_run is not None:
+            if selected is None:
+                raise RuntimeError(f"Requested run {args.show_run} not found (total {total})")
+            print("")
+            print(f"=== Replay Run {args.show_run} ===")
+            run_movie(puzzle, ns_script=[], ns_random_seed=args.ns_seed, forced_line=selected)
+        return
+
     run_movie(puzzle, ns_script, args.ns_seed)
 
 
