@@ -136,11 +136,16 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
   let rngAfter = { ...rngBefore };
   const contractStrain = input.contractStrain ?? 'NT';
   const signature = buildCanonicalPositionSignature({ contractStrain, seat, hands, trick });
+  const ddSource = policy.ddSource ?? 'runtime';
+  const applyDdFilter = (candidates: CardId[], legalUniverse?: CardId[]) =>
+    ddSource === 'runtime'
+      ? applyStrictDdFilter(input.problemId, signature, candidates, legalUniverse)
+      : { candidates: [...candidates] as CardId[], trace: undefined as DdPolicyTrace | undefined };
 
   if (policy.kind === 'randomLegal') {
     const legal = legalPlaysForSeat(hands, seat, leadSuit);
     const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
-    const ddFiltered = applyStrictDdFilter(input.problemId, signature, legalCardIds);
+    const ddFiltered = applyDdFilter(legalCardIds, legalCardIds);
     const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
     rngAfter = nextRng;
     const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
@@ -160,7 +165,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
   if (leadSuit === null) {
     const legal = legalPlaysForSeat(hands, seat, null);
     const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
-    const ddFiltered = applyStrictDdFilter(input.problemId, signature, legalCardIds);
+    const ddFiltered = applyDdFilter(legalCardIds, legalCardIds);
     const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
     rngAfter = nextRng;
     const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
@@ -185,12 +190,28 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     if (threatLabels) {
       const idleCards = inSuitCardIds.filter((cardId) => threatLabels[seat].idle.has(cardId));
       if (idleCards.length > 0 && idleCards.length === inSuitCardIds.length) {
+        const ddOnIdle = applyDdFilter(idleCards, inSuitCardIds);
+        if (ddOnIdle.trace?.bound) {
+          const chosenCardId = chooseLowestByRank(ddOnIdle.candidates);
+          if (chosenCardId) {
+            const chosenBucket = 'follow:idle-cheap-win';
+            return {
+              chosenCardId,
+              chosenBucket,
+              bucketCards: [...ddOnIdle.candidates],
+              policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddOnIdle.candidates),
+              ddPolicy: ddOnIdle.trace,
+              rngBefore,
+              rngAfter
+            };
+          }
+        }
         const highestSoFar = trick.reduce((max, play) => {
           if (play.suit !== leadSuit) return max;
           return Math.max(max, RANK_STRENGTH[play.rank]);
         }, 0);
         const winningIdle = idleCards.filter((cardId) => RANK_STRENGTH[rankOfCardId(cardId)] > highestSoFar);
-        const ddFiltered = applyStrictDdFilter(input.problemId, signature, winningIdle);
+        const ddFiltered = applyDdFilter(winningIdle);
         const chosenCardId = chooseLowestByRank(ddFiltered.candidates);
         if (chosenCardId) {
           const chosenBucket = 'follow:idle-cheap-win';
@@ -211,6 +232,22 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     if (threat && threatLabels && trick.length === 1) {
       const busyCards = inSuitCardIds.filter((cardId) => threatLabels[seat].busy.has(cardId));
       if (busyCards.length > 0 && busyCards.length === inSuitCardIds.length) {
+        const ddOnBusy = applyDdFilter(busyCards, inSuitCardIds);
+        if (ddOnBusy.trace?.bound) {
+          const chosenCardId = chooseLowestByRank(ddOnBusy.candidates);
+          if (chosenCardId) {
+            const chosenBucket = 'follow:busy-protect-threat';
+            return {
+              chosenCardId,
+              chosenBucket,
+              bucketCards: [...ddOnBusy.candidates],
+              policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddOnBusy.candidates),
+              ddPolicy: ddOnBusy.trace,
+              rngBefore,
+              rngAfter
+            };
+          }
+        }
         const thirdSeat = nextSeat(seat);
         const partnerSeat = nextSeat(thirdSeat);
         const suitThreat = threat.threatsBySuit[leadSuit];
@@ -219,7 +256,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
           const partnerCanBeatThreat = (hands[partnerSeat][leadSuit] ?? []).some((rank) => RANK_STRENGTH[rank] > threatRankValue);
           if (!partnerCanBeatThreat) {
             const covering = busyCards.filter((cardId) => RANK_STRENGTH[rankOfCardId(cardId)] > threatRankValue);
-            const ddFiltered = applyStrictDdFilter(input.problemId, signature, covering);
+            const ddFiltered = applyDdFilter(covering);
             const chosenCardId = chooseLowestByRank(ddFiltered.candidates);
             if (chosenCardId) {
               const chosenBucket = 'follow:busy-protect-threat';
@@ -240,7 +277,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
 
     if (!threat || !threatLabels) {
       const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank) as CardId);
-      const ddFiltered = applyStrictDdFilter(input.problemId, signature, bucketCards);
+      const ddFiltered = applyDdFilter(bucketCards, inSuitCardIds);
       const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
       rngAfter = nextRng;
       const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
@@ -259,7 +296,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     const threshold = getIdleThreatThresholdRank(leadSuit, threat, threatLabels);
     if (!threshold) {
       const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank) as CardId);
-      const ddFiltered = applyStrictDdFilter(input.problemId, signature, bucketCards);
+      const ddFiltered = applyDdFilter(bucketCards, inSuitCardIds);
       const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
       rngAfter = nextRng;
       const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
@@ -279,7 +316,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     const above = inSuit.filter((p) => RANK_STRENGTH[p.rank] >= RANK_STRENGTH[threshold]);
     const bucket = below.length > 0 ? below : above;
     const bucketCards = bucket.map((p) => toCardId(p.suit, p.rank) as CardId);
-    const ddFiltered = applyStrictDdFilter(input.problemId, signature, bucketCards);
+    const ddFiltered = applyDdFilter(bucketCards, inSuitCardIds);
     const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
     rngAfter = nextRng;
     const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
@@ -317,7 +354,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     { name: 'tier5', cards: tiers.tier5 }
   ];
   const chosen = ordered.find((o) => o.cards.length > 0) ?? { name: 'tier5', cards: tiers.tier5 };
-  const ddFiltered = applyStrictDdFilter(input.problemId, signature, chosen.cards);
+  const ddFiltered = applyDdFilter(chosen.cards, tiers.legal);
   const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
   rngAfter = nextRng;
   const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;

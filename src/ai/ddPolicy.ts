@@ -20,12 +20,14 @@ export type DdAdvice = {
 
 export type DdPolicyTrace = {
   mode: 'strict';
+  source: 'runtime';
   problemId: string;
   signature: string;
   baseCandidates: CardId[];
   allowedCandidates: CardId[];
   bound: boolean;
   fallback: boolean;
+  path: 'intersection' | 'dd-fallback' | 'base-fallback';
 };
 
 const SUIT_ORDER = ['S', 'H', 'D', 'C'] as const;
@@ -86,7 +88,8 @@ export function lookupDdAdvice(problemId: string | undefined, signature: string)
 export function applyStrictDdFilter(
   problemId: string | undefined,
   signature: string,
-  baseCandidates: CardId[]
+  baseCandidates: CardId[],
+  legalCandidates?: CardId[]
 ): { candidates: CardId[]; trace?: DdPolicyTrace } {
   const advice = lookupDdAdvice(problemId, signature);
   if (!advice) return { candidates: baseCandidates };
@@ -98,12 +101,33 @@ export function applyStrictDdFilter(
       candidates: intersection,
       trace: {
         mode: 'strict',
+        source: 'runtime',
         problemId: problemId ?? '-',
         signature,
         baseCandidates: [...baseCandidates],
         allowedCandidates: [...intersection],
         bound: true,
-        fallback: false
+        fallback: false,
+        path: 'intersection'
+      }
+    };
+  }
+
+  const legalUniverse = legalCandidates ?? baseCandidates;
+  const ddLegal = legalUniverse.filter((card) => allowed.has(card));
+  if (ddLegal.length > 0) {
+    return {
+      candidates: ddLegal,
+      trace: {
+        mode: 'strict',
+        source: 'runtime',
+        problemId: problemId ?? '-',
+        signature,
+        baseCandidates: [...baseCandidates],
+        allowedCandidates: [...ddLegal],
+        bound: true,
+        fallback: true,
+        path: 'dd-fallback'
       }
     };
   }
@@ -112,12 +136,14 @@ export function applyStrictDdFilter(
     candidates: [...baseCandidates],
     trace: {
       mode: 'strict',
+      source: 'runtime',
       problemId: problemId ?? '-',
       signature,
       baseCandidates: [...baseCandidates],
       allowedCandidates: [...advice.optimalMoves],
       bound: false,
-      fallback: true
+      fallback: true,
+      path: 'base-fallback'
     }
   };
 }

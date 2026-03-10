@@ -49,7 +49,7 @@ export type Contract = {
 export type Play = { seat: Seat; suit: Suit; rank: Rank };
 export type Goal = { type: 'minTricks'; side: Side; n: number };
 export type GoalStatus = 'live' | 'assuredSuccess' | 'assuredFailure';
-export type Policy = { kind: 'randomLegal' | 'threatAware' };
+export type Policy = { kind: 'randomLegal' | 'threatAware'; ddSource?: 'off' | 'runtime' };
 
 export type Problem = {
   id: string;
@@ -129,12 +129,14 @@ export type EngineEvent =
       tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
       ddPolicy?: {
         mode: 'strict';
+        source: 'runtime';
         problemId: string;
         signature: string;
         baseCandidates: CardId[];
         allowedCandidates: CardId[];
         bound: boolean;
         fallback: boolean;
+        path: 'intersection' | 'dd-fallback' | 'base-fallback';
       };
       decisionSig?: string;
       replay?: {

@@ -745,6 +745,15 @@ def should_validate_dd(scope: str, seat: str) -> bool:
     return False
 
 
+def derive_dd_scope_from_goal_side(goal_side: str) -> str:
+    side = str(goal_side).upper()
+    if side == "NS":
+        return "ew"
+    if side == "EW":
+        return "ns"
+    raise RuntimeError(f"Unsupported goal side for DD scope derivation: {goal_side}")
+
+
 def enumerate_runs(
     puzzle: Dict[str, Any],
     policy_client: PersistentPolicyClient,
@@ -1170,7 +1179,12 @@ def main() -> None:
     parser.add_argument("--ns-seed", type=int, default=1, help="Seed for random NS fallback moves")
     parser.add_argument("--enumerate", action="store_true", help="Enumerate all deterministic runs (DFS)")
     parser.add_argument("--show-run", type=int, default=None, help="When used with --enumerate, replay this run number")
-    parser.add_argument("--dd-scope", choices=["none", "ns", "ew", "all"], default="none", help="Enable double-dummy validation for selected side(s)")
+    parser.add_argument(
+        "--dd-scope",
+        choices=["auto", "none", "ns", "ew", "all"],
+        default="auto",
+        help="DD validation scope; auto derives defender side from goal.side",
+    )
     parser.add_argument("--dd-discrepancies-only", action="store_true", help="With --enumerate, print only runs that contain DD discrepancies")
     parser.add_argument("--dd-export-jsonl", default=None, help="Write factual DD records (keyed by canonical signature) to this JSONL file")
     parser.add_argument("--dd-export-all", action="store_true", help="With --dd-export-jsonl, emit all validated positions (default filters to useful varying states)")
@@ -1178,10 +1192,11 @@ def main() -> None:
 
     ns_script = [c.strip().upper() for c in args.ns_script.split(",") if c.strip()]
     puzzle = load_problem(args.problem_id)
+    effective_dd_scope = derive_dd_scope_from_goal_side(puzzle["goal"]["side"]) if args.dd_scope == "auto" else args.dd_scope
     dd_validator: Optional[DoubleDummyValidator] = None
-    if args.dd_scope != "none":
+    if effective_dd_scope != "none":
         dd_validator = DoubleDummyValidator()
-    if args.dd_export_jsonl and args.dd_scope == "none":
+    if args.dd_export_jsonl and effective_dd_scope == "none":
         raise RuntimeError("--dd-export-jsonl requires --dd-scope ns|ew|all")
     if args.show_run is not None and args.show_run <= 0:
         raise RuntimeError("--show-run must be >= 1")
@@ -1206,7 +1221,7 @@ def main() -> None:
                     threat_client,
                     args.show_run,
                     dd_validator=dd_validator,
-                    dd_scope=args.dd_scope,
+                    dd_scope=effective_dd_scope,
                     dd_discrepancies_only=args.dd_discrepancies_only,
                     emit_summaries=(args.show_run is None),
                     dd_exporter=dd_exporter,
@@ -1237,7 +1252,7 @@ def main() -> None:
                     ns_random_seed=args.ns_seed,
                     forced_line=selected,
                     dd_validator=dd_validator,
-                    dd_scope=args.dd_scope,
+                    dd_scope=effective_dd_scope,
                     forced_dd_failures=selected_dd_failures,
                     dd_exporter=dd_exporter,
                 )
@@ -1248,7 +1263,7 @@ def main() -> None:
             ns_script,
             args.ns_seed,
             dd_validator=dd_validator,
-            dd_scope=args.dd_scope,
+            dd_scope=effective_dd_scope,
             dd_exporter=dd_exporter,
         )
     finally:

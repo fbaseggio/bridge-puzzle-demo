@@ -9,6 +9,7 @@ import {
   type DecisionRecord,
   type EngineEvent,
   type Play,
+  type Policy,
   type Rank,
   type Seat,
   type State,
@@ -46,6 +47,10 @@ const busyBranchingLabel: Record<'strict' | 'sameLevel' | 'allBusy', string> = {
   sameLevel: 'Same level',
   allBusy: 'All busy'
 };
+const ddSourceLabel: Record<'off' | 'runtime', string> = {
+  off: 'Off',
+  runtime: 'Runtime'
+};
 type ProblemWithThreats = typeof demoProblems[number]['problem'] & { threatCardIds?: CardId[] };
 
 const maxSuitLineLen = Math.max(
@@ -74,13 +79,14 @@ root.style.setProperty('--table-gap-y', `${verticalGap}px`);
 root.style.setProperty('--table-gap-x', `${horizontalGap}px`);
 root.style.setProperty('--slot-offset', '12%');
 let busyBranching: 'strict' | 'sameLevel' | 'allBusy' = 'sameLevel';
+let ddSourceMode: 'off' | 'runtime' = 'runtime';
 const threatDetail = false;
 const verboseCoverageDetail = false;
 
 let currentProblem = demoProblems[0].problem;
 let currentProblemId = demoProblems[0].id;
 let currentSeed = currentProblem.rngSeed >>> 0;
-let state: State = init({ ...currentProblem, rngSeed: currentSeed });
+let state: State = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
 let logs: string[] = [];
 let deferredLogLines: string[] = [];
 let verboseLog = false;
@@ -336,6 +342,17 @@ function seatSide(seat: Seat): 'NS' | 'EW' {
 function nextSeat(seat: Seat): Seat {
   const idx = seatOrder.indexOf(seat);
   return seatOrder[(idx + 1) % seatOrder.length];
+}
+
+function withDdSource(problem: ProblemWithThreats): ProblemWithThreats {
+  const policies: Partial<Record<Seat, Policy>> = {};
+  for (const seat of seatOrder) {
+    const policy = problem.policies[seat];
+    if (!policy) continue;
+    const source = policy.ddSource ?? (policy.kind === 'threatAware' ? ddSourceMode : 'off');
+    policies[seat] = { ...policy, ddSource: source };
+  }
+  return { ...problem, policies };
 }
 
 function cloneStateForLog(src: State): State {
@@ -1146,11 +1163,11 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
       if (event.ddPolicy) {
         if (event.ddPolicy.bound) {
           lines.push(
-            `[DD-POLICY] problem=${event.ddPolicy.problemId} bound=yes base={${event.ddPolicy.baseCandidates.join(',') || '-'}} allowed={${event.ddPolicy.allowedCandidates.join(',') || '-'}}`
+            `[DD-POLICY] source=${event.ddPolicy.source} problem=${event.ddPolicy.problemId} bound=yes path=${event.ddPolicy.path} base={${event.ddPolicy.baseCandidates.join(',') || '-'}} allowed={${event.ddPolicy.allowedCandidates.join(',') || '-'}}`
           );
         } else if (event.ddPolicy.fallback) {
           lines.push(
-            `[DD-POLICY] problem=${event.ddPolicy.problemId} bound=no reason=empty-intersection base={${event.ddPolicy.baseCandidates.join(',') || '-'}} optimal={${event.ddPolicy.allowedCandidates.join(',') || '-'}} fallback=base`
+            `[DD-POLICY] source=${event.ddPolicy.source} problem=${event.ddPolicy.problemId} bound=no path=${event.ddPolicy.path} base={${event.ddPolicy.baseCandidates.join(',') || '-'}} optimal={${event.ddPolicy.allowedCandidates.join(',') || '-'}} fallback=base`
           );
         }
       }
@@ -1627,7 +1644,7 @@ function resetGame(seed: number, reason: string): void {
     replayCoverage.representativeByIdx.clear();
   }
   currentSeed = nextSeed;
-  state = init({ ...currentProblem, rngSeed: currentSeed });
+  state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
   logs = [...logs, `${reason} seed=${currentSeed}`].slice(-500);
   runStatus = 'running';
   runPlayCounter = 0;
@@ -1659,7 +1676,7 @@ function selectProblem(problemId: string): void {
   currentProblem = entry.problem;
   currentProblemId = entry.id;
   currentSeed = currentProblem.rngSeed >>> 0;
-  state = init({ ...currentProblem, rngSeed: currentSeed });
+  state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
   runStatus = 'running';
   runPlayCounter = 0;
   invEqVersion = 0;
@@ -2136,6 +2153,31 @@ function renderStatusPanel(view: State): HTMLElement {
   variationsValue.appendChild(variationsSelect);
   variationsRow.append(variationsKey, variationsValue);
   facts.appendChild(variationsRow);
+
+  const ddRow = document.createElement('div');
+  ddRow.className = 'meta-row';
+  const ddKey = document.createElement('span');
+  ddKey.className = 'k';
+  ddKey.textContent = 'DD source';
+  const ddValue = document.createElement('span');
+  ddValue.className = 'v turn-meta';
+  const ddSelect = document.createElement('select');
+  (['off', 'runtime'] as const).forEach((source) => {
+    const option = document.createElement('option');
+    option.value = source;
+    option.textContent = ddSourceLabel[source];
+    if (source === ddSourceMode) option.selected = true;
+    ddSelect.appendChild(option);
+  });
+  ddSelect.onchange = () => {
+    const nextSource = ddSelect.value as 'off' | 'runtime';
+    if (nextSource === ddSourceMode) return;
+    ddSourceMode = nextSource;
+    resetGame(currentSeed, `DD source changed: ${ddSourceLabel[nextSource]}`);
+  };
+  ddValue.appendChild(ddSelect);
+  ddRow.append(ddKey, ddValue);
+  facts.appendChild(ddRow);
   panel.appendChild(facts);
 
   return panel;

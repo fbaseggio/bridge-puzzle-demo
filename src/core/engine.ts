@@ -211,12 +211,14 @@ type AutoChoice = {
   tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
   ddPolicy?: {
     mode: 'strict';
+    source: 'runtime';
     problemId: string;
     signature: string;
     baseCandidates: CardId[];
     allowedCandidates: CardId[];
     bound: boolean;
     fallback: boolean;
+    path: 'intersection' | 'dd-fallback' | 'base-fallback';
   };
   decisionSig?: string;
   replay?: {
@@ -488,12 +490,14 @@ function applyOnePlay(
   tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>,
   ddPolicy?: {
     mode: 'strict';
+    source: 'runtime';
     problemId: string;
     signature: string;
     baseCandidates: CardId[];
     allowedCandidates: CardId[];
     bound: boolean;
     fallback: boolean;
+    path: 'intersection' | 'dd-fallback' | 'base-fallback';
   },
   decisionSig?: string,
   replay?: {
