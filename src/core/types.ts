@@ -2,7 +2,7 @@ export type Suit = 'S' | 'H' | 'D' | 'C';
 export type Rank = 'A' | 'K' | 'Q' | 'J' | 'T' | '9' | '8' | '7' | '6' | '5' | '4' | '3' | '2';
 export type Seat = 'N' | 'E' | 'S' | 'W';
 export type CardId = `${Suit}${Rank}`;
-export type CardRole = 'promotedWinner' | 'threat' | 'busy' | 'idle' | 'winner' | 'default';
+export type CardRole = 'promotedWinner' | 'threat' | 'strandedThreat' | 'busy' | 'idle' | 'winner' | 'default';
 export type DecisionRecord = {
   index: number;
   seat: 'E' | 'W';
@@ -126,7 +126,7 @@ export type EngineEvent =
       chosenBucket?: string;
       bucketCards?: CardId[];
       policyClassByCard?: Record<string, string>;
-      tierBuckets?: Partial<Record<'tier2a' | 'tier2b' | 'tier3a' | 'tier3b', CardId[]>>;
+      tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
       decisionSig?: string;
       replay?: {
         action: 'forced' | 'disabled';

@@ -519,10 +519,13 @@ class PersistentThreatStateClient:
         hands: Dict[str, Dict[str, List[str]]],
         threat_card_ids: List[str],
         goal_context: Optional[Dict[str, Any]] = None,
+        runtime_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"mode": "init", "position": {"hands": hands}, "threatCardIds": threat_card_ids}
         if goal_context is not None:
             payload["goalContext"] = goal_context
+        if runtime_context is not None:
+            payload["runtimeContext"] = runtime_context
         return self._query(payload)
 
     def update_state(
@@ -531,11 +534,21 @@ class PersistentThreatStateClient:
         state: Dict[str, Any],
         played_card_id: str,
         goal_context: Optional[Dict[str, Any]] = None,
+        runtime_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"mode": "update", "position": {"hands": hands}, "state": state, "playedCardId": played_card_id}
         if goal_context is not None:
             payload["goalContext"] = goal_context
+        if runtime_context is not None:
+            payload["runtimeContext"] = runtime_context
         return self._query(payload)
+
+
+def runtime_context_for_threat(trick: List[Play], contract_strain: str) -> Dict[str, Any]:
+    return {
+        "trick": [{"seat": p.seat, "suit": p.suit, "rank": p.rank} for p in trick],
+        "trumpSuit": None if str(contract_strain).upper() == "NT" else str(contract_strain).upper(),
+    }
 
 
 def format_feature_updates(feature_diff: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -665,8 +678,14 @@ def enumerate_runs(
     threat_state: Optional[Dict[str, Any]] = None
     initial_goal_status: Optional[str] = None
     threat_card_ids = list(puzzle.get("threatCardIds", []))
+    contract_strain = puzzle["contract"]["strain"]
     if threat_client is not None and threat_card_ids:
-        threat_state = threat_client.init_state(hands, threat_card_ids, goal_context({"NS": 0, "EW": 0}))
+        threat_state = threat_client.init_state(
+            hands,
+            threat_card_ids,
+            goal_context({"NS": 0, "EW": 0}),
+            runtime_context_for_threat([], contract_strain),
+        )
         initial_goal_status = threat_client.last_goal_status()
 
     run_no = 0
@@ -774,7 +793,13 @@ def enumerate_runs(
             next_threat_state = node.threat_state
             next_goal_status = node.goal_status
             if next_threat_state is not None and threat_client is not None:
-                next_threat_state = threat_client.update_state(next_hands, next_threat_state, chosen, goal_context(next_tricks_won))
+                next_threat_state = threat_client.update_state(
+                    next_hands,
+                    next_threat_state,
+                    chosen,
+                    goal_context(next_tricks_won),
+                    runtime_context_for_threat(next_trick, contract_strain),
+                )
                 # Goal-status is reliable for terminal checks at trick boundaries.
                 if len(next_trick) == 4:
                     next_goal_status = threat_client.last_goal_status()
@@ -829,6 +854,7 @@ def run_movie(
     policy_rng = {"seed": int(puzzle["rngSeed"]), "counter": 0}
     threat_state: Optional[Dict[str, Any]] = None
     threat_card_ids = list(puzzle.get("threatCardIds", []))
+    contract_strain = puzzle["contract"]["strain"]
 
     print(f"Movie start: problem={puzzle.get('id', '?')} nsScript={','.join(ns_script) if ns_script else '-'} nsSeed={ns_random_seed}")
     print("Initial deal:")
@@ -847,7 +873,12 @@ def run_movie(
     if threat_card_ids:
         threat_client = PersistentThreatStateClient()
         threat_client.start()
-        threat_state = threat_client.init_state(hands, threat_card_ids, goal_context(tricks_won))
+        threat_state = threat_client.init_state(
+            hands,
+            threat_card_ids,
+            goal_context(tricks_won),
+            runtime_context_for_threat(trick, contract_strain),
+        )
     goal_status: Optional[str] = threat_client.last_goal_status() if threat_client is not None else None
     try:
         while not all_hands_empty(hands):
@@ -953,7 +984,13 @@ def run_movie(
                 if len(trick) == 4:
                     winner_preview = resolve_trick_winner(trick, puzzle["contract"]["strain"])
                     projected_tricks[side_of(winner_preview)] += 1
-                threat_state = threat_client.update_state(hands, threat_state, chosen, goal_context(projected_tricks))
+                threat_state = threat_client.update_state(
+                    hands,
+                    threat_state,
+                    chosen,
+                    goal_context(projected_tricks),
+                    runtime_context_for_threat(trick, contract_strain),
+                )
                 if len(trick) == 4:
                     goal_status = threat_client.last_goal_status()
                 feature_line = format_feature_updates(threat_client.last_feature_diff)

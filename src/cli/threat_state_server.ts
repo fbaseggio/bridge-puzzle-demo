@@ -20,11 +20,17 @@ type GoalContext = {
   tricksWon: { NS: number; EW: number };
 };
 
+type RuntimeContext = {
+  trick?: Array<{ seat: Seat; suit: Suit; rank: Rank }>;
+  trumpSuit?: Suit | null;
+};
+
 type InitRequest = {
   mode: 'init';
   position: Position;
   threatCardIds: CardId[];
   goalContext?: GoalContext;
+  runtimeContext?: RuntimeContext;
 };
 
 type UpdateRequest = {
@@ -33,6 +39,7 @@ type UpdateRequest = {
   state: JsonState;
   playedCardId: CardId;
   goalContext?: GoalContext;
+  runtimeContext?: RuntimeContext;
 };
 
 type Request = InitRequest | UpdateRequest;
@@ -78,7 +85,12 @@ function normalizePosition(position: Position): Position {
 
 function handleRequest(req: Request): { ok: true; state: JsonState; features: ReturnType<typeof buildFeatureStateFromRuntime>; featureDiff?: ReturnType<typeof diffFeatureStates> } {
   if (req.mode === 'init') {
-    const state = initClassification(normalizePosition(req.position), req.threatCardIds);
+    const state = initClassification(normalizePosition(req.position), req.threatCardIds, {
+      trick: req.runtimeContext?.trick,
+      trumpSuit: req.runtimeContext?.trumpSuit ?? null,
+      goal: req.goalContext?.goal,
+      tricksWon: req.goalContext?.tricksWon
+    });
     const features = buildFeatureStateFromRuntime({
       threat: state.threat,
       threatLabels: state.labels as unknown as State['threatLabels'],
@@ -90,7 +102,12 @@ function handleRequest(req: Request): { ok: true; state: JsonState; features: Re
     return { ok: true, state: toJsonState(state), features };
   }
   const prev = fromJsonState(req.state);
-  const next = updateClassificationAfterPlay(prev, normalizePosition(req.position), req.playedCardId);
+  const next = updateClassificationAfterPlay(prev, normalizePosition(req.position), req.playedCardId, {
+    trick: req.runtimeContext?.trick,
+    trumpSuit: req.runtimeContext?.trumpSuit ?? null,
+    goal: req.goalContext?.goal,
+    tricksWon: req.goalContext?.tricksWon
+  });
   const beforeFeatures = buildFeatureStateFromRuntime({
     threat: prev.threat,
     threatLabels: prev.labels as unknown as State['threatLabels'],

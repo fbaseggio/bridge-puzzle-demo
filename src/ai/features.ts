@@ -238,7 +238,7 @@ export function diffFeatureStates(before: FeatureState, after: FeatureState): Fe
 export function getRankColorForFeatureRole(role: FeatureCardRole, teachingMode: boolean): FeatureColor {
   if (!teachingMode) return 'black';
   if (role === 'promotedWinner') return 'purple';
-  if (role === 'threat') return 'green';
+  if (role === 'threat' || role === 'strandedThreat') return 'green';
   if (role === 'busy') return 'blue';
   if (role === 'winner' || role === 'idle') return 'black';
   return 'grey';

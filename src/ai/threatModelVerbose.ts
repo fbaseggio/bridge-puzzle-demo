@@ -253,23 +253,23 @@ export function formatDiscardDecisionBlock(params: {
   legal: CardId[];
   tier1a: CardId[];
   tier1b: CardId[];
-  tier1c: CardId[];
-  tier2a: CardId[];
-  tier2b: CardId[];
+  tier2: CardId[];
   tier3a: CardId[];
   tier3b: CardId[];
-  tier4: CardId[];
+  tier4a: CardId[];
+  tier4b: CardId[];
+  tier5: CardId[];
   chosen: CardId;
   rngState?: { seed: number; counter: number };
 }): string {
-  let tier = 'tier4';
+  let tier = 'tier5';
   if (params.tier1a.includes(params.chosen)) tier = 'tier1a';
   else if (params.tier1b.includes(params.chosen)) tier = 'tier1b';
-  else if (params.tier1c.includes(params.chosen)) tier = 'tier1c';
-  else if (params.tier2a.includes(params.chosen)) tier = 'tier2a';
-  else if (params.tier2b.includes(params.chosen)) tier = 'tier2b';
+  else if (params.tier2.includes(params.chosen)) tier = 'tier2';
   else if (params.tier3a.includes(params.chosen)) tier = 'tier3a';
   else if (params.tier3b.includes(params.chosen)) tier = 'tier3b';
+  else if (params.tier4a.includes(params.chosen)) tier = 'tier4a';
+  else if (params.tier4b.includes(params.chosen)) tier = 'tier4b';
   const legalSuits = [...new Set(params.legal.map((id) => parseCardId(id).suit))];
   const partner: 'E' | 'W' = params.defender === 'E' ? 'W' : 'E';
   const lines = [
@@ -277,12 +277,12 @@ export function formatDiscardDecisionBlock(params: {
     `legal=${fmtCards(params.legal)}`,
     `tier1a=${fmtCards(params.tier1a)}`,
     `tier1b=${fmtCards(params.tier1b)}`,
-    `tier1c=${fmtCards(params.tier1c)}`,
-    `tier2a=${fmtCards(params.tier2a)}`,
-    `tier2b=${fmtCards(params.tier2b)}`,
+    `tier2=${fmtCards(params.tier2)}`,
     `tier3a=${fmtCards(params.tier3a)}`,
     `tier3b=${fmtCards(params.tier3b)}`,
-    `tier4=${fmtCards(params.tier4)}`,
+    `tier4a=${fmtCards(params.tier4a)}`,
+    `tier4b=${fmtCards(params.tier4b)}`,
+    `tier5=${fmtCards(params.tier5)}`,
     `chosenTier=${tier} chosen=${params.chosen}`,
     `rng=${params.rngState ? `seed:${params.rngState.seed} counter:${params.rngState.counter}` : 'n/a'}`
   ];
@@ -338,10 +338,10 @@ export function formatDiscardDecisionBlock(params: {
     );
     for (const c of explain.cards) {
       lines.push(
-        `card=${c.cardId} suit=${c.suit} rank=${fmtRankNum(c.rank)} label=${c.label} idle=${c.idle} suitActiveThreat=${c.suitActiveThreat} threshold=${fmt(c.threshold)} rank<threshold?=${c.rankBelowThreshold === null ? '-' : c.rankBelowThreshold} tier1a?=${c.tier1a} tier1b?=${c.tier1b} tier1c?=${c.tier1c}`
+        `card=${c.cardId} suit=${c.suit} rank=${fmtRankNum(c.rank)} label=${c.label} idle=${c.idle} suitActiveThreat=${c.suitActiveThreat} threshold=${fmt(c.threshold)} rank<threshold?=${c.rankBelowThreshold === null ? '-' : c.rankBelowThreshold} tier1a?=${c.tier1a} tier1b?=${c.tier1b} tier2?=${c.tier2}`
       );
     }
-    lines.push(`tier1Integrity idleLegal=${explain.idleLegal.length} tier1sum=${explain.tier1a.length + explain.tier1b.length + explain.tier1c.length} ok=${explain.integrityOk}`);
+    lines.push(`tier1Integrity idleLegal=${explain.idleLegal.length} tier1sum=${explain.tier1a.length + explain.tier1b.length + explain.tier2.length} ok=${explain.integrityOk}`);
     if (!explain.integrityOk) {
       lines.push(`tier1Integrity ERROR missing=${fmtCards(explain.missing)} overlap=${fmtCards(explain.overlap)}`);
     }

@@ -20,11 +20,17 @@ type GoalContext = {
   tricksWon: { NS: number; EW: number };
 };
 
+type RuntimeContext = {
+  trick?: Array<{ seat: Seat; suit: Suit; rank: Rank }>;
+  trumpSuit?: Suit | null;
+};
+
 type InitRequest = {
   mode: 'init';
   position: Position;
   threatCardIds: CardId[];
   goalContext?: GoalContext;
+  runtimeContext?: RuntimeContext;
 };
 
 type UpdateRequest = {
@@ -33,6 +39,7 @@ type UpdateRequest = {
   state: JsonState;
   playedCardId: CardId;
   goalContext?: GoalContext;
+  runtimeContext?: RuntimeContext;
 };
 
 type Request = InitRequest | UpdateRequest;
@@ -89,7 +96,12 @@ async function main(): Promise<void> {
   try {
     const req = JSON.parse(await readStdin()) as Request;
     if (req.mode === 'init') {
-      const state = initClassification(normalizePosition(req.position), req.threatCardIds);
+      const state = initClassification(normalizePosition(req.position), req.threatCardIds, {
+        trick: req.runtimeContext?.trick,
+        trumpSuit: req.runtimeContext?.trumpSuit ?? null,
+        goal: req.goalContext?.goal,
+        tricksWon: req.goalContext?.tricksWon
+      });
       const features = buildFeatureStateFromRuntime({
         threat: state.threat,
         threatLabels: state.labels as unknown as State['threatLabels'],
@@ -105,7 +117,13 @@ async function main(): Promise<void> {
     const next = updateClassificationAfterPlay(
       prev,
       normalizePosition(req.position),
-      req.playedCardId
+      req.playedCardId,
+      {
+        trick: req.runtimeContext?.trick,
+        trumpSuit: req.runtimeContext?.trumpSuit ?? null,
+        goal: req.goalContext?.goal,
+        tricksWon: req.goalContext?.tricksWon
+      }
     );
     const beforeFeatures = buildFeatureStateFromRuntime({
       threat: prev.threat,

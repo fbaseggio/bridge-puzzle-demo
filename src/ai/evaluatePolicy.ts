@@ -35,7 +35,7 @@ export type EvaluatePolicyOutput = {
   chosenBucket?: string;
   bucketCards?: CardId[];
   policyClassByCard?: Record<string, string>;
-  tierBuckets?: Partial<Record<'tier2a' | 'tier2b' | 'tier3a' | 'tier3b', CardId[]>>;
+  tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
   discardTiers?: DiscardTiers;
   rngBefore: RngState;
   rngAfter: RngState;
@@ -95,7 +95,9 @@ function buildPolicyClassByCard(
       out[card] = defaultClass;
     } else if (chosenBucket.startsWith('tier1')) {
       out[card] = 'idle:tier1';
-    } else if (chosenBucket.startsWith('tier2') || chosenBucket.startsWith('tier3')) {
+    } else if (chosenBucket === 'tier2') {
+      out[card] = `semiIdle:${card[0]}`;
+    } else if (chosenBucket.startsWith('tier3') || chosenBucket.startsWith('tier4')) {
       out[card] = `busy:${card[0]}`;
     } else {
       out[card] = `other:${card[0]}`;
@@ -208,26 +210,29 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
   const ordered: Array<{ name: string; cards: CardId[] }> = [
     { name: 'tier1a', cards: tiers.tier1a },
     { name: 'tier1b', cards: tiers.tier1b },
-    { name: 'tier1c', cards: tiers.tier1c },
-    { name: 'tier2a', cards: tiers.tier2a },
-    { name: 'tier2b', cards: tiers.tier2b },
+    { name: 'tier2', cards: tiers.tier2 },
     { name: 'tier3a', cards: tiers.tier3a },
     { name: 'tier3b', cards: tiers.tier3b },
-    { name: 'tier4', cards: tiers.tier4 }
+    { name: 'tier4a', cards: tiers.tier4a },
+    { name: 'tier4b', cards: tiers.tier4b },
+    { name: 'tier5', cards: tiers.tier5 }
   ];
-  const chosen = ordered.find((o) => o.cards.length > 0) ?? { name: 'tier4', cards: tiers.tier4 };
+  const chosen = ordered.find((o) => o.cards.length > 0) ?? { name: 'tier5', cards: tiers.tier5 };
   const [idx, nextRng] = pickRandomIndex(chosen.cards.length, rngAfter);
   rngAfter = nextRng;
   const chosenCardId = chosen.cards[idx] ?? chosen.cards[0] ?? null;
   const policyClassByCard = buildPolicyClassByCard(hands, seat, chosen.name, chosen.cards) ?? {};
-  for (const card of [...tiers.tier2a, ...tiers.tier2b, ...tiers.tier3a, ...tiers.tier3b]) {
+  for (const card of tiers.tier2) {
+    policyClassByCard[card] = `semiIdle:${card[0]}`;
+  }
+  for (const card of [...tiers.tier3a, ...tiers.tier3b, ...tiers.tier4a, ...tiers.tier4b]) {
     policyClassByCard[card] = `busy:${card[0]}`;
   }
-  const tierBuckets: Partial<Record<'tier2a' | 'tier2b' | 'tier3a' | 'tier3b', CardId[]>> = {};
-  if (tiers.tier2a.length > 0) tierBuckets.tier2a = [...tiers.tier2a];
-  if (tiers.tier2b.length > 0) tierBuckets.tier2b = [...tiers.tier2b];
+  const tierBuckets: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>> = {};
   if (tiers.tier3a.length > 0) tierBuckets.tier3a = [...tiers.tier3a];
   if (tiers.tier3b.length > 0) tierBuckets.tier3b = [...tiers.tier3b];
+  if (tiers.tier4a.length > 0) tierBuckets.tier4a = [...tiers.tier4a];
+  if (tiers.tier4b.length > 0) tierBuckets.tier4b = [...tiers.tier4b];
 
   return {
     chosenCardId,

@@ -208,7 +208,7 @@ type AutoChoice = {
   chosenBucket?: string;
   bucketCards?: CardId[];
   policyClassByCard?: Record<string, string>;
-  tierBuckets?: Partial<Record<'tier2a' | 'tier2b' | 'tier3a' | 'tier3b', CardId[]>>;
+  tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
   decisionSig?: string;
   replay?: { action: 'forced' | 'disabled'; index?: number; reason?: 'sig-mismatch' | 'card-not-legal'; card?: CardId };
 };
@@ -286,7 +286,9 @@ function buildPolicyClassByCard(
       out[card] = defaultClass;
     } else if (chosenBucket.startsWith('tier1')) {
       out[card] = 'idle:tier1';
-    } else if (chosenBucket.startsWith('tier2') || chosenBucket.startsWith('tier3')) {
+    } else if (chosenBucket === 'tier2') {
+      out[card] = `semiIdle:${card[0]}`;
+    } else if (chosenBucket.startsWith('tier3') || chosenBucket.startsWith('tier4')) {
       out[card] = `busy:${card[0]}`;
     } else {
       out[card] = `other:${card[0]}`;
@@ -462,7 +464,7 @@ function applyOnePlay(
   chosenBucket?: string,
   bucketCards?: CardId[],
   policyClassByCard?: Record<string, string>,
-  tierBuckets?: Partial<Record<'tier2a' | 'tier2b' | 'tier3a' | 'tier3b', CardId[]>>,
+  tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>,
   decisionSig?: string,
   replay?: { action: 'forced' | 'disabled'; index?: number; reason?: 'sig-mismatch' | 'card-not-legal'; card?: CardId }
 ): EngineEvent[] {
@@ -491,7 +493,14 @@ function applyOnePlay(
         perCardRole: state.cardRoles
       },
       { hands: state.hands },
-      toCardId(play.suit, play.rank) as CardId
+      toCardId(play.suit, play.rank) as CardId,
+      {
+        trick: state.trick,
+        trumpSuit: state.trumpSuit,
+        goal: state.goal,
+        tricksWon: state.tricksWon,
+        goalStatus: state.goalStatus
+      }
     );
     state.threat = updated.threat as State['threat'];
     state.threatLabels = updated.labels as State['threatLabels'];

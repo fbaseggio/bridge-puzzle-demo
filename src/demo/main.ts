@@ -582,11 +582,12 @@ function computeEqcForAutoplayEvent(shadow: State, event: Extract<EngineEvent, {
   const chosenBucket = event.chosenBucket ?? 'unknown';
   const tierBuckets = event.tierBuckets ?? {};
   let explorationCards = [...bucketCards];
-  if ((chosenBucket.startsWith('tier2') || chosenBucket.startsWith('tier3')) && busyBranching !== 'strict') {
+  if ((chosenBucket.startsWith('tier3') || chosenBucket.startsWith('tier4')) && busyBranching !== 'strict') {
+    const level = chosenBucket.startsWith('tier3') ? '3' : '4';
     const orderedKeys =
       busyBranching === 'sameLevel'
-        ? ([`tier${chosenBucket.startsWith('tier2') ? '2' : '3'}a`, `tier${chosenBucket.startsWith('tier2') ? '2' : '3'}b`] as const)
-        : (['tier2a', 'tier2b', 'tier3a', 'tier3b'] as const);
+        ? ([`tier${level}a`, `tier${level}b`] as const)
+        : (['tier3a', 'tier3b', 'tier4a', 'tier4b'] as const);
     const merged: CardId[] = [];
     for (const key of orderedKeys) {
       for (const card of tierBuckets[key] ?? []) {
@@ -597,8 +598,9 @@ function computeEqcForAutoplayEvent(shadow: State, event: Extract<EngineEvent, {
   }
   const toAltClassId = (card: CardId): string => {
     if (chosenBucket.startsWith('tier1')) return 'idle:tier1';
-    if (chosenBucket.startsWith('tier2') || chosenBucket.startsWith('tier3')) return `busy:${card[0]}`;
-    if (chosenBucket === 'tier4') return `other:${card[0]}`;
+    if (chosenBucket === 'tier2') return `semiIdle:${card[0]}`;
+    if (chosenBucket.startsWith('tier3') || chosenBucket.startsWith('tier4')) return `busy:${card[0]}`;
+    if (chosenBucket === 'tier5') return `other:${card[0]}`;
     const labels = shadow.threatLabels as DefenderLabels | null;
     if (labels) {
       if (labels[event.play.seat].busy.has(card)) return `busy:${card[0]}`;
@@ -703,7 +705,7 @@ function sortCardIdsDesc(cards: CardId[]): CardId[] {
 }
 
 function tierOrderKey(tier: string): number {
-  const order = ['tier1a', 'tier1b', 'tier1c', 'tier2a', 'tier2b', 'tier3a', 'tier3b', 'tier4', 'follow:below', 'follow:above', 'follow:baseline', 'lead:none', 'legal', 'preferred'];
+  const order = ['tier1a', 'tier1b', 'tier2', 'tier3a', 'tier3b', 'tier4a', 'tier4b', 'tier5', 'follow:below', 'follow:above', 'follow:baseline', 'lead:none', 'legal', 'preferred'];
   const idx = order.indexOf(tier);
   return idx >= 0 ? idx : 999;
 }
@@ -731,12 +733,12 @@ function computeTierByCardForDecision(shadow: State, event: Extract<EngineEvent,
     const priority: Array<[string, CardId[]]> = [
       ['tier1a', tiers.tier1a],
       ['tier1b', tiers.tier1b],
-      ['tier1c', tiers.tier1c],
-      ['tier2a', tiers.tier2a],
-      ['tier2b', tiers.tier2b],
+      ['tier2', tiers.tier2],
       ['tier3a', tiers.tier3a],
       ['tier3b', tiers.tier3b],
-      ['tier4', tiers.tier4]
+      ['tier4a', tiers.tier4a],
+      ['tier4b', tiers.tier4b],
+      ['tier5', tiers.tier5]
     ];
     // Best-tier only assignment to keep the debug cross-tab compact.
     for (const [tier, cards] of priority) {
@@ -776,8 +778,9 @@ function computeEqByTierSummary(shadow: State, event: Extract<EngineEvent, { typ
     let eqClass = event.policyClassByCard?.[card];
     if (!eqClass) {
       if (tier.startsWith('tier1')) eqClass = 'idle:tier1';
-      else if (tier.startsWith('tier2') || tier.startsWith('tier3')) eqClass = `busy:${card[0]}`;
-      else if (tier === 'tier4') eqClass = `other:${card[0]}`;
+      else if (tier === 'tier2') eqClass = `semiIdle:${card[0]}`;
+      else if (tier.startsWith('tier3') || tier.startsWith('tier4')) eqClass = `busy:${card[0]}`;
+      else if (tier === 'tier5') eqClass = `other:${card[0]}`;
       else eqClass = classInfoForCard(shadow, event.play.seat, card).classId;
     }
     const tierMap = eqToTier.get(eqClass) ?? new Map<string, CardId[]>();
@@ -824,7 +827,7 @@ function formatDefenderInventoryEqBlock(s: State): string[] {
   const defenderOrder: Array<'E' | 'W'> = ['E', 'W'];
   const idleSuitOrder: Suit[] = ['C', 'D', 'H', 'S'];
   const busySuitOrder: Suit[] = ['S', 'H', 'D', 'C'];
-  const tierOrder = ['tier2a', 'tier2b', 'tier3a', 'tier3b'];
+  const tierOrder = ['tier3a', 'tier3b', 'tier4a', 'tier4b'];
 
   for (const seat of defenderOrder) {
     const threatSuits = busySuitOrder.filter((suit) => !!ctx?.threatsBySuit[suit]);
@@ -846,7 +849,7 @@ function formatDefenderInventoryEqBlock(s: State): string[] {
 
       const threshold = ctx && labels ? getIdleThreatThresholdRank(suit, ctx, labels) : null;
       const stopStatus = ctx?.threatsBySuit[suit]?.stopStatus;
-      const prefix = stopStatus === 'double' ? '2' : '3';
+      const prefix = stopStatus === 'double' ? '3' : '4';
       const tiers = new Map<string, CardId[]>();
       for (const card of cards) {
         const tier =
@@ -880,7 +883,7 @@ function formatDefenderInventoryEqSeat(s: State, seat: 'E' | 'W'): string {
   const labels = s.threatLabels as DefenderLabels | null;
   const idleSuitOrder: Suit[] = ['C', 'D', 'H', 'S'];
   const busySuitOrder: Suit[] = ['S', 'H', 'D', 'C'];
-  const tierOrder = ['tier2a', 'tier2b', 'tier3a', 'tier3b'];
+  const tierOrder = ['tier3a', 'tier3b', 'tier4a', 'tier4b'];
   const threatSuits = busySuitOrder.filter((suit) => !!ctx?.threatsBySuit[suit]);
 
   const idleParts: string[] = [];
@@ -903,7 +906,7 @@ function formatDefenderInventoryEqSeat(s: State, seat: 'E' | 'W'): string {
     }
     const threshold = ctx && labels ? getIdleThreatThresholdRank(suit, ctx, labels) : null;
     const stopStatus = ctx?.threatsBySuit[suit]?.stopStatus;
-    const prefix = stopStatus === 'double' ? '2' : '3';
+    const prefix = stopStatus === 'double' ? '3' : '4';
     const tiers = new Map<string, CardId[]>();
     for (const card of cards) {
       const tier = threshold && isBelowThreshold(card, threshold) ? `tier${prefix}a` : `tier${prefix}b`;
@@ -924,10 +927,10 @@ function cardStatusSnapshot(
   s: State,
   ctx: ThreatContext | null,
   labels: DefenderLabels | null
-): Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black'; role: string; seat: Seat }> {
+): Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black' | 'grey'; role: string; seat: Seat }> {
   void ctx;
   void labels;
-  const snap = new Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black'; role: string; seat: Seat }>();
+  const snap = new Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black' | 'grey'; role: string; seat: Seat }>();
   const features = buildFeatureStateFromRuntime({
     threat: (s.threat as ThreatContext | null) ?? null,
     threatLabels: s.threatLabels,
@@ -949,8 +952,8 @@ function cardStatusSnapshot(
 
 function maybeEmitTeachingRecolorEvents(
   triggerCardId: CardId,
-  beforeSnap: Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black'; role: string; seat: Seat }>,
-  afterSnap: Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black'; role: string; seat: Seat }>
+  beforeSnap: Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black' | 'grey'; role: string; seat: Seat }>,
+  afterSnap: Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black' | 'grey'; role: string; seat: Seat }>
 ): void {
   const changes: string[] = [];
   const prettyCard = (cardId: CardId): string => `${cardId[0]}${displayRank(cardId.slice(1) as Rank)}`;
@@ -1057,7 +1060,14 @@ function applyEventToShadow(s: State, event: EngineEvent): void {
       const next = updateClassificationAfterPlay(
         { threat: s.threat, labels: s.threatLabels, perCardRole: s.cardRoles },
         { hands: s.hands },
-        toCardId(event.play.suit, event.play.rank) as CardId
+        toCardId(event.play.suit, event.play.rank) as CardId,
+        {
+          trick: s.trick,
+          trumpSuit: s.trumpSuit,
+          goal: s.goal,
+          tricksWon: s.tricksWon,
+          goalStatus: s.goalStatus
+        }
       );
       s.threat = next.threat as State['threat'];
       s.threatLabels = next.labels as State['threatLabels'];
@@ -1175,10 +1185,11 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
         const localLabels = shadow.threatLabels as DefenderLabels;
         const tiers = computeDiscardTiers(shadow.turn, positionFromState(shadow), ledSuit, localCtx, localLabels);
         const tierCounts = [
-          ['t2a', tiers.tier2a.length],
-          ['t2b', tiers.tier2b.length],
+          ['t2', tiers.tier2.length],
           ['t3a', tiers.tier3a.length],
-          ['t3b', tiers.tier3b.length]
+          ['t3b', tiers.tier3b.length],
+          ['t4a', tiers.tier4a.length],
+          ['t4b', tiers.tier4b.length]
         ].filter(([, count]) => count > 0).map(([name, count]) => `${name}:${count}`).join(' ');
         lines.push(
           `[THREAT] discard seat=${shadow.turn} ledSuit=${ledSuit} legal=${tiers.legal.length} chosen=${event.play.suit}${event.play.rank} bucket=${event.chosenBucket ?? '-'} tiers=${tierCounts || '-'}`
@@ -1194,12 +1205,12 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
               legal: tiers.legal,
               tier1a: tiers.tier1a,
               tier1b: tiers.tier1b,
-              tier1c: tiers.tier1c,
-              tier2a: tiers.tier2a,
-              tier2b: tiers.tier2b,
+              tier2: tiers.tier2,
               tier3a: tiers.tier3a,
               tier3b: tiers.tier3b,
-              tier4: tiers.tier4,
+              tier4a: tiers.tier4a,
+              tier4b: tiers.tier4b,
+              tier5: tiers.tier5,
               chosen: toCardId(event.play.suit, event.play.rank),
               rngState: { seed: after.rng.seed, counter: after.rng.counter }
             })
@@ -1298,8 +1309,9 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
       const bucketCards = event.bucketCards ? [...event.bucketCards] : [chosenCard];
       const toDecisionClass = (card: CardId): string => {
         if (eqRec.bucket.startsWith('tier1')) return 'idle:tier1';
-        if (eqRec.bucket.startsWith('tier2') || eqRec.bucket.startsWith('tier3')) return `busy:${card[0]}`;
-        if (eqRec.bucket === 'tier4') return `other:${card[0]}`;
+        if (eqRec.bucket === 'tier2') return `semiIdle:${card[0]}`;
+        if (eqRec.bucket.startsWith('tier3') || eqRec.bucket.startsWith('tier4')) return `busy:${card[0]}`;
+        if (eqRec.bucket === 'tier5') return `other:${card[0]}`;
         const labels = shadow.threatLabels as DefenderLabels | null;
         if (labels) {
           if (labels[event.play.seat].busy.has(card)) return `busy:${card[0]}`;
