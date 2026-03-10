@@ -4,6 +4,7 @@ import { parseCardId, toCardId, type CardId, type DefenderLabels, type ThreatCon
 import { classInfoForCard } from '../core/equivalence';
 
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
+const SEAT_ORDER: Seat[] = ['N', 'E', 'S', 'W'];
 const RANK_STRENGTH: Record<Rank, number> = {
   '2': 2,
   '3': 3,
@@ -19,6 +20,24 @@ const RANK_STRENGTH: Record<Rank, number> = {
   K: 13,
   A: 14
 };
+
+function nextSeat(seat: Seat): Seat {
+  const idx = SEAT_ORDER.indexOf(seat);
+  return SEAT_ORDER[(idx + 1) % SEAT_ORDER.length];
+}
+
+function rankOfCardId(cardId: CardId): Rank {
+  return parseCardId(cardId).rank;
+}
+
+function chooseLowestByRank(cards: CardId[]): CardId | null {
+  if (cards.length === 0) return null;
+  let best = cards[0];
+  for (const card of cards.slice(1)) {
+    if (RANK_STRENGTH[rankOfCardId(card)] < RANK_STRENGTH[rankOfCardId(best)]) best = card;
+  }
+  return best;
+}
 
 export type EvaluatePolicyInput = {
   policy: Policy;
@@ -146,6 +165,61 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
 
   const inSuit = legalPlaysForSeat(hands, seat, leadSuit);
   if (hands[seat][leadSuit].length > 0) {
+    const inSuitCardIds = inSuit.map((p) => toCardId(p.suit, p.rank) as CardId);
+
+    // Rule 1: when all in-suit options are idle, win as cheaply as possible if we can.
+    if (threatLabels) {
+      const idleCards = inSuitCardIds.filter((cardId) => threatLabels[seat].idle.has(cardId));
+      if (idleCards.length > 0 && idleCards.length === inSuitCardIds.length) {
+        const highestSoFar = trick.reduce((max, play) => {
+          if (play.suit !== leadSuit) return max;
+          return Math.max(max, RANK_STRENGTH[play.rank]);
+        }, 0);
+        const winningIdle = idleCards.filter((cardId) => RANK_STRENGTH[rankOfCardId(cardId)] > highestSoFar);
+        const chosenCardId = chooseLowestByRank(winningIdle);
+        if (chosenCardId) {
+          const chosenBucket = 'follow:idle-cheap-win';
+          return {
+            chosenCardId,
+            chosenBucket,
+            bucketCards: [...winningIdle],
+            policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, winningIdle),
+            rngBefore,
+            rngAfter
+          };
+        }
+      }
+    }
+
+    // Rule 2: second hand busy follow; if partner cannot beat third-hand threat, cover it cheaply now.
+    if (threat && threatLabels && trick.length === 1) {
+      const busyCards = inSuitCardIds.filter((cardId) => threatLabels[seat].busy.has(cardId));
+      if (busyCards.length > 0 && busyCards.length === inSuitCardIds.length) {
+        const thirdSeat = nextSeat(seat);
+        const partnerSeat = nextSeat(thirdSeat);
+        const suitThreat = threat.threatsBySuit[leadSuit];
+        if (suitThreat && suitThreat.active && suitThreat.establishedOwner === thirdSeat) {
+          const threatRankValue = RANK_STRENGTH[suitThreat.threatRank];
+          const partnerCanBeatThreat = (hands[partnerSeat][leadSuit] ?? []).some((rank) => RANK_STRENGTH[rank] > threatRankValue);
+          if (!partnerCanBeatThreat) {
+            const covering = busyCards.filter((cardId) => RANK_STRENGTH[rankOfCardId(cardId)] > threatRankValue);
+            const chosenCardId = chooseLowestByRank(covering);
+            if (chosenCardId) {
+              const chosenBucket = 'follow:busy-protect-threat';
+              return {
+                chosenCardId,
+                chosenBucket,
+                bucketCards: [...covering],
+                policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, covering),
+                rngBefore,
+                rngAfter
+              };
+            }
+          }
+        }
+      }
+    }
+
     if (!threat || !threatLabels) {
       const [chosenCardId, nextRng] = chooseUniformLegalCardId(hands, seat, leadSuit, rngAfter);
       rngAfter = nextRng;
