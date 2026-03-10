@@ -21,7 +21,7 @@ export type ThreatContext = {
 };
 
 export type DefenderLabels = Record<DefenderSeat, { busy: Set<CardId>; idle: Set<CardId> }>;
-export type CardRole = 'promotedWinner' | 'threat' | 'busy' | 'idle' | 'default';
+export type CardRole = 'promotedWinner' | 'threat' | 'busy' | 'idle' | 'winner' | 'default';
 export type ClassificationState = {
   threat: ThreatContext;
   labels: DefenderLabels;
@@ -281,6 +281,23 @@ function updateRolesForSuit(
     for (const rank of position.hands[seat][suit]) {
       const cardId = toCardId(suit, rank);
       perCardRole[cardId] = 'default';
+    }
+  }
+
+  // Mark generic suit winners first; later role passes (idle/busy/threat/promotedWinner)
+  // retain precedence and can overwrite this role.
+  for (const seat of seats) {
+    const opponents: Seat[] = seat === 'N' || seat === 'S' ? ['E', 'W'] : ['N', 'S'];
+    let highestOpponent = 0;
+    for (const opp of opponents) {
+      for (const oppRank of position.hands[opp][suit]) {
+        highestOpponent = Math.max(highestOpponent, rankValue(oppRank));
+      }
+    }
+    for (const rank of position.hands[seat][suit]) {
+      if (rankValue(rank) > highestOpponent) {
+        perCardRole[toCardId(suit, rank)] = 'winner';
+      }
     }
   }
 

@@ -1,8 +1,8 @@
 /// <reference types="node" />
 
 import { initClassification, updateClassificationAfterPlay, type CardId, type ClassificationState, type Position } from '../ai/threatModel';
-import { buildFeatureStateFromClassification, diffFeatureStates } from '../ai/features';
-import type { Hand, Rank, Seat, Suit } from '../core';
+import { buildFeatureStateFromRuntime, diffFeatureStates } from '../ai/features';
+import type { Goal, Hand, Rank, Seat, State, Suit } from '../core';
 
 type JsonLabels = {
   E: { busy: CardId[]; idle: CardId[] };
@@ -15,10 +15,16 @@ type JsonState = {
   perCardRole: ClassificationState['perCardRole'];
 };
 
+type GoalContext = {
+  goal: Goal;
+  tricksWon: { NS: number; EW: number };
+};
+
 type InitRequest = {
   mode: 'init';
   position: Position;
   threatCardIds: CardId[];
+  goalContext?: GoalContext;
 };
 
 type UpdateRequest = {
@@ -26,6 +32,7 @@ type UpdateRequest = {
   position: Position;
   state: JsonState;
   playedCardId: CardId;
+  goalContext?: GoalContext;
 };
 
 type Request = InitRequest | UpdateRequest;
@@ -69,16 +76,37 @@ function normalizePosition(position: Position): Position {
   return { hands: out };
 }
 
-function handleRequest(req: Request): { ok: true; state: JsonState; features: ReturnType<typeof buildFeatureStateFromClassification>; featureDiff?: ReturnType<typeof diffFeatureStates> } {
+function handleRequest(req: Request): { ok: true; state: JsonState; features: ReturnType<typeof buildFeatureStateFromRuntime>; featureDiff?: ReturnType<typeof diffFeatureStates> } {
   if (req.mode === 'init') {
     const state = initClassification(normalizePosition(req.position), req.threatCardIds);
-    const features = buildFeatureStateFromClassification(state);
+    const features = buildFeatureStateFromRuntime({
+      threat: state.threat,
+      threatLabels: state.labels as unknown as State['threatLabels'],
+      cardRoles: state.perCardRole as State['cardRoles'],
+      goal: req.goalContext?.goal,
+      tricksWon: req.goalContext?.tricksWon,
+      hands: req.position.hands as State['hands']
+    });
     return { ok: true, state: toJsonState(state), features };
   }
   const prev = fromJsonState(req.state);
   const next = updateClassificationAfterPlay(prev, normalizePosition(req.position), req.playedCardId);
-  const beforeFeatures = buildFeatureStateFromClassification(prev);
-  const features = buildFeatureStateFromClassification(next);
+  const beforeFeatures = buildFeatureStateFromRuntime({
+    threat: prev.threat,
+    threatLabels: prev.labels as unknown as State['threatLabels'],
+    cardRoles: prev.perCardRole as State['cardRoles'],
+    goal: req.goalContext?.goal,
+    tricksWon: req.goalContext?.tricksWon,
+    hands: req.position.hands as State['hands']
+  });
+  const features = buildFeatureStateFromRuntime({
+    threat: next.threat,
+    threatLabels: next.labels as unknown as State['threatLabels'],
+    cardRoles: next.perCardRole as State['cardRoles'],
+    goal: req.goalContext?.goal,
+    tricksWon: req.goalContext?.tricksWon,
+    hands: req.position.hands as State['hands']
+  });
   const featureDiff = diffFeatureStates(beforeFeatures, features);
   return { ok: true, state: toJsonState(next), features, featureDiff };
 }

@@ -35,8 +35,9 @@ class EnumState:
     tricks_won: Dict[str, int]
     policy_rng: Dict[str, int]
     threat_state: Optional[Dict[str, Any]]
+    goal_status: Optional[str]
     line: List[Tuple[str, str]]
-    dd_failures: List[Tuple[int, int, str, str, List[str], int]]
+    dd_failures: List[Tuple[int, int, str, str, List[str], int, str]]
 
 
 @dataclass
@@ -55,6 +56,7 @@ class DDDiscrepancy:
     actual_card: str
     optimal_cards: List[str]
     max_tricks: int
+    severity: str
 
 
 def next_seat(seat: str) -> str:
@@ -505,18 +507,42 @@ class PersistentThreatStateClient:
             raise RuntimeError("threat:serve response missing state")
         return state
 
-    def init_state(self, hands: Dict[str, Dict[str, List[str]]], threat_card_ids: List[str]) -> Dict[str, Any]:
-        return self._query({"mode": "init", "position": {"hands": hands}, "threatCardIds": threat_card_ids})
+    def last_goal_status(self) -> Optional[str]:
+        if isinstance(self.last_features, dict):
+            value = self.last_features.get("goalStatus")
+            if isinstance(value, str):
+                return value
+        return None
 
-    def update_state(self, hands: Dict[str, Dict[str, List[str]]], state: Dict[str, Any], played_card_id: str) -> Dict[str, Any]:
-        return self._query({"mode": "update", "position": {"hands": hands}, "state": state, "playedCardId": played_card_id})
+    def init_state(
+        self,
+        hands: Dict[str, Dict[str, List[str]]],
+        threat_card_ids: List[str],
+        goal_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"mode": "init", "position": {"hands": hands}, "threatCardIds": threat_card_ids}
+        if goal_context is not None:
+            payload["goalContext"] = goal_context
+        return self._query(payload)
+
+    def update_state(
+        self,
+        hands: Dict[str, Dict[str, List[str]]],
+        state: Dict[str, Any],
+        played_card_id: str,
+        goal_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"mode": "update", "position": {"hands": hands}, "state": state, "playedCardId": played_card_id}
+        if goal_context is not None:
+            payload["goalContext"] = goal_context
+        return self._query(payload)
 
 
 def format_feature_updates(feature_diff: Optional[Dict[str, Any]]) -> Optional[str]:
     if not feature_diff:
         return None
 
-    reasoning_roles = {"busy", "threat", "promotedWinner", "idle"}
+    reasoning_roles = {"busy", "threat", "promotedWinner", "idle", "winner"}
     impactful_removed_roles = {"busy", "threat", "promotedWinner"}
     updates: List[str] = []
 
@@ -631,19 +657,22 @@ def enumerate_runs(
     int,
     Optional[List[Tuple[str, str]]],
     Optional[str],
-    Optional[List[Tuple[int, int, str, str, List[str], int]]],
+    Optional[List[Tuple[int, int, str, str, List[str], int, str]]],
     List[DDDiscrepancy],
 ]:
+    goal_context = lambda tricks: {"goal": puzzle["goal"], "tricksWon": {"NS": tricks["NS"], "EW": tricks["EW"]}}
     hands = {seat: {suit: list(ranks) for suit, ranks in puzzle["hands"][seat].items()} for seat in SEAT_ORDER}
     threat_state: Optional[Dict[str, Any]] = None
+    initial_goal_status: Optional[str] = None
     threat_card_ids = list(puzzle.get("threatCardIds", []))
     if threat_client is not None and threat_card_ids:
-        threat_state = threat_client.init_state(hands, threat_card_ids)
+        threat_state = threat_client.init_state(hands, threat_card_ids, goal_context({"NS": 0, "EW": 0}))
+        initial_goal_status = threat_client.last_goal_status()
 
     run_no = 0
     selected_line: Optional[List[Tuple[str, str]]] = None
     selected_summary: Optional[str] = None
-    selected_dd_failures: Optional[List[Tuple[int, int, str, str, List[str], int]]] = None
+    selected_dd_failures: Optional[List[Tuple[int, int, str, str, List[str], int, str]]] = None
     discrepancies: List[DDDiscrepancy] = []
     stack: List[EnumState] = [
         EnumState(
@@ -654,6 +683,7 @@ def enumerate_runs(
             tricks_won={"NS": 0, "EW": 0},
             policy_rng={"seed": int(puzzle["rngSeed"]), "counter": 0},
             threat_state=threat_state,
+            goal_status=initial_goal_status,
             line=[],
             dd_failures=[],
         )
@@ -661,10 +691,10 @@ def enumerate_runs(
 
     while stack:
         node = stack.pop()
-        if all_hands_empty(node.hands):
+        if all_hands_empty(node.hands) or (node.goal_status == "assuredFailure" and len(node.trick) == 0):
             run_no += 1
             line_text = format_compact_line(node.line)
-            for position_index, trick_no, seat, actual_card, optimal_cards, max_tricks in node.dd_failures:
+            for position_index, trick_no, seat, actual_card, optimal_cards, max_tricks, severity in node.dd_failures:
                 discrepancies.append(
                     DDDiscrepancy(
                         run_no=run_no,
@@ -674,9 +704,11 @@ def enumerate_runs(
                         actual_card=actual_card,
                         optimal_cards=optimal_cards,
                         max_tricks=max_tricks,
+                        severity=severity,
                     )
                 )
-            summary_line = f"Run {run_no}  NS {node.tricks_won['NS']}-{node.tricks_won['EW']} EW  line: {line_text}"
+            goal_marker = " goal=dead" if node.goal_status == "assuredFailure" else ""
+            summary_line = f"Run {run_no}  NS {node.tricks_won['NS']}-{node.tricks_won['EW']} EW{goal_marker}  line: {line_text}"
             if not emit_summaries:
                 pass
             elif dd_discrepancies_only:
@@ -716,6 +748,7 @@ def enumerate_runs(
             if dd_validator is not None and should_validate_dd(dd_scope, node.turn):
                 dd = dd_validator.optimal_for_position(node.hands, node.trick, node.turn, puzzle["contract"]["strain"])
                 if dd.optimal_cards and chosen not in dd.optimal_cards:
+                    severity = "minor" if node.goal_status == "assuredFailure" else "major"
                     next_dd_failures.append(
                         (
                             len(node.line) + 1,
@@ -724,6 +757,7 @@ def enumerate_runs(
                             chosen,
                             dd.optimal_cards,
                             dd.max_tricks,
+                            severity,
                         )
                     )
             next_hands = copy.deepcopy(node.hands)
@@ -734,13 +768,19 @@ def enumerate_runs(
             next_turn = node.turn
             next_leader = node.leader
             next_tricks_won = {"NS": node.tricks_won["NS"], "EW": node.tricks_won["EW"]}
+            if len(next_trick) == 4:
+                winner_preview = resolve_trick_winner(next_trick, puzzle["contract"]["strain"])
+                next_tricks_won[side_of(winner_preview)] += 1
             next_threat_state = node.threat_state
+            next_goal_status = node.goal_status
             if next_threat_state is not None and threat_client is not None:
-                next_threat_state = threat_client.update_state(next_hands, next_threat_state, chosen)
+                next_threat_state = threat_client.update_state(next_hands, next_threat_state, chosen, goal_context(next_tricks_won))
+                # Goal-status is reliable for terminal checks at trick boundaries.
+                if len(next_trick) == 4:
+                    next_goal_status = threat_client.last_goal_status()
 
             if len(next_trick) == 4:
-                winner = resolve_trick_winner(next_trick, puzzle["contract"]["strain"])
-                next_tricks_won[side_of(winner)] += 1
+                winner = winner_preview
                 next_leader = winner
                 next_turn = winner
                 next_trick = []
@@ -756,6 +796,7 @@ def enumerate_runs(
                     tricks_won=next_tricks_won,
                     policy_rng={"seed": int(next_rng["seed"]), "counter": int(next_rng["counter"])},
                     threat_state=copy.deepcopy(next_threat_state) if next_threat_state is not None else None,
+                    goal_status=next_goal_status,
                     line=next_line,
                     dd_failures=next_dd_failures,
                 )
@@ -771,8 +812,9 @@ def run_movie(
     forced_line: Optional[List[Tuple[str, str]]] = None,
     dd_validator: Optional[DoubleDummyValidator] = None,
     dd_scope: str = "none",
-    forced_dd_failures: Optional[List[Tuple[int, int, str, str, List[str], int]]] = None,
+    forced_dd_failures: Optional[List[Tuple[int, int, str, str, List[str], int, str]]] = None,
 ) -> None:
+    goal_context = lambda tricks: {"goal": puzzle["goal"], "tricksWon": {"NS": tricks["NS"], "EW": tricks["EW"]}}
     hands = {
         seat: {suit: list(ranks) for suit, ranks in puzzle["hands"][seat].items()}
         for seat in SEAT_ORDER
@@ -794,7 +836,7 @@ def run_movie(
     print("")
     trick_details: List[Tuple[str, Optional[str], Optional[str]]] = []
     forced_idx = 0
-    forced_dd_by_position: Dict[int, Tuple[int, int, str, str, List[str], int]] = {}
+    forced_dd_by_position: Dict[int, Tuple[int, int, str, str, List[str], int, str]] = {}
     if forced_dd_failures:
         for rec in forced_dd_failures:
             forced_dd_by_position[rec[0]] = rec
@@ -805,7 +847,8 @@ def run_movie(
     if threat_card_ids:
         threat_client = PersistentThreatStateClient()
         threat_client.start()
-        threat_state = threat_client.init_state(hands, threat_card_ids)
+        threat_state = threat_client.init_state(hands, threat_card_ids, goal_context(tricks_won))
+    goal_status: Optional[str] = threat_client.last_goal_status() if threat_client is not None else None
     try:
         while not all_hands_empty(hands):
             legal = legal_cards(hands, turn, trick)
@@ -880,24 +923,25 @@ def run_movie(
                 dd = dd_validator.optimal_for_position(hands, trick, turn, puzzle["contract"]["strain"])
                 if dd.optimal_cards:
                     if chosen not in dd.optimal_cards:
+                        severity = "minor" if goal_status == "assuredFailure" else "major"
                         chosen_tricks = dd.tricks_by_card.get(chosen)
                         if isinstance(chosen_tricks, int):
                             delta = chosen_tricks - dd.max_tricks
                             dd_line = (
-                                f"DD: actual={pretty_card(chosen)} "
+                                f"DD[{severity}]: actual={pretty_card(chosen)} "
                                 f"optimal={{{', '.join(pretty_card(c) for c in dd.optimal_cards)}}} "
                                 f"ΔDD={delta}"
                             )
                         else:
                             dd_line = (
-                                f"DD: actual={pretty_card(chosen)} "
+                                f"DD[{severity}]: actual={pretty_card(chosen)} "
                                 f"optimal={{{', '.join(pretty_card(c) for c in dd.optimal_cards)}}}"
                             )
             if dd_line is None and position_index in forced_dd_by_position:
-                _, _, seat, actual_card, optimal_cards, max_tricks = forced_dd_by_position[position_index]
+                _, _, seat, actual_card, optimal_cards, max_tricks, severity = forced_dd_by_position[position_index]
                 if seat == turn and actual_card == chosen and optimal_cards:
                     dd_line = (
-                        f"DD: actual={pretty_card(actual_card)} "
+                        f"DD[{severity}]: actual={pretty_card(actual_card)} "
                         f"optimal={{{', '.join(pretty_card(c) for c in optimal_cards)}}} "
                         f"max={max_tricks}"
                     )
@@ -905,7 +949,13 @@ def run_movie(
             trick.append(Play(turn, suit, rank))
             feature_line: Optional[str] = None
             if threat_state is not None and threat_client is not None:
-                threat_state = threat_client.update_state(hands, threat_state, chosen)
+                projected_tricks = {"NS": tricks_won["NS"], "EW": tricks_won["EW"]}
+                if len(trick) == 4:
+                    winner_preview = resolve_trick_winner(trick, puzzle["contract"]["strain"])
+                    projected_tricks[side_of(winner_preview)] += 1
+                threat_state = threat_client.update_state(hands, threat_state, chosen, goal_context(projected_tricks))
+                if len(trick) == 4:
+                    goal_status = threat_client.last_goal_status()
                 feature_line = format_feature_updates(threat_client.last_feature_diff)
             trick_details.append((detail, feature_line, dd_line))
 
@@ -929,6 +979,10 @@ def run_movie(
                 if dd_line:
                     print(f"    {dd_line}")
             print("")
+            if goal_status == "assuredFailure":
+                print("GOAL FAILED: assured failure reached — run stopped early")
+                print(f"Final tricks: NS {tricks_won['NS']} - EW {tricks_won['EW']}")
+                return
             leader = winner
             turn = leader
             trick = []
@@ -996,7 +1050,7 @@ def main() -> None:
             for d in discrepancies:
                 print(
                     f"DD Run {d.run_no}  pos {d.position_index} trick {d.trick_no}  {d.seat} played {pretty_card(d.actual_card)}  "
-                    f"optimal {{{', '.join(pretty_card(c) for c in d.optimal_cards)}}} max={d.max_tricks}"
+                    f"optimal {{{', '.join(pretty_card(c) for c in d.optimal_cards)}}} max={d.max_tricks} severity={d.severity}"
                 )
         if args.show_run is not None:
             if selected is None:

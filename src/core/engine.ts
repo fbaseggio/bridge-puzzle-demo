@@ -2,6 +2,7 @@ import type { EngineEvent, Goal, Hand, Play, Policy, Problem, Rank, Seat, State,
 import { evaluatePolicy } from '../ai/evaluatePolicy';
 import { initClassification, parseCardId, toCardId, updateClassificationAfterPlay, type CardId } from '../ai/threatModel';
 import { classInfoForCard } from './equivalence';
+import { computeGoalStatus, remainingTricksFromHands } from './goal';
 
 const TURN_ORDER: Seat[] = ['N', 'E', 'S', 'W'];
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
@@ -51,6 +52,7 @@ function cloneState(state: State): State {
     trick: state.trick.map((p) => ({ ...p })),
     trickClassIds: [...state.trickClassIds],
     tricksWon: { ...state.tricksWon },
+    goalStatus: state.goalStatus,
     rng: { ...state.rng },
     goal: { ...state.goal },
     userControls: [...state.userControls],
@@ -138,6 +140,10 @@ function evaluateGoal(goal: Goal, tricksWon: { NS: number; EW: number }): boolea
     return tricksWon[goal.side] >= goal.n;
   }
   return false;
+}
+
+function refreshGoalStatus(state: State): void {
+  state.goalStatus = computeGoalStatus(state.goal, state.tricksWon, remainingTricksFromHands(state.hands));
 }
 
 function randomUnit(rng: State['rng']): number {
@@ -506,6 +512,13 @@ function applyOnePlay(
   state.leader = winner;
   state.turn = winner;
   events.push({ type: 'trickComplete', winner, trick: completedTrick });
+  refreshGoalStatus(state);
+
+  if (state.goalStatus !== 'live') {
+    state.phase = 'end';
+    events.push({ type: 'handComplete', success: evaluateGoal(state.goal, state.tricksWon), tricksWon: { ...state.tricksWon } });
+    return events;
+  }
 
   if (allHandsEmpty(state.hands)) {
     state.phase = 'end';
@@ -552,6 +565,7 @@ export function init(problem: Problem): State {
     trick: [],
     trickClassIds: [],
     tricksWon: { NS: 0, EW: 0 },
+    goalStatus: 'live',
     phase: 'awaitUser',
     rng: { seed: problem.rngSeed >>> 0, counter: 0 },
     goal: { ...problem.goal },
@@ -567,6 +581,7 @@ export function init(problem: Problem): State {
   } else {
     state.phase = isUserTurn(state) ? 'awaitUser' : 'auto';
   }
+  refreshGoalStatus(state);
 
   return state;
 }
@@ -617,7 +632,7 @@ export function apply(state: State, play: Play): { state: State; events: EngineE
 
   events.push(...applyOnePlay(next, play, 'played'));
 
-  while (!isUserTurn(next)) {
+  while (next.phase !== 'end' && !isUserTurn(next)) {
     if (allHandsEmpty(next.hands)) break;
     next.phase = 'auto';
     const policy = next.policies[next.turn];
@@ -649,6 +664,10 @@ export function apply(state: State, play: Play): { state: State; events: EngineE
         auto.replay
       )
     );
+  }
+
+  if (next.phase === 'end') {
+    return { state: next, events };
   }
 
   if (allHandsEmpty(next.hands)) {

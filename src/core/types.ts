@@ -2,7 +2,7 @@ export type Suit = 'S' | 'H' | 'D' | 'C';
 export type Rank = 'A' | 'K' | 'Q' | 'J' | 'T' | '9' | '8' | '7' | '6' | '5' | '4' | '3' | '2';
 export type Seat = 'N' | 'E' | 'S' | 'W';
 export type CardId = `${Suit}${Rank}`;
-export type CardRole = 'promotedWinner' | 'threat' | 'busy' | 'idle' | 'default';
+export type CardRole = 'promotedWinner' | 'threat' | 'busy' | 'idle' | 'winner' | 'default';
 export type DecisionRecord = {
   index: number;
   seat: 'E' | 'W';
@@ -48,6 +48,7 @@ export type Contract = {
 
 export type Play = { seat: Seat; suit: Suit; rank: Rank };
 export type Goal = { type: 'minTricks'; side: Side; n: number };
+export type GoalStatus = 'live' | 'assuredSuccess' | 'assuredFailure';
 export type Policy = { kind: 'randomLegal' | 'threatAware' };
 
 export type Problem = {
@@ -100,6 +101,7 @@ export type State = {
   trick: Play[];
   trickClassIds: string[];
   tricksWon: { NS: number; EW: number };
+  goalStatus: GoalStatus;
   phase: 'awaitUser' | 'auto' | 'end';
   rng: RngState;
   goal: Goal;

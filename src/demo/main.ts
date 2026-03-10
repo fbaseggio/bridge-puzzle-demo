@@ -282,7 +282,8 @@ function rankColorClass(cardId: CardId, featureSource: Pick<State, 'cardRoles' |
   const features = buildFeatureStateFromRuntime({
     threat: (featureSource.threat as ThreatContext | null) ?? null,
     threatLabels: featureSource.threatLabels,
-    cardRoles: featureSource.cardRoles
+    cardRoles: featureSource.cardRoles,
+    goalStatus: state.goalStatus
   });
   const color = getRankColorForFeatureRole(features.cardRoleById[cardId] ?? 'default', teachingMode);
   return color === 'purple'
@@ -291,7 +292,9 @@ function rankColorClass(cardId: CardId, featureSource: Pick<State, 'cardRoles' |
       ? 'rank--green'
       : color === 'blue'
         ? 'rank--blue'
-        : 'rank--black';
+        : color === 'grey'
+          ? 'rank--grey'
+          : 'rank--black';
 }
 
 function appendRankContent(target: HTMLElement, rank: Rank, colorClass: string, isEquivalent = false): void {
@@ -928,7 +931,8 @@ function cardStatusSnapshot(
   const features = buildFeatureStateFromRuntime({
     threat: (s.threat as ThreatContext | null) ?? null,
     threatLabels: s.threatLabels,
-    cardRoles: s.cardRoles
+    cardRoles: s.cardRoles,
+    goalStatus: s.goalStatus
   });
   for (const seat of seatOrder) {
     for (const suit of suitOrder) {
@@ -1415,6 +1419,16 @@ function formatGoal(s: State): string {
   return 'Unknown goal';
 }
 
+function formatGoalStatus(s: State): string {
+  if (s.goalStatus === 'assuredSuccess') return 'Assured success';
+  if (s.goalStatus === 'assuredFailure') return 'Assured failure';
+  return 'Live';
+}
+
+function handsAreEmpty(s: State): boolean {
+  return seatOrder.every((seat) => suitOrder.every((suit) => s.hands[seat][suit].length === 0));
+}
+
 function currentViewState(): State {
   return trickFrozen && frozenViewState ? frozenViewState : state;
 }
@@ -1785,7 +1799,7 @@ function runTurn(play: Play): void {
     if (verboseLog) {
       logs = [
         ...logs,
-        `[GOAL] endOfRun=true NSwon=${complete.tricksWon.NS} EWwon=${complete.tricksWon.EW} required${state.goal.side}>=${state.goal.n} success=${complete.success}`,
+        `[GOAL] endOfRun=true goalStatus=${state.goalStatus} NSwon=${complete.tricksWon.NS} EWwon=${complete.tricksWon.EW} required${state.goal.side}>=${state.goal.n} success=${complete.success}`,
         `[RUNSTATUS] ${runStatus} -> ${nextStatus}`
       ].slice(-500);
     }
@@ -2069,6 +2083,7 @@ function renderStatusPanel(view: State): HTMLElement {
   facts.innerHTML = `
     <div><span class="k">Contract</span><span class="v">${view.contract.strain}</span></div>
     <div><span class="k">Goal</span><span class="v">${formatGoal(view)}</span></div>
+    <div><span class="k">Goal state</span><span class="v">${formatGoalStatus(view)}</span></div>
     <div class="tricks"><span class="k">Tricks</span><span class="v heavy">NS ${view.tricksWon.NS} - EW ${view.tricksWon.EW}</span></div>
     <div class="meta-row"><span class="k">Leader</span><span class="v turn-meta">${view.leader}</span></div>
     <div class="meta-row"><span class="k">Turn</span><span class="v turn-meta turn-emph">${view.turn}</span></div>
@@ -2279,7 +2294,10 @@ function render(): void {
   if (runStatus === 'success' || runStatus === 'failure') {
     const banner = document.createElement('div');
     banner.className = `banner ${runStatus === 'success' ? 'ok' : 'fail'}`;
-    banner.textContent = runStatus === 'success' ? 'Success - goal achieved' : 'Not enough tricks - try again';
+    const earlyGuaranteedFailure = runStatus === 'failure' && view.goalStatus === 'assuredFailure' && !handsAreEmpty(view);
+    banner.textContent = runStatus === 'success'
+      ? 'Success - goal achieved'
+      : (earlyGuaranteedFailure ? 'Goal already impossible - run stopped early' : 'Not enough tricks - try again');
     root.appendChild(banner);
   }
   if (runStatus === 'success' && playAgainAvailable) {

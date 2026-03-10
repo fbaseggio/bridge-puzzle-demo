@@ -1,11 +1,12 @@
-import type { CardRole as EngineCardRole, Seat, Suit, State } from '../core';
-import type { CardId, ClassificationState, StopStatus, ThreatContext } from './threatModel';
+import type { CardRole as EngineCardRole, Goal, GoalStatus, Seat, Suit, State } from '../core';
+import { computeGoalStatus, remainingTricksFromHands } from '../core';
+import type { CardId, ClassificationState, Position, StopStatus, ThreatContext } from './threatModel';
 
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
 const RANK_ORDER: string[] = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
 
 export type FeatureCardRole = EngineCardRole;
-export type FeatureColor = 'purple' | 'green' | 'blue' | 'black';
+export type FeatureColor = 'purple' | 'green' | 'blue' | 'black' | 'grey';
 
 export type FeatureSuitState = {
   suit: Suit;
@@ -18,9 +19,11 @@ export type FeatureSuitState = {
 };
 
 export type FeatureState = {
+  goalStatus: GoalStatus | null;
   threatCardIds: CardId[];
   threatBySuit: Partial<Record<Suit, FeatureSuitState>>;
   cardRoleById: Partial<Record<CardId, FeatureCardRole>>;
+  highCardEntries: Record<Seat, Suit[]>;
   labels: {
     E: { busy: CardId[]; idle: CardId[] };
     W: { busy: CardId[]; idle: CardId[] };
@@ -43,7 +46,51 @@ export type FeatureDiff = {
   removedCards: CardId[];
   roleChanges: FeatureRoleChange[];
   suitChanges: FeatureSuitChange[];
+  goalStatusChange?: { before: GoalStatus | null; after: GoalStatus | null };
+  highCardEntryChanges?: Array<{ seat: Seat; added: Suit[]; removed: Suit[] }>;
 };
+
+function rankStrength(rank: string): number {
+  const idx = RANK_ORDER.indexOf(rank);
+  return idx < 0 ? -1 : (RANK_ORDER.length - idx);
+}
+
+function partnerOf(seat: Seat): Seat {
+  if (seat === 'N') return 'S';
+  if (seat === 'S') return 'N';
+  if (seat === 'E') return 'W';
+  return 'E';
+}
+
+function computeHighCardEntries(
+  hands: State['hands'] | Position['hands'] | undefined,
+  cardRoleById: Partial<Record<CardId, FeatureCardRole>>
+): Record<Seat, Suit[]> {
+  const out: Record<Seat, Suit[]> = { N: [], E: [], S: [], W: [] };
+  if (!hands) return out;
+
+  for (const seat of ['N', 'E', 'S', 'W'] as const) {
+    const partner = partnerOf(seat);
+    const entries: Suit[] = [];
+    for (const suit of SUITS) {
+      const winnerRanks: string[] = [];
+      for (const rank of hands[seat][suit]) {
+        const cardId = `${suit}${rank}` as CardId;
+        if (cardRoleById[cardId] === 'winner') winnerRanks.push(rank);
+      }
+      if (winnerRanks.length === 0) continue;
+      const partnerRanks = hands[partner][suit];
+      if (partnerRanks.length === 0) continue;
+      const hasLowerPartnerCard = winnerRanks.some((w) => {
+        const wv = rankStrength(w);
+        return partnerRanks.some((p) => rankStrength(p) < wv);
+      });
+      if (hasLowerPartnerCard) entries.push(suit);
+    }
+    out[seat] = entries;
+  }
+  return out;
+}
 
 function rankIndex(cardId: CardId): number {
   return RANK_ORDER.indexOf(cardId.slice(1));
@@ -81,11 +128,14 @@ function normalizeThreatBySuit(ctx: ThreatContext | null | undefined): FeatureSt
   return out;
 }
 
-export function buildFeatureStateFromClassification(state: ClassificationState): FeatureState {
+export function buildFeatureStateFromClassification(state: ClassificationState, position?: Position): FeatureState {
+  const cardRoleById = { ...state.perCardRole };
   return {
+    goalStatus: null,
     threatCardIds: [...state.threat.threatCardIds],
     threatBySuit: normalizeThreatBySuit(state.threat),
-    cardRoleById: { ...state.perCardRole },
+    cardRoleById,
+    highCardEntries: computeHighCardEntries(position?.hands, cardRoleById),
     labels: {
       E: { busy: sortCardIds(state.labels.E.busy), idle: sortCardIds(state.labels.E.idle) },
       W: { busy: sortCardIds(state.labels.W.busy), idle: sortCardIds(state.labels.W.idle) }
@@ -97,11 +147,23 @@ export function buildFeatureStateFromRuntime(input: {
   threat: ThreatContext | null;
   threatLabels: State['threatLabels'];
   cardRoles: State['cardRoles'];
+  goal?: Goal;
+  tricksWon?: { NS: number; EW: number };
+  hands?: State['hands'];
+  goalStatus?: GoalStatus;
 }): FeatureState {
+  const resolvedGoalStatus =
+    input.goalStatus ??
+    (input.goal && input.tricksWon && input.hands
+      ? computeGoalStatus(input.goal, input.tricksWon, remainingTricksFromHands(input.hands))
+      : null);
+  const cardRoleById = { ...(input.cardRoles ?? {}) };
   return {
+    goalStatus: resolvedGoalStatus,
     threatCardIds: [...(input.threat?.threatCardIds ?? [])],
     threatBySuit: normalizeThreatBySuit(input.threat),
-    cardRoleById: { ...(input.cardRoles ?? {}) },
+    cardRoleById,
+    highCardEntries: computeHighCardEntries(input.hands, cardRoleById),
     labels: input.threatLabels
       ? {
           E: { busy: sortCardIds(input.threatLabels.E.busy), idle: sortCardIds(input.threatLabels.E.idle) },
@@ -149,7 +211,28 @@ export function diffFeatureStates(before: FeatureState, after: FeatureState): Fe
     }
   }
 
-  return { removedCards, roleChanges, suitChanges };
+  const goalStatusChange =
+    before.goalStatus !== after.goalStatus
+      ? { before: before.goalStatus, after: after.goalStatus }
+      : undefined;
+
+  const highCardEntryChanges = (['N', 'E', 'S', 'W'] as const)
+    .map((seat) => {
+      const prev = new Set(before.highCardEntries[seat] ?? []);
+      const next = new Set(after.highCardEntries[seat] ?? []);
+      const added = SUITS.filter((suit) => !prev.has(suit) && next.has(suit));
+      const removed = SUITS.filter((suit) => prev.has(suit) && !next.has(suit));
+      return { seat, added, removed };
+    })
+    .filter((c) => c.added.length > 0 || c.removed.length > 0);
+
+  return {
+    removedCards,
+    roleChanges,
+    suitChanges,
+    goalStatusChange,
+    highCardEntryChanges: highCardEntryChanges.length > 0 ? highCardEntryChanges : undefined
+  };
 }
 
 export function getRankColorForFeatureRole(role: FeatureCardRole, teachingMode: boolean): FeatureColor {
@@ -157,6 +240,6 @@ export function getRankColorForFeatureRole(role: FeatureCardRole, teachingMode: 
   if (role === 'promotedWinner') return 'purple';
   if (role === 'threat') return 'green';
   if (role === 'busy') return 'blue';
-  return 'black';
+  if (role === 'winner' || role === 'idle') return 'black';
+  return 'grey';
 }
-

@@ -314,6 +314,10 @@ body {
   color: #111827;
 }
 
+.rank.rank--grey {
+  color: #6b7280;
+}
+
 .rank.rank--green {
   color: #15803d;
   text-shadow: 0 0 0.5px rgba(22, 101, 52, 0.28);
