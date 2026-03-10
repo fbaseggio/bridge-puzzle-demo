@@ -1143,6 +1143,17 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
           );
         }
       }
+      if (event.ddPolicy) {
+        if (event.ddPolicy.bound) {
+          lines.push(
+            `[DD-POLICY] problem=${event.ddPolicy.problemId} bound=yes base={${event.ddPolicy.baseCandidates.join(',') || '-'}} allowed={${event.ddPolicy.allowedCandidates.join(',') || '-'}}`
+          );
+        } else if (event.ddPolicy.fallback) {
+          lines.push(
+            `[DD-POLICY] problem=${event.ddPolicy.problemId} bound=no reason=empty-intersection base={${event.ddPolicy.baseCandidates.join(',') || '-'}} optimal={${event.ddPolicy.allowedCandidates.join(',') || '-'}} fallback=base`
+          );
+        }
+      }
       if (threatDetail) {
         const leadSuit = shadow.trick[0]?.suit ?? 'none';
         const legalCount = legalPlays(shadow).length;

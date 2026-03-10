@@ -2,6 +2,7 @@ import type { Hand, Play, Policy, Rank, RngState, Seat, State, Suit } from '../c
 import { computeDiscardTiers, type DiscardTiers, getIdleThreatThresholdRank } from './defenderDiscard';
 import { parseCardId, toCardId, type CardId, type DefenderLabels, type ThreatContext } from './threatModel';
 import { classInfoForCard } from '../core/equivalence';
+import { applyStrictDdFilter, buildCanonicalPositionSignature, type DdPolicyTrace } from './ddPolicy';
 
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
 const SEAT_ORDER: Seat[] = ['N', 'E', 'S', 'W'];
@@ -42,6 +43,8 @@ function chooseLowestByRank(cards: CardId[]): CardId | null {
 export type EvaluatePolicyInput = {
   policy: Policy;
   seat: 'E' | 'W';
+  problemId?: string;
+  contractStrain?: Suit | 'NT';
   hands: Record<Seat, Hand>;
   trick: Play[];
   threat: ThreatContext | null;
@@ -56,6 +59,7 @@ export type EvaluatePolicyOutput = {
   policyClassByCard?: Record<string, string>;
   tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
   discardTiers?: DiscardTiers;
+  ddPolicy?: DdPolicyTrace;
   rngBefore: RngState;
   rngAfter: RngState;
 };
@@ -130,18 +134,24 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
   const leadSuit = trick[0]?.suit ?? null;
   const rngBefore = { seed: input.rng.seed >>> 0, counter: input.rng.counter };
   let rngAfter = { ...rngBefore };
+  const contractStrain = input.contractStrain ?? 'NT';
+  const signature = buildCanonicalPositionSignature({ contractStrain, seat, hands, trick });
 
   if (policy.kind === 'randomLegal') {
     const legal = legalPlaysForSeat(hands, seat, leadSuit);
-    const [chosenCardId, nextRng] = chooseUniformLegalCardId(hands, seat, leadSuit, rngAfter);
+    const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
+    const ddFiltered = applyStrictDdFilter(input.problemId, signature, legalCardIds);
+    const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
     rngAfter = nextRng;
+    const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
     const chosenBucket = 'legal';
-    const bucketCards = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
+    const bucketCards = [...ddFiltered.candidates];
     return {
       chosenCardId,
       chosenBucket,
       bucketCards,
       policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, bucketCards),
+      ddPolicy: ddFiltered.trace,
       rngBefore,
       rngAfter
     };
@@ -149,15 +159,19 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
 
   if (leadSuit === null) {
     const legal = legalPlaysForSeat(hands, seat, null);
-    const [chosenCardId, nextRng] = chooseUniformLegalCardId(hands, seat, null, rngAfter);
+    const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
+    const ddFiltered = applyStrictDdFilter(input.problemId, signature, legalCardIds);
+    const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
     rngAfter = nextRng;
+    const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
     const chosenBucket = 'lead:none';
-    const bucketCards = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
+    const bucketCards = [...ddFiltered.candidates];
     return {
       chosenCardId,
       chosenBucket,
       bucketCards,
       policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, bucketCards),
+      ddPolicy: ddFiltered.trace,
       rngBefore,
       rngAfter
     };
@@ -176,14 +190,16 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
           return Math.max(max, RANK_STRENGTH[play.rank]);
         }, 0);
         const winningIdle = idleCards.filter((cardId) => RANK_STRENGTH[rankOfCardId(cardId)] > highestSoFar);
-        const chosenCardId = chooseLowestByRank(winningIdle);
+        const ddFiltered = applyStrictDdFilter(input.problemId, signature, winningIdle);
+        const chosenCardId = chooseLowestByRank(ddFiltered.candidates);
         if (chosenCardId) {
           const chosenBucket = 'follow:idle-cheap-win';
           return {
             chosenCardId,
             chosenBucket,
-            bucketCards: [...winningIdle],
-            policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, winningIdle),
+            bucketCards: [...ddFiltered.candidates],
+            policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+            ddPolicy: ddFiltered.trace,
             rngBefore,
             rngAfter
           };
@@ -203,14 +219,16 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
           const partnerCanBeatThreat = (hands[partnerSeat][leadSuit] ?? []).some((rank) => RANK_STRENGTH[rank] > threatRankValue);
           if (!partnerCanBeatThreat) {
             const covering = busyCards.filter((cardId) => RANK_STRENGTH[rankOfCardId(cardId)] > threatRankValue);
-            const chosenCardId = chooseLowestByRank(covering);
+            const ddFiltered = applyStrictDdFilter(input.problemId, signature, covering);
+            const chosenCardId = chooseLowestByRank(ddFiltered.candidates);
             if (chosenCardId) {
               const chosenBucket = 'follow:busy-protect-threat';
               return {
                 chosenCardId,
                 chosenBucket,
-                bucketCards: [...covering],
-                policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, covering),
+                bucketCards: [...ddFiltered.candidates],
+                policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+                ddPolicy: ddFiltered.trace,
                 rngBefore,
                 rngAfter
               };
@@ -221,15 +239,18 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     }
 
     if (!threat || !threatLabels) {
-      const [chosenCardId, nextRng] = chooseUniformLegalCardId(hands, seat, leadSuit, rngAfter);
-      rngAfter = nextRng;
-      const chosenBucket = 'follow:baseline';
       const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank) as CardId);
+      const ddFiltered = applyStrictDdFilter(input.problemId, signature, bucketCards);
+      const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
+      rngAfter = nextRng;
+      const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
+      const chosenBucket = 'follow:baseline';
       return {
         chosenCardId,
         chosenBucket,
-        bucketCards,
-        policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, bucketCards),
+        bucketCards: [...ddFiltered.candidates],
+        policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+        ddPolicy: ddFiltered.trace,
         rngBefore,
         rngAfter
       };
@@ -237,15 +258,18 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
 
     const threshold = getIdleThreatThresholdRank(leadSuit, threat, threatLabels);
     if (!threshold) {
-      const [chosenCardId, nextRng] = chooseUniformLegalCardId(hands, seat, leadSuit, rngAfter);
-      rngAfter = nextRng;
-      const chosenBucket = 'follow:baseline';
       const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank) as CardId);
+      const ddFiltered = applyStrictDdFilter(input.problemId, signature, bucketCards);
+      const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
+      rngAfter = nextRng;
+      const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
+      const chosenBucket = 'follow:baseline';
       return {
         chosenCardId,
         chosenBucket,
-        bucketCards,
-        policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, bucketCards),
+        bucketCards: [...ddFiltered.candidates],
+        policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+        ddPolicy: ddFiltered.trace,
         rngBefore,
         rngAfter
       };
@@ -254,17 +278,18 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     const below = inSuit.filter((p) => RANK_STRENGTH[p.rank] < RANK_STRENGTH[threshold]);
     const above = inSuit.filter((p) => RANK_STRENGTH[p.rank] >= RANK_STRENGTH[threshold]);
     const bucket = below.length > 0 ? below : above;
-    const [idx, nextRng] = pickRandomIndex(bucket.length, rngAfter);
-    rngAfter = nextRng;
-    const selected = bucket[idx] ?? bucket[0] ?? inSuit[0] ?? null;
-    const chosenCardId = selected ? (toCardId(selected.suit, selected.rank) as CardId) : null;
-    const chosenBucket = below.length > 0 ? 'follow:below' : 'follow:above';
     const bucketCards = bucket.map((p) => toCardId(p.suit, p.rank) as CardId);
+    const ddFiltered = applyStrictDdFilter(input.problemId, signature, bucketCards);
+    const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
+    rngAfter = nextRng;
+    const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
+    const chosenBucket = below.length > 0 ? 'follow:below' : 'follow:above';
     return {
       chosenCardId,
       chosenBucket,
-      bucketCards,
-      policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, bucketCards),
+      bucketCards: [...ddFiltered.candidates],
+      policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+      ddPolicy: ddFiltered.trace,
       rngBefore,
       rngAfter
     };
@@ -292,10 +317,11 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     { name: 'tier5', cards: tiers.tier5 }
   ];
   const chosen = ordered.find((o) => o.cards.length > 0) ?? { name: 'tier5', cards: tiers.tier5 };
-  const [idx, nextRng] = pickRandomIndex(chosen.cards.length, rngAfter);
+  const ddFiltered = applyStrictDdFilter(input.problemId, signature, chosen.cards);
+  const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
   rngAfter = nextRng;
-  const chosenCardId = chosen.cards[idx] ?? chosen.cards[0] ?? null;
-  const policyClassByCard = buildPolicyClassByCard(hands, seat, chosen.name, chosen.cards) ?? {};
+  const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
+  const policyClassByCard = buildPolicyClassByCard(hands, seat, chosen.name, ddFiltered.candidates) ?? {};
   for (const card of tiers.tier2) {
     policyClassByCard[card] = `semiIdle:${card[0]}`;
   }
@@ -311,10 +337,11 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
   return {
     chosenCardId,
     chosenBucket: chosen.name,
-    bucketCards: [...chosen.cards],
+    bucketCards: [...ddFiltered.candidates],
     policyClassByCard,
     tierBuckets,
     discardTiers: tiers,
+    ddPolicy: ddFiltered.trace,
     rngBefore,
     rngAfter
   };

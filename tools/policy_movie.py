@@ -2,6 +2,7 @@
 import argparse
 import copy
 import json
+import os
 import random
 import re
 import subprocess
@@ -59,6 +60,39 @@ class DDDiscrepancy:
     severity: str
 
 
+class DDRecordExporter:
+    def __init__(self, path: str, emit_all_states: bool = False) -> None:
+        self.path = path
+        self.emit_all_states = emit_all_states
+        self._fh = open(path, "w", encoding="utf-8")
+        self._seen_signatures: set[str] = set()
+        self.records_written = 0
+
+    def close(self) -> None:
+        try:
+            self._fh.close()
+        except Exception:
+            pass
+
+    def should_emit(self, legal_moves: List[str], move_values: Dict[str, int]) -> bool:
+        if self.emit_all_states:
+            return True
+        if len(legal_moves) <= 1:
+            return False
+        values = {move_values.get(card) for card in legal_moves if card in move_values}
+        return len(values) > 1
+
+    def emit(self, record: Dict[str, Any]) -> None:
+        signature = record.get("signature")
+        if not isinstance(signature, str):
+            return
+        if signature in self._seen_signatures:
+            return
+        self._seen_signatures.add(signature)
+        self._fh.write(json.dumps(record, separators=(",", ":")) + "\n")
+        self.records_written += 1
+
+
 def next_seat(seat: str) -> str:
     i = SEAT_ORDER.index(seat)
     return SEAT_ORDER[(i + 1) % 4]
@@ -86,6 +120,60 @@ def card_sort_key(card_id: str) -> Tuple[int, int]:
 
 def sorted_cards(cards: List[str]) -> List[str]:
     return sorted(cards, key=card_sort_key)
+
+
+def sort_ranks_desc(ranks: List[str]) -> List[str]:
+    return sorted(ranks, key=lambda r: -RANK_STRENGTH.get(r, 0))
+
+
+def canonical_position_signature(
+    contract_strain: str,
+    side_to_act: str,
+    hands: Dict[str, Dict[str, List[str]]],
+    trick: List[Play],
+) -> str:
+    # Canonical, policy-agnostic signature:
+    # trump=<NT|S|H|D|C>|turn=<N|E|S|W>|trick=<seat:card,...>|hands=N:...|E:...|S:...|W:...
+    trick_text = ",".join(f"{p.seat}:{p.card_id}" for p in trick) if trick else "-"
+    hand_parts: List[str] = []
+    for seat in SEAT_ORDER:
+        suits: List[str] = []
+        for suit in SUIT_ORDER:
+            ranks = "".join(sort_ranks_desc(hands[seat][suit]))
+            suits.append(f"{suit}:{ranks or '-'}")
+        hand_parts.append(f"{seat}:" + ";".join(suits))
+    return f"trump={str(contract_strain).upper()}|turn={side_to_act}|trick={trick_text}|hands=" + "|".join(hand_parts)
+
+
+def build_dd_record(
+    puzzle: Dict[str, Any],
+    hands: Dict[str, Dict[str, List[str]]],
+    trick: List[Play],
+    side_to_act: str,
+    legal_moves: List[str],
+    dd: DDResult,
+    expected_policy_moves: Optional[List[str]] = None,
+    run_no: Optional[int] = None,
+    position_index: Optional[int] = None,
+) -> Dict[str, Any]:
+    move_values = {card: dd.tricks_by_card[card] for card in sorted_cards(list(dd.tricks_by_card.keys()))}
+    record: Dict[str, Any] = {
+        "signature": canonical_position_signature(puzzle["contract"]["strain"], side_to_act, hands, trick),
+        "sideToAct": side_to_act,
+        "legalMoves": sorted_cards(list(legal_moves)),
+        "moveValues": move_values,
+        "bestValue": dd.max_tricks,
+        "optimalMoves": sorted_cards(list(dd.optimal_cards)),
+    }
+    if expected_policy_moves:
+        record["expectedPolicyMoves"] = sorted_cards(list(expected_policy_moves))
+    if isinstance(puzzle.get("id"), str):
+        record["problemId"] = puzzle["id"]
+    if run_no is not None:
+        record["runNo"] = run_no
+    if position_index is not None:
+        record["positionIndex"] = position_index
+    return record
 
 
 class DoubleDummyValidator:
@@ -666,6 +754,7 @@ def enumerate_runs(
     dd_scope: str = "none",
     dd_discrepancies_only: bool = False,
     emit_summaries: bool = True,
+    dd_exporter: Optional[DDRecordExporter] = None,
 ) -> Tuple[
     int,
     Optional[List[Tuple[str, str]]],
@@ -749,6 +838,7 @@ def enumerate_runs(
 
         choices_with_rng: List[Tuple[str, Dict[str, Any], Optional[Dict[str, Any]]]] = []
         # tuple: (cardId, nextPolicyRng, policyResult)
+        expected_policy_moves: Optional[List[str]] = None
         if node.turn in ("N", "S"):
             for c in sorted_cards(legal):
                 choices_with_rng.append((c, node.policy_rng, None))
@@ -758,15 +848,32 @@ def enumerate_runs(
                 node.turn, policy, node.hands, node.trick, node.policy_rng, node.threat_state
             )
             candidates = [c for c in policy_candidates(policy_result, chosen) if c in legal]
+            expected_policy_moves = sorted_cards(candidates)
             for c in candidates:
                 choices_with_rng.append((c, next_rng, policy_result))
+
+        dd_for_node: Optional[DDResult] = None
+        if dd_validator is not None and should_validate_dd(dd_scope, node.turn):
+            dd_for_node = dd_validator.optimal_for_position(node.hands, node.trick, node.turn, puzzle["contract"]["strain"])
+            if dd_exporter is not None and dd_for_node.optimal_cards:
+                record = build_dd_record(
+                    puzzle,
+                    node.hands,
+                    node.trick,
+                    node.turn,
+                    legal,
+                    dd_for_node,
+                    expected_policy_moves=expected_policy_moves,
+                    position_index=len(node.line) + 1,
+                )
+                if dd_exporter.should_emit(record["legalMoves"], record["moveValues"]):
+                    dd_exporter.emit(record)
 
         # DFS: push in reverse so smallest deterministic choice is visited first.
         for chosen, next_rng, _policy_result in reversed(choices_with_rng):
             next_dd_failures = list(node.dd_failures)
-            if dd_validator is not None and should_validate_dd(dd_scope, node.turn):
-                dd = dd_validator.optimal_for_position(node.hands, node.trick, node.turn, puzzle["contract"]["strain"])
-                if dd.optimal_cards and chosen not in dd.optimal_cards:
+            if dd_for_node is not None:
+                if dd_for_node.optimal_cards and chosen not in dd_for_node.optimal_cards:
                     severity = "minor" if node.goal_status == "assuredFailure" else "major"
                     next_dd_failures.append(
                         (
@@ -774,8 +881,8 @@ def enumerate_runs(
                             (len(node.line) // 4) + 1,
                             node.turn,
                             chosen,
-                            dd.optimal_cards,
-                            dd.max_tricks,
+                            dd_for_node.optimal_cards,
+                            dd_for_node.max_tricks,
                             severity,
                         )
                     )
@@ -838,6 +945,7 @@ def run_movie(
     dd_validator: Optional[DoubleDummyValidator] = None,
     dd_scope: str = "none",
     forced_dd_failures: Optional[List[Tuple[int, int, str, str, List[str], int, str]]] = None,
+    dd_exporter: Optional[DDRecordExporter] = None,
 ) -> None:
     goal_context = lambda tricks: {"goal": puzzle["goal"], "tricksWon": {"NS": tricks["NS"], "EW": tricks["EW"]}}
     hands = {
@@ -952,6 +1060,22 @@ def run_movie(
             position_index = forced_idx if forced_line is not None else (len(trick_details) + trick_no * 4 + 1)
             if dd_validator is not None and should_validate_dd(dd_scope, turn):
                 dd = dd_validator.optimal_for_position(hands, trick, turn, puzzle["contract"]["strain"])
+                if dd_exporter is not None and dd.optimal_cards:
+                    expected_policy_moves: Optional[List[str]] = None
+                    if turn in ("E", "W") and policy_result is not None:
+                        expected_policy_moves = sorted_cards([c for c in policy_candidates(policy_result, chosen) if c in legal])
+                    record = build_dd_record(
+                        puzzle,
+                        hands,
+                        trick,
+                        turn,
+                        legal,
+                        dd,
+                        expected_policy_moves=expected_policy_moves,
+                        position_index=position_index,
+                    )
+                    if dd_exporter.should_emit(record["legalMoves"], record["moveValues"]):
+                        dd_exporter.emit(record)
                 if dd.optimal_cards:
                     if chosen not in dd.optimal_cards:
                         severity = "minor" if goal_status == "assuredFailure" else "major"
@@ -1048,6 +1172,8 @@ def main() -> None:
     parser.add_argument("--show-run", type=int, default=None, help="When used with --enumerate, replay this run number")
     parser.add_argument("--dd-scope", choices=["none", "ns", "ew", "all"], default="none", help="Enable double-dummy validation for selected side(s)")
     parser.add_argument("--dd-discrepancies-only", action="store_true", help="With --enumerate, print only runs that contain DD discrepancies")
+    parser.add_argument("--dd-export-jsonl", default=None, help="Write factual DD records (keyed by canonical signature) to this JSONL file")
+    parser.add_argument("--dd-export-all", action="store_true", help="With --dd-export-jsonl, emit all validated positions (default filters to useful varying states)")
     args = parser.parse_args()
 
     ns_script = [c.strip().upper() for c in args.ns_script.split(",") if c.strip()]
@@ -1055,59 +1181,80 @@ def main() -> None:
     dd_validator: Optional[DoubleDummyValidator] = None
     if args.dd_scope != "none":
         dd_validator = DoubleDummyValidator()
+    if args.dd_export_jsonl and args.dd_scope == "none":
+        raise RuntimeError("--dd-export-jsonl requires --dd-scope ns|ew|all")
     if args.show_run is not None and args.show_run <= 0:
         raise RuntimeError("--show-run must be >= 1")
 
-    if args.enumerate:
-        policy_client = PersistentPolicyClient()
-        threat_client: Optional[PersistentThreatStateClient] = None
-        policy_client.start()
-        if puzzle.get("threatCardIds"):
-            threat_client = PersistentThreatStateClient()
-            threat_client.start()
-        try:
-            total, selected, selected_summary, selected_dd_failures, discrepancies = enumerate_runs(
-                puzzle,
-                policy_client,
-                threat_client,
-                args.show_run,
-                dd_validator=dd_validator,
-                dd_scope=args.dd_scope,
-                dd_discrepancies_only=args.dd_discrepancies_only,
-                emit_summaries=(args.show_run is None),
-            )
-        finally:
-            policy_client.stop()
-            if threat_client is not None:
-                threat_client.stop()
-        if args.show_run is None:
-            print(f"Total runs: {total}")
-        if dd_validator is not None and args.show_run is None:
-            print(f"DD discrepancies: {len(discrepancies)}")
-            for d in discrepancies:
-                print(
-                    f"DD Run {d.run_no}  pos {d.position_index} trick {d.trick_no}  {d.seat} played {pretty_card(d.actual_card)}  "
-                    f"optimal {{{', '.join(pretty_card(c) for c in d.optimal_cards)}}} max={d.max_tricks} severity={d.severity}"
-                )
-        if args.show_run is not None:
-            if selected is None:
-                raise RuntimeError(f"Requested run {args.show_run} not found (total {total})")
-            if selected_summary:
-                print(selected_summary)
-            print("")
-            print(f"=== Replay Run {args.show_run} ===")
-            run_movie(
-                puzzle,
-                ns_script=[],
-                ns_random_seed=args.ns_seed,
-                forced_line=selected,
-                dd_validator=dd_validator,
-                dd_scope=args.dd_scope,
-                forced_dd_failures=selected_dd_failures,
-            )
-        return
+    dd_exporter: Optional[DDRecordExporter] = None
+    if args.dd_export_jsonl:
+        export_path = os.path.abspath(args.dd_export_jsonl)
+        dd_exporter = DDRecordExporter(export_path, emit_all_states=args.dd_export_all)
 
-    run_movie(puzzle, ns_script, args.ns_seed, dd_validator=dd_validator, dd_scope=args.dd_scope)
+    try:
+        if args.enumerate:
+            policy_client = PersistentPolicyClient()
+            threat_client: Optional[PersistentThreatStateClient] = None
+            policy_client.start()
+            if puzzle.get("threatCardIds"):
+                threat_client = PersistentThreatStateClient()
+                threat_client.start()
+            try:
+                total, selected, selected_summary, selected_dd_failures, discrepancies = enumerate_runs(
+                    puzzle,
+                    policy_client,
+                    threat_client,
+                    args.show_run,
+                    dd_validator=dd_validator,
+                    dd_scope=args.dd_scope,
+                    dd_discrepancies_only=args.dd_discrepancies_only,
+                    emit_summaries=(args.show_run is None),
+                    dd_exporter=dd_exporter,
+                )
+            finally:
+                policy_client.stop()
+                if threat_client is not None:
+                    threat_client.stop()
+            if args.show_run is None:
+                print(f"Total runs: {total}")
+            if dd_validator is not None and args.show_run is None:
+                print(f"DD discrepancies: {len(discrepancies)}")
+                for d in discrepancies:
+                    print(
+                        f"DD Run {d.run_no}  pos {d.position_index} trick {d.trick_no}  {d.seat} played {pretty_card(d.actual_card)}  "
+                        f"optimal {{{', '.join(pretty_card(c) for c in d.optimal_cards)}}} max={d.max_tricks} severity={d.severity}"
+                    )
+            if args.show_run is not None:
+                if selected is None:
+                    raise RuntimeError(f"Requested run {args.show_run} not found (total {total})")
+                if selected_summary:
+                    print(selected_summary)
+                print("")
+                print(f"=== Replay Run {args.show_run} ===")
+                run_movie(
+                    puzzle,
+                    ns_script=[],
+                    ns_random_seed=args.ns_seed,
+                    forced_line=selected,
+                    dd_validator=dd_validator,
+                    dd_scope=args.dd_scope,
+                    forced_dd_failures=selected_dd_failures,
+                    dd_exporter=dd_exporter,
+                )
+            return
+
+        run_movie(
+            puzzle,
+            ns_script,
+            args.ns_seed,
+            dd_validator=dd_validator,
+            dd_scope=args.dd_scope,
+            dd_exporter=dd_exporter,
+        )
+    finally:
+        if dd_exporter is not None:
+            dd_exporter.close()
+            print(f"DD records written: {dd_exporter.records_written} -> {dd_exporter.path}")
 
 
 if __name__ == "__main__":

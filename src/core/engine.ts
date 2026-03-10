@@ -209,8 +209,23 @@ type AutoChoice = {
   bucketCards?: CardId[];
   policyClassByCard?: Record<string, string>;
   tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
+  ddPolicy?: {
+    mode: 'strict';
+    problemId: string;
+    signature: string;
+    baseCandidates: CardId[];
+    allowedCandidates: CardId[];
+    bound: boolean;
+    fallback: boolean;
+  };
   decisionSig?: string;
-  replay?: { action: 'forced' | 'disabled'; index?: number; reason?: 'sig-mismatch' | 'card-not-legal'; card?: CardId };
+  replay?: {
+    action: 'forced' | 'disabled';
+    index?: number;
+    reason?: 'sig-mismatch' | 'card-not-legal' | 'class-not-legal';
+    card?: CardId;
+    forcedClassId?: string;
+  };
 };
 
 function decisionSignature(state: State): string {
@@ -406,6 +421,8 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
     const evaluated = evaluatePolicy({
       policy,
       seat: state.turn,
+      problemId: state.id,
+      contractStrain: state.contract.strain,
       hands: state.hands,
       trick: state.trick,
       threat: state.threat as any,
@@ -422,6 +439,7 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
       chosenBucket: evaluated.chosenBucket ?? 'legal',
       bucketCards: evaluated.bucketCards ?? legal.map((p) => toCardId(p.suit, p.rank)),
       policyClassByCard: evaluated.policyClassByCard,
+      ddPolicy: evaluated.ddPolicy,
       decisionSig,
       replay: replayNote
     };
@@ -432,6 +450,8 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
   const evaluated = evaluatePolicy({
     policy,
     seat: state.turn,
+    problemId: state.id,
+    contractStrain: state.contract.strain,
     hands: state.hands,
     trick: state.trick,
     threat: state.threat as any,
@@ -450,6 +470,7 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
     bucketCards: evaluated.bucketCards,
     policyClassByCard: evaluated.policyClassByCard,
     tierBuckets: evaluated.tierBuckets,
+    ddPolicy: evaluated.ddPolicy,
     decisionSig,
     replay: replayNote
   };
@@ -465,8 +486,23 @@ function applyOnePlay(
   bucketCards?: CardId[],
   policyClassByCard?: Record<string, string>,
   tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>,
+  ddPolicy?: {
+    mode: 'strict';
+    problemId: string;
+    signature: string;
+    baseCandidates: CardId[];
+    allowedCandidates: CardId[];
+    bound: boolean;
+    fallback: boolean;
+  },
   decisionSig?: string,
-  replay?: { action: 'forced' | 'disabled'; index?: number; reason?: 'sig-mismatch' | 'card-not-legal'; card?: CardId }
+  replay?: {
+    action: 'forced' | 'disabled';
+    index?: number;
+    reason?: 'sig-mismatch' | 'card-not-legal' | 'class-not-legal';
+    card?: CardId;
+    forcedClassId?: string;
+  }
 ): EngineEvent[] {
   const events: EngineEvent[] = [];
   const playedId = toCardId(play.suit, play.rank) as CardId;
@@ -480,7 +516,7 @@ function applyOnePlay(
   state.trick.push({ ...play });
   state.trickClassIds.push(`${play.seat}:${playedClass}`);
   if (eventType === 'autoplay') {
-    events.push({ type: eventType, play: { ...play }, preferredDiscard, chosenBucket, bucketCards, policyClassByCard, tierBuckets, decisionSig, replay });
+    events.push({ type: eventType, play: { ...play }, preferredDiscard, chosenBucket, bucketCards, policyClassByCard, tierBuckets, ddPolicy, decisionSig, replay });
   } else {
     events.push({ type: eventType, play: { ...play } });
   }
@@ -669,6 +705,7 @@ export function apply(state: State, play: Play): { state: State; events: EngineE
         auto.bucketCards,
         auto.policyClassByCard,
         auto.tierBuckets,
+        auto.ddPolicy,
         auto.decisionSig,
         auto.replay
       )

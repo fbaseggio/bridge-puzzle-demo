@@ -127,6 +127,15 @@ export type EngineEvent =
       bucketCards?: CardId[];
       policyClassByCard?: Record<string, string>;
       tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
+      ddPolicy?: {
+        mode: 'strict';
+        problemId: string;
+        signature: string;
+        baseCandidates: CardId[];
+        allowedCandidates: CardId[];
+        bound: boolean;
+        fallback: boolean;
+      };
       decisionSig?: string;
       replay?: {
         action: 'forced' | 'disabled';

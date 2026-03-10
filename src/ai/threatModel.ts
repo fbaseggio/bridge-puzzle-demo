@@ -222,6 +222,49 @@ function applyStrandedFlags(ctx: ThreatContext, position: Position, runtime?: Ru
   return next;
 }
 
+function wasThreatPlayedThisTrick(threat: ThreatSuitState, trick: Play[] | undefined): boolean {
+  if (!trick || trick.length !== 4) return false;
+  const { suit, rank } = parseCardId(threat.threatCardId);
+  return trick.some((play) => play.seat === threat.establishedOwner && play.suit === suit && play.rank === rank);
+}
+
+function pickSubstituteThreatRank(position: Position, owner: Seat, suit: Suit, priorThreatRank: Rank): Rank | null {
+  const priorValue = rankValue(priorThreatRank);
+  const candidates = position.hands[owner][suit]
+    .filter((rank) => rankValue(rank) < priorValue)
+    .sort((a, b) => rankValue(b) - rankValue(a));
+  return candidates[0] ?? null;
+}
+
+function applyTrickEndThreatSubstitution(
+  ctx: ThreatContext,
+  position: Position,
+  runtime?: RuntimeThreatContext
+): ThreatContext {
+  const trick = runtime?.trick;
+  if (!trick || trick.length !== 4) return ctx;
+
+  const next: ThreatContext = { threatCardIds: [...ctx.threatCardIds], threatsBySuit: { ...ctx.threatsBySuit } };
+  for (const suit of SUITS) {
+    const threat = next.threatsBySuit[suit];
+    if (!threat || threat.active) continue;
+    if (!wasThreatPlayedThisTrick(threat, trick)) continue;
+
+    const substitute = pickSubstituteThreatRank(position, threat.establishedOwner, suit, threat.threatRank);
+    if (!substitute) continue;
+    next.threatsBySuit[suit] = {
+      ...threat,
+      threatCardId: toCardId(suit, substitute),
+      threatRank: substitute,
+      active: true,
+      stranded: false,
+      threatLength: countThreatLength(position, threat.establishedOwner, suit, substitute),
+      stopStatus: undefined
+    };
+  }
+  return next;
+}
+
 function partnerOf(seat: Seat): Seat {
   if (seat === 'N') return 'S';
   if (seat === 'S') return 'N';
@@ -528,7 +571,8 @@ export function updateClassificationAfterPlay(
     updateRolesForSuit(nextRoles, nextThreat, nextLabels, position, suit);
   }
 
-  const strandedThreat = applyStrandedFlags(nextThreat, position, runtime);
+  const substitutedThreat = applyTrickEndThreatSubstitution(nextThreat, position, runtime);
+  const strandedThreat = applyStrandedFlags(substitutedThreat, position, runtime);
   const recomputedLabels = computeDefenderLabels(strandedThreat, position);
   for (const suit of SUITS) {
     const updatedThreat = strandedThreat.threatsBySuit[suit];
