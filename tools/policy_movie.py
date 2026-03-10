@@ -3,6 +3,7 @@ import argparse
 import copy
 import json
 import random
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -35,6 +36,25 @@ class EnumState:
     policy_rng: Dict[str, int]
     threat_state: Optional[Dict[str, Any]]
     line: List[Tuple[str, str]]
+    dd_failures: List[Tuple[int, int, str, str, List[str], int]]
+
+
+@dataclass
+class DDResult:
+    optimal_cards: List[str]
+    max_tricks: int
+    tricks_by_card: Dict[str, int]
+
+
+@dataclass
+class DDDiscrepancy:
+    run_no: int
+    position_index: int
+    trick_no: int
+    seat: str
+    actual_card: str
+    optimal_cards: List[str]
+    max_tricks: int
 
 
 def next_seat(seat: str) -> str:
@@ -64,6 +84,115 @@ def card_sort_key(card_id: str) -> Tuple[int, int]:
 
 def sorted_cards(cards: List[str]) -> List[str]:
     return sorted(cards, key=card_sort_key)
+
+
+class DoubleDummyValidator:
+    def __init__(self) -> None:
+        try:
+            from endplay.types import Deal, Denom, Player  # type: ignore
+            from endplay.dds import solve_board  # type: ignore
+        except Exception as exc:
+            raise RuntimeError(
+                "Double-dummy validation requires Python package 'endplay'. "
+                "Install with: pip install endplay"
+            ) from exc
+        self.Deal = Deal
+        self.Denom = Denom
+        self.Player = Player
+        self.solve_board = solve_board
+        self._rank_order = "AKQJT98765432"
+        self._card_re = re.compile(r"([SHDC♠♥♦♣])([AKQJT98765432])")
+
+    def _sort_ranks_desc(self, ranks: List[str]) -> List[str]:
+        return sorted(ranks, key=lambda r: self._rank_order.index(r))
+
+    def _pbn_hand(self, hand: Dict[str, List[str]]) -> str:
+        parts = []
+        for suit in SUIT_ORDER:
+            parts.append("".join(self._sort_ranks_desc(hand[suit])))
+        return ".".join(parts)
+
+    def _pbn_deal(self, hands: Dict[str, Dict[str, List[str]]]) -> str:
+        # endplay Deal expects N:... in N E S W order
+        return "N:" + " ".join(self._pbn_hand(hands[seat]) for seat in SEAT_ORDER)
+
+    def _to_denom(self, strain: str):
+        s = str(strain).upper()
+        if s == "NT":
+            return self.Denom.nt
+        mapping = {"S": self.Denom.spades, "H": self.Denom.hearts, "D": self.Denom.diamonds, "C": self.Denom.clubs}
+        return mapping[s]
+
+    def _to_player(self, seat: str):
+        mapping = {"N": self.Player.north, "E": self.Player.east, "S": self.Player.south, "W": self.Player.west}
+        return mapping[seat]
+
+    def _normalize_card(self, raw: Any) -> Optional[str]:
+        text = str(raw)
+        m = self._card_re.search(text)
+        if not m:
+            return None
+        suit_sym, rank = m.group(1), m.group(2)
+        suit_map = {"♠": "S", "♥": "H", "♦": "D", "♣": "C", "S": "S", "H": "H", "D": "D", "C": "C"}
+        suit = suit_map.get(suit_sym)
+        return f"{suit}{rank}" if suit else None
+
+    def optimal_for_position(
+        self,
+        hands: Dict[str, Dict[str, List[str]]],
+        trick: List[Play],
+        turn: str,
+        contract_strain: str
+    ) -> DDResult:
+        # Build a fresh deal per query. Hands in runner state already exclude cards in `trick`,
+        # so restore those cards first, then replay `trick` onto the deal.
+        hands_for_deal = {
+            seat: {suit: list(ranks) for suit, ranks in hands[seat].items()}
+            for seat in SEAT_ORDER
+        }
+        for p in trick:
+            if p.rank not in hands_for_deal[p.seat][p.suit]:
+                hands_for_deal[p.seat][p.suit].append(p.rank)
+
+        deal = self.Deal(self._pbn_deal(hands_for_deal))
+        deal.trump = self._to_denom(contract_strain)
+        leader = trick[0].seat if trick else turn
+        deal.first = self._to_player(leader)
+        expected_seat = leader
+        for p in trick:
+            if p.seat != expected_seat:
+                raise RuntimeError(
+                    f"DD trick reconstruction seat mismatch: expected {expected_seat}, got {p.seat}"
+                )
+            if p.rank not in hands_for_deal[p.seat][p.suit]:
+                raise RuntimeError(
+                    f"DD trick reconstruction missing card before play: {p.seat}:{p.card_id}"
+                )
+            deal.play(p.card_id)
+            hands_for_deal[p.seat][p.suit].remove(p.rank)
+            expected_seat = next_seat(expected_seat)
+        if expected_seat != turn:
+            raise RuntimeError(
+                f"DD turn mismatch after trick reconstruction: expected {expected_seat}, got {turn}"
+            )
+
+        raw = self.solve_board(deal)
+        scored: List[Tuple[str, int]] = []
+        for entry in raw:
+            try:
+                card_obj, tricks = entry
+            except Exception:
+                continue
+            card = self._normalize_card(card_obj)
+            if card is None:
+                continue
+            scored.append((card, int(tricks)))
+        if not scored:
+            return DDResult(optimal_cards=[], max_tricks=-1, tricks_by_card={})
+        best = max(v for _, v in scored)
+        optimal = sorted_cards([c for c, v in scored if v == best])
+        tricks_by_card = {c: v for c, v in scored}
+        return DDResult(optimal_cards=optimal, max_tricks=best, tricks_by_card=tricks_by_card)
 
 
 def legal_cards(hands: Dict[str, Dict[str, List[str]]], seat: str, trick: List[Play]) -> List[str]:
@@ -478,12 +607,33 @@ def format_compact_line(line: List[Tuple[str, str]]) -> str:
     return " / ".join(chunks)
 
 
+def should_validate_dd(scope: str, seat: str) -> bool:
+    scope_norm = scope.lower()
+    if scope_norm == "all":
+        return True
+    if scope_norm == "ns":
+        return seat in ("N", "S")
+    if scope_norm == "ew":
+        return seat in ("E", "W")
+    return False
+
+
 def enumerate_runs(
     puzzle: Dict[str, Any],
     policy_client: PersistentPolicyClient,
     threat_client: Optional[PersistentThreatStateClient],
     show_run: Optional[int],
-) -> Tuple[int, Optional[List[Tuple[str, str]]]]:
+    dd_validator: Optional[DoubleDummyValidator] = None,
+    dd_scope: str = "none",
+    dd_discrepancies_only: bool = False,
+    emit_summaries: bool = True,
+) -> Tuple[
+    int,
+    Optional[List[Tuple[str, str]]],
+    Optional[str],
+    Optional[List[Tuple[int, int, str, str, List[str], int]]],
+    List[DDDiscrepancy],
+]:
     hands = {seat: {suit: list(ranks) for suit, ranks in puzzle["hands"][seat].items()} for seat in SEAT_ORDER}
     threat_state: Optional[Dict[str, Any]] = None
     threat_card_ids = list(puzzle.get("threatCardIds", []))
@@ -492,6 +642,9 @@ def enumerate_runs(
 
     run_no = 0
     selected_line: Optional[List[Tuple[str, str]]] = None
+    selected_summary: Optional[str] = None
+    selected_dd_failures: Optional[List[Tuple[int, int, str, str, List[str], int]]] = None
+    discrepancies: List[DDDiscrepancy] = []
     stack: List[EnumState] = [
         EnumState(
             hands=hands,
@@ -502,6 +655,7 @@ def enumerate_runs(
             policy_rng={"seed": int(puzzle["rngSeed"]), "counter": 0},
             threat_state=threat_state,
             line=[],
+            dd_failures=[],
         )
     ]
 
@@ -510,9 +664,32 @@ def enumerate_runs(
         if all_hands_empty(node.hands):
             run_no += 1
             line_text = format_compact_line(node.line)
-            print(f"Run {run_no}  NS {node.tricks_won['NS']}-{node.tricks_won['EW']} EW  line: {line_text}")
+            for position_index, trick_no, seat, actual_card, optimal_cards, max_tricks in node.dd_failures:
+                discrepancies.append(
+                    DDDiscrepancy(
+                        run_no=run_no,
+                        position_index=position_index,
+                        trick_no=trick_no,
+                        seat=seat,
+                        actual_card=actual_card,
+                        optimal_cards=optimal_cards,
+                        max_tricks=max_tricks,
+                    )
+                )
+            summary_line = f"Run {run_no}  NS {node.tricks_won['NS']}-{node.tricks_won['EW']} EW  line: {line_text}"
+            if not emit_summaries:
+                pass
+            elif dd_discrepancies_only:
+                run_disc = [d for d in discrepancies if d.run_no == run_no]
+                if run_disc:
+                    print(summary_line)
+            else:
+                print(summary_line)
             if show_run is not None and run_no == show_run:
                 selected_line = list(node.line)
+                selected_summary = summary_line
+                selected_dd_failures = list(node.dd_failures)
+                return run_no, selected_line, selected_summary, selected_dd_failures, discrepancies
             continue
 
         legal = legal_cards(node.hands, node.turn, node.trick)
@@ -535,6 +712,20 @@ def enumerate_runs(
 
         # DFS: push in reverse so smallest deterministic choice is visited first.
         for chosen, next_rng, _policy_result in reversed(choices_with_rng):
+            next_dd_failures = list(node.dd_failures)
+            if dd_validator is not None and should_validate_dd(dd_scope, node.turn):
+                dd = dd_validator.optimal_for_position(node.hands, node.trick, node.turn, puzzle["contract"]["strain"])
+                if dd.optimal_cards and chosen not in dd.optimal_cards:
+                    next_dd_failures.append(
+                        (
+                            len(node.line) + 1,
+                            (len(node.line) // 4) + 1,
+                            node.turn,
+                            chosen,
+                            dd.optimal_cards,
+                            dd.max_tricks,
+                        )
+                    )
             next_hands = copy.deepcopy(node.hands)
             remove_card(next_hands, node.turn, chosen)
             suit, rank = parse_card(chosen)
@@ -566,10 +757,11 @@ def enumerate_runs(
                     policy_rng={"seed": int(next_rng["seed"]), "counter": int(next_rng["counter"])},
                     threat_state=copy.deepcopy(next_threat_state) if next_threat_state is not None else None,
                     line=next_line,
+                    dd_failures=next_dd_failures,
                 )
             )
 
-    return run_no, selected_line
+    return run_no, selected_line, selected_summary, selected_dd_failures, discrepancies
 
 
 def run_movie(
@@ -577,6 +769,9 @@ def run_movie(
     ns_script: List[str],
     ns_random_seed: int,
     forced_line: Optional[List[Tuple[str, str]]] = None,
+    dd_validator: Optional[DoubleDummyValidator] = None,
+    dd_scope: str = "none",
+    forced_dd_failures: Optional[List[Tuple[int, int, str, str, List[str], int]]] = None,
 ) -> None:
     hands = {
         seat: {suit: list(ranks) for suit, ranks in puzzle["hands"][seat].items()}
@@ -597,8 +792,12 @@ def run_movie(
     print("Initial deal:")
     print_newspaper(hands)
     print("")
-    trick_details: List[Tuple[str, str]] = []
+    trick_details: List[Tuple[str, Optional[str], Optional[str]]] = []
     forced_idx = 0
+    forced_dd_by_position: Dict[int, Tuple[int, int, str, str, List[str], int]] = {}
+    if forced_dd_failures:
+        for rec in forced_dd_failures:
+            forced_dd_by_position[rec[0]] = rec
 
     policy_client = PersistentPolicyClient()
     policy_client.start()
@@ -675,13 +874,40 @@ def run_movie(
                 )
 
             suit, rank = parse_card(chosen)
+            dd_line: Optional[str] = None
+            position_index = forced_idx if forced_line is not None else (len(trick_details) + trick_no * 4 + 1)
+            if dd_validator is not None and should_validate_dd(dd_scope, turn):
+                dd = dd_validator.optimal_for_position(hands, trick, turn, puzzle["contract"]["strain"])
+                if dd.optimal_cards:
+                    if chosen not in dd.optimal_cards:
+                        chosen_tricks = dd.tricks_by_card.get(chosen)
+                        if isinstance(chosen_tricks, int):
+                            delta = chosen_tricks - dd.max_tricks
+                            dd_line = (
+                                f"DD: actual={pretty_card(chosen)} "
+                                f"optimal={{{', '.join(pretty_card(c) for c in dd.optimal_cards)}}} "
+                                f"ΔDD={delta}"
+                            )
+                        else:
+                            dd_line = (
+                                f"DD: actual={pretty_card(chosen)} "
+                                f"optimal={{{', '.join(pretty_card(c) for c in dd.optimal_cards)}}}"
+                            )
+            if dd_line is None and position_index in forced_dd_by_position:
+                _, _, seat, actual_card, optimal_cards, max_tricks = forced_dd_by_position[position_index]
+                if seat == turn and actual_card == chosen and optimal_cards:
+                    dd_line = (
+                        f"DD: actual={pretty_card(actual_card)} "
+                        f"optimal={{{', '.join(pretty_card(c) for c in optimal_cards)}}} "
+                        f"max={max_tricks}"
+                    )
             remove_card(hands, turn, chosen)
             trick.append(Play(turn, suit, rank))
             feature_line: Optional[str] = None
             if threat_state is not None and threat_client is not None:
                 threat_state = threat_client.update_state(hands, threat_state, chosen)
                 feature_line = format_feature_updates(threat_client.last_feature_diff)
-            trick_details.append((detail, feature_line))
+            trick_details.append((detail, feature_line, dd_line))
 
             if len(trick) < 4:
                 turn = next_seat(turn)
@@ -696,10 +922,12 @@ def run_movie(
             print(f"Winner: {winner}")
             print_newspaper_with_trick(hands, trick, leader_seat)
             print("Play details:")
-            for line, feature_line in trick_details:
+            for line, feature_line, dd_line in trick_details:
                 print(f"  {line}")
                 if feature_line:
                     print(f"    features: {feature_line}")
+                if dd_line:
+                    print(f"    {dd_line}")
             print("")
             leader = winner
             turn = leader
@@ -727,10 +955,15 @@ def main() -> None:
     parser.add_argument("--ns-seed", type=int, default=1, help="Seed for random NS fallback moves")
     parser.add_argument("--enumerate", action="store_true", help="Enumerate all deterministic runs (DFS)")
     parser.add_argument("--show-run", type=int, default=None, help="When used with --enumerate, replay this run number")
+    parser.add_argument("--dd-scope", choices=["none", "ns", "ew", "all"], default="none", help="Enable double-dummy validation for selected side(s)")
+    parser.add_argument("--dd-discrepancies-only", action="store_true", help="With --enumerate, print only runs that contain DD discrepancies")
     args = parser.parse_args()
 
     ns_script = [c.strip().upper() for c in args.ns_script.split(",") if c.strip()]
     puzzle = load_problem(args.problem_id)
+    dd_validator: Optional[DoubleDummyValidator] = None
+    if args.dd_scope != "none":
+        dd_validator = DoubleDummyValidator()
     if args.show_run is not None and args.show_run <= 0:
         raise RuntimeError("--show-run must be >= 1")
 
@@ -742,21 +975,48 @@ def main() -> None:
             threat_client = PersistentThreatStateClient()
             threat_client.start()
         try:
-            total, selected = enumerate_runs(puzzle, policy_client, threat_client, args.show_run)
+            total, selected, selected_summary, selected_dd_failures, discrepancies = enumerate_runs(
+                puzzle,
+                policy_client,
+                threat_client,
+                args.show_run,
+                dd_validator=dd_validator,
+                dd_scope=args.dd_scope,
+                dd_discrepancies_only=args.dd_discrepancies_only,
+                emit_summaries=(args.show_run is None),
+            )
         finally:
             policy_client.stop()
             if threat_client is not None:
                 threat_client.stop()
-        print(f"Total runs: {total}")
+        if args.show_run is None:
+            print(f"Total runs: {total}")
+        if dd_validator is not None and args.show_run is None:
+            print(f"DD discrepancies: {len(discrepancies)}")
+            for d in discrepancies:
+                print(
+                    f"DD Run {d.run_no}  pos {d.position_index} trick {d.trick_no}  {d.seat} played {pretty_card(d.actual_card)}  "
+                    f"optimal {{{', '.join(pretty_card(c) for c in d.optimal_cards)}}} max={d.max_tricks}"
+                )
         if args.show_run is not None:
             if selected is None:
                 raise RuntimeError(f"Requested run {args.show_run} not found (total {total})")
+            if selected_summary:
+                print(selected_summary)
             print("")
             print(f"=== Replay Run {args.show_run} ===")
-            run_movie(puzzle, ns_script=[], ns_random_seed=args.ns_seed, forced_line=selected)
+            run_movie(
+                puzzle,
+                ns_script=[],
+                ns_random_seed=args.ns_seed,
+                forced_line=selected,
+                dd_validator=dd_validator,
+                dd_scope=args.dd_scope,
+                forced_dd_failures=selected_dd_failures,
+            )
         return
 
-    run_movie(puzzle, ns_script, args.ns_seed)
+    run_movie(puzzle, ns_script, args.ns_seed, dd_validator=dd_validator, dd_scope=args.dd_scope)
 
 
 if __name__ == "__main__":
