@@ -45,11 +45,28 @@ export type EvaluatePolicyInput = {
   seat: 'E' | 'W';
   problemId?: string;
   contractStrain?: Suit | 'NT';
+  debugPositionIndex?: number;
+  debugTrickIndex?: number;
   hands: Record<Seat, Hand>;
   trick: Play[];
   threat: ThreatContext | null;
   threatLabels: DefenderLabels | null;
   rng: RngState;
+};
+
+export type DdDecisionTrace = {
+  pos: number | '-';
+  trick: number | '-';
+  seat: 'E' | 'W';
+  sig: string;
+  legal: CardId[];
+  base: CardId[];
+  lookup: boolean;
+  found: boolean;
+  path: 'intersection' | 'dd-fallback' | 'base-fallback' | 'disabled';
+  optimal?: CardId[];
+  after: CardId[];
+  chosen: CardId | '-';
 };
 
 export type EvaluatePolicyOutput = {
@@ -60,6 +77,7 @@ export type EvaluatePolicyOutput = {
   tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
   discardTiers?: DiscardTiers;
   ddPolicy?: DdPolicyTrace;
+  ddTrace?: DdDecisionTrace;
   rngBefore: RngState;
   rngAfter: RngState;
 };
@@ -137,10 +155,63 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
   const contractStrain = input.contractStrain ?? 'NT';
   const signature = buildCanonicalPositionSignature({ contractStrain, seat, hands, trick });
   const ddSource = policy.ddSource ?? 'runtime';
-  const applyDdFilter = (candidates: CardId[], legalUniverse?: CardId[]) =>
-    ddSource === 'runtime'
-      ? applyStrictDdFilter(input.problemId, signature, candidates, legalUniverse)
-      : { candidates: [...candidates] as CardId[], trace: undefined as DdPolicyTrace | undefined };
+  const applyDdFilter = (
+    candidates: CardId[],
+    legalUniverse?: CardId[]
+  ): {
+    candidates: CardId[];
+    trace?: DdPolicyTrace;
+    lookup: boolean;
+    found: boolean;
+    path: 'intersection' | 'dd-fallback' | 'base-fallback' | 'disabled';
+  } => {
+    if (ddSource !== 'runtime') {
+      return {
+        candidates: [...candidates],
+        trace: undefined,
+        lookup: false,
+        found: false,
+        path: 'disabled'
+      };
+    }
+    const filtered = applyStrictDdFilter(input.problemId, signature, candidates, legalUniverse);
+    if (!filtered.trace) {
+      return {
+        candidates: filtered.candidates,
+        trace: undefined,
+        lookup: true,
+        found: false,
+        path: 'base-fallback'
+      };
+    }
+    return {
+      candidates: filtered.candidates,
+      trace: filtered.trace,
+      lookup: true,
+      found: true,
+      path: filtered.trace.path
+    };
+  };
+
+  const buildDdDecisionTrace = (
+    legal: CardId[],
+    base: CardId[],
+    filtered: ReturnType<typeof applyDdFilter>,
+    chosen: CardId | null
+  ): DdDecisionTrace => ({
+    pos: typeof input.debugPositionIndex === 'number' ? input.debugPositionIndex : '-',
+    trick: typeof input.debugTrickIndex === 'number' ? input.debugTrickIndex : '-',
+    seat,
+    sig: signature,
+    legal: [...legal],
+    base: [...base],
+    lookup: filtered.lookup,
+    found: filtered.found,
+    path: filtered.path,
+    optimal: filtered.trace?.optimalMoves ? [...filtered.trace.optimalMoves] : undefined,
+    after: [...filtered.candidates],
+    chosen: chosen ?? '-'
+  });
 
   if (policy.kind === 'randomLegal') {
     const legal = legalPlaysForSeat(hands, seat, leadSuit);
@@ -157,6 +228,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
       bucketCards,
       policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, bucketCards),
       ddPolicy: ddFiltered.trace,
+      ddTrace: buildDdDecisionTrace(legalCardIds, legalCardIds, ddFiltered, chosenCardId),
       rngBefore,
       rngAfter
     };
@@ -177,6 +249,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
       bucketCards,
       policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, bucketCards),
       ddPolicy: ddFiltered.trace,
+      ddTrace: buildDdDecisionTrace(legalCardIds, legalCardIds, ddFiltered, chosenCardId),
       rngBefore,
       rngAfter
     };
@@ -196,14 +269,15 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
           if (chosenCardId) {
             const chosenBucket = 'follow:idle-cheap-win';
             return {
-              chosenCardId,
-              chosenBucket,
-              bucketCards: [...ddOnIdle.candidates],
-              policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddOnIdle.candidates),
-              ddPolicy: ddOnIdle.trace,
-              rngBefore,
-              rngAfter
-            };
+            chosenCardId,
+            chosenBucket,
+            bucketCards: [...ddOnIdle.candidates],
+            policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddOnIdle.candidates),
+            ddPolicy: ddOnIdle.trace,
+            ddTrace: buildDdDecisionTrace(inSuitCardIds, idleCards, ddOnIdle, chosenCardId),
+            rngBefore,
+            rngAfter
+          };
           }
         }
         const highestSoFar = trick.reduce((max, play) => {
@@ -221,6 +295,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
             bucketCards: [...ddFiltered.candidates],
             policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
             ddPolicy: ddFiltered.trace,
+            ddTrace: buildDdDecisionTrace(inSuitCardIds, winningIdle, ddFiltered, chosenCardId),
             rngBefore,
             rngAfter
           };
@@ -238,14 +313,15 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
           if (chosenCardId) {
             const chosenBucket = 'follow:busy-protect-threat';
             return {
-              chosenCardId,
-              chosenBucket,
-              bucketCards: [...ddOnBusy.candidates],
-              policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddOnBusy.candidates),
-              ddPolicy: ddOnBusy.trace,
-              rngBefore,
-              rngAfter
-            };
+                chosenCardId,
+                chosenBucket,
+                bucketCards: [...ddOnBusy.candidates],
+                policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddOnBusy.candidates),
+                ddPolicy: ddOnBusy.trace,
+                ddTrace: buildDdDecisionTrace(inSuitCardIds, busyCards, ddOnBusy, chosenCardId),
+                rngBefore,
+                rngAfter
+              };
           }
         }
         const thirdSeat = nextSeat(seat);
@@ -266,6 +342,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
                 bucketCards: [...ddFiltered.candidates],
                 policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
                 ddPolicy: ddFiltered.trace,
+                ddTrace: buildDdDecisionTrace(inSuitCardIds, covering, ddFiltered, chosenCardId),
                 rngBefore,
                 rngAfter
               };
@@ -288,6 +365,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
         bucketCards: [...ddFiltered.candidates],
         policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
         ddPolicy: ddFiltered.trace,
+        ddTrace: buildDdDecisionTrace(inSuitCardIds, bucketCards, ddFiltered, chosenCardId),
         rngBefore,
         rngAfter
       };
@@ -307,6 +385,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
         bucketCards: [...ddFiltered.candidates],
         policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
         ddPolicy: ddFiltered.trace,
+        ddTrace: buildDdDecisionTrace(inSuitCardIds, bucketCards, ddFiltered, chosenCardId),
         rngBefore,
         rngAfter
       };
@@ -327,6 +406,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
       bucketCards: [...ddFiltered.candidates],
       policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
       ddPolicy: ddFiltered.trace,
+      ddTrace: buildDdDecisionTrace(inSuitCardIds, bucketCards, ddFiltered, chosenCardId),
       rngBefore,
       rngAfter
     };
@@ -379,6 +459,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     tierBuckets,
     discardTiers: tiers,
     ddPolicy: ddFiltered.trace,
+    ddTrace: buildDdDecisionTrace(tiers.legal, chosen.cards, ddFiltered, chosenCardId),
     rngBefore,
     rngAfter
   };

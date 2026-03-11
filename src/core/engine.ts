@@ -216,6 +216,7 @@ type AutoChoice = {
     signature: string;
     baseCandidates: CardId[];
     allowedCandidates: CardId[];
+    optimalMoves: CardId[];
     bound: boolean;
     fallback: boolean;
     path: 'intersection' | 'dd-fallback' | 'base-fallback';
@@ -495,6 +496,7 @@ function applyOnePlay(
     signature: string;
     baseCandidates: CardId[];
     allowedCandidates: CardId[];
+    optimalMoves: CardId[];
     bound: boolean;
     fallback: boolean;
     path: 'intersection' | 'dd-fallback' | 'base-fallback';

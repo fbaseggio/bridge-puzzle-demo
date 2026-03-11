@@ -25,9 +25,18 @@ export type DdPolicyTrace = {
   signature: string;
   baseCandidates: CardId[];
   allowedCandidates: CardId[];
+  optimalMoves: CardId[];
   bound: boolean;
   fallback: boolean;
   path: 'intersection' | 'dd-fallback' | 'base-fallback';
+};
+
+export type DdDatasetDiagnostics = {
+  problemId: string;
+  loaded: boolean;
+  records: number;
+  source: string;
+  firstKey?: string;
 };
 
 const SUIT_ORDER = ['S', 'H', 'D', 'C'] as const;
@@ -66,6 +75,11 @@ const ddByProblem = new Map<string, Map<string, DdAdvice>>([
   ['p004', buildIndex(p004Records as DdRecord[])]
 ]);
 
+const ddSourceByProblem = new Map<string, string>([
+  ['p003', 'src/data/dd/p003.json'],
+  ['p004', 'src/data/dd/p004.json']
+]);
+
 export function buildCanonicalPositionSignature(input: Pick<EvaluatePolicyInput, 'contractStrain' | 'seat' | 'hands' | 'trick'>): string {
   const trickText = input.trick.length > 0 ? input.trick.map((p) => `${p.seat}:${p.suit}${p.rank}`).join(',') : '-';
   const handParts = SEAT_ORDER.map((seat) => {
@@ -83,6 +97,16 @@ export function lookupDdAdvice(problemId: string | undefined, signature: string)
   const bySignature = ddByProblem.get(problemId);
   if (!bySignature) return null;
   return bySignature.get(signature) ?? null;
+}
+
+export function getDdDatasetDiagnostics(problemId: string | undefined): DdDatasetDiagnostics {
+  const id = problemId ?? '-';
+  const bySignature = problemId ? ddByProblem.get(problemId) : undefined;
+  const loaded = !!bySignature;
+  const records = bySignature?.size ?? 0;
+  const source = (problemId && ddSourceByProblem.get(problemId)) ?? 'none';
+  const firstKey = bySignature && bySignature.size > 0 ? bySignature.keys().next().value : undefined;
+  return { problemId: id, loaded, records, source, firstKey };
 }
 
 export function applyStrictDdFilter(
@@ -106,6 +130,7 @@ export function applyStrictDdFilter(
         signature,
         baseCandidates: [...baseCandidates],
         allowedCandidates: [...intersection],
+        optimalMoves: [...advice.optimalMoves],
         bound: true,
         fallback: false,
         path: 'intersection'
@@ -125,6 +150,7 @@ export function applyStrictDdFilter(
         signature,
         baseCandidates: [...baseCandidates],
         allowedCandidates: [...ddLegal],
+        optimalMoves: [...advice.optimalMoves],
         bound: true,
         fallback: true,
         path: 'dd-fallback'
@@ -141,6 +167,7 @@ export function applyStrictDdFilter(
       signature,
       baseCandidates: [...baseCandidates],
       allowedCandidates: [...advice.optimalMoves],
+      optimalMoves: [...advice.optimalMoves],
       bound: false,
       fallback: true,
       path: 'base-fallback'

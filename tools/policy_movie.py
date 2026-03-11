@@ -509,12 +509,16 @@ class PersistentPolicyClient:
 
     def query(
         self,
+        problem_id: str,
         seat: str,
         policy_kind: str,
+        dd_source: str,
         hands: Dict[str, Dict[str, List[str]]],
         trick: List[Play],
         rng_state: Dict[str, int],
         threat_state: Optional[Dict[str, Any]],
+        position_index: Optional[int] = None,
+        trick_index: Optional[int] = None,
     ) -> Tuple[str, Dict[str, int], Dict[str, Any]]:
         if not self.proc or not self.proc.stdin or not self.proc.stdout:
             raise RuntimeError("Policy server is not running")
@@ -522,8 +526,11 @@ class PersistentPolicyClient:
             "schemaVersion": 1,
             "policyVersion": 1,
             "input": {
-                "policy": {"kind": policy_kind},
+                "policy": {"kind": policy_kind, "ddSource": dd_source},
+                "problemId": problem_id,
                 "seat": seat,
+                "debugPositionIndex": position_index,
+                "debugTrickIndex": trick_index,
                 "hands": hands,
                 "trick": [{"seat": p.seat, "suit": p.suit, "rank": p.rank} for p in trick],
                 "threat": threat_state["threat"] if threat_state else None,
@@ -540,6 +547,11 @@ class PersistentPolicyClient:
         out = json.loads(line.strip())
         if not out.get("ok"):
             raise RuntimeError(f"policy:serve error: {out.get('error', {}).get('message', 'unknown')}")
+        debug_lines = out.get("debugLines")
+        if isinstance(debug_lines, list):
+            for debug_line in debug_lines:
+                if isinstance(debug_line, str) and debug_line:
+                    print(debug_line)
         result = out["result"]
         chosen = result["chosenCardId"]
         next_rng = result["rngAfter"]
@@ -758,6 +770,7 @@ def enumerate_runs(
     puzzle: Dict[str, Any],
     policy_client: PersistentPolicyClient,
     threat_client: Optional[PersistentThreatStateClient],
+    dd_source: str,
     show_run: Optional[int],
     dd_validator: Optional[DoubleDummyValidator] = None,
     dd_scope: str = "none",
@@ -853,8 +866,19 @@ def enumerate_runs(
                 choices_with_rng.append((c, node.policy_rng, None))
         else:
             policy = puzzle["policies"][node.turn]["kind"]
+            position_index = len(node.line) + 1
+            trick_index = (len(node.line) // 4) + 1
             chosen, next_rng, policy_result = policy_client.query(
-                node.turn, policy, node.hands, node.trick, node.policy_rng, node.threat_state
+                puzzle["id"],
+                node.turn,
+                policy,
+                dd_source,
+                node.hands,
+                node.trick,
+                node.policy_rng,
+                node.threat_state,
+                position_index,
+                trick_index,
             )
             candidates = [c for c in policy_candidates(policy_result, chosen) if c in legal]
             expected_policy_moves = sorted_cards(candidates)
@@ -950,6 +974,7 @@ def run_movie(
     puzzle: Dict,
     ns_script: List[str],
     ns_random_seed: int,
+    dd_source: str,
     forced_line: Optional[List[Tuple[str, str]]] = None,
     dd_validator: Optional[DoubleDummyValidator] = None,
     dd_scope: str = "none",
@@ -1019,7 +1044,18 @@ def run_movie(
                     detail = f"{SUIT_SYMBOL[chosen[0]]}{chosen[1:]}  [replay]"
                 else:
                     policy = puzzle["policies"][turn]["kind"]
-                    _picked, policy_rng, policy_result = policy_client.query(turn, policy, hands, trick, policy_rng, threat_state)
+                    _picked, policy_rng, policy_result = policy_client.query(
+                        puzzle["id"],
+                        turn,
+                        policy,
+                        dd_source,
+                        hands,
+                        trick,
+                        policy_rng,
+                        threat_state,
+                        forced_idx,
+                        ((forced_idx - 1) // 4) + 1 if forced_idx > 0 else 1,
+                    )
                     candidates = policy_candidates(policy_result, _picked)
                     if chosen not in candidates:
                         raise RuntimeError(
@@ -1049,7 +1085,19 @@ def run_movie(
                     detail = f"{SUIT_SYMBOL[chosen[0]]}{chosen[1:]}  [random-ns seed={ns_random_seed}]"
             else:
                 policy = puzzle["policies"][turn]["kind"]
-                chosen, policy_rng, policy_result = policy_client.query(turn, policy, hands, trick, policy_rng, threat_state)
+                current_position_index = len(trick_details) + trick_no * 4 + 1
+                chosen, policy_rng, policy_result = policy_client.query(
+                    puzzle["id"],
+                    turn,
+                    policy,
+                    dd_source,
+                    hands,
+                    trick,
+                    policy_rng,
+                    threat_state,
+                    current_position_index,
+                    trick_no + 1,
+                )
                 if chosen not in legal:
                     raise RuntimeError(
                         f"Policy chose illegal card {chosen} for {turn}. Legal: {', '.join(legal)}"
@@ -1188,6 +1236,7 @@ def main() -> None:
     parser.add_argument("--dd-discrepancies-only", action="store_true", help="With --enumerate, print only runs that contain DD discrepancies")
     parser.add_argument("--dd-export-jsonl", default=None, help="Write factual DD records (keyed by canonical signature) to this JSONL file")
     parser.add_argument("--dd-export-all", action="store_true", help="With --dd-export-jsonl, emit all validated positions (default filters to useful varying states)")
+    parser.add_argument("--dd-source", choices=["off", "runtime"], default="off", help="TS DD backstop source passed into policy layer")
     args = parser.parse_args()
 
     ns_script = [c.strip().upper() for c in args.ns_script.split(",") if c.strip()]
@@ -1206,6 +1255,8 @@ def main() -> None:
         export_path = os.path.abspath(args.dd_export_jsonl)
         dd_exporter = DDRecordExporter(export_path, emit_all_states=args.dd_export_all)
 
+    print(f"DD source: {args.dd_source}")
+
     try:
         if args.enumerate:
             policy_client = PersistentPolicyClient()
@@ -1219,6 +1270,7 @@ def main() -> None:
                     puzzle,
                     policy_client,
                     threat_client,
+                    args.dd_source,
                     args.show_run,
                     dd_validator=dd_validator,
                     dd_scope=effective_dd_scope,
@@ -1250,6 +1302,7 @@ def main() -> None:
                     puzzle,
                     ns_script=[],
                     ns_random_seed=args.ns_seed,
+                    dd_source=args.dd_source,
                     forced_line=selected,
                     dd_validator=dd_validator,
                     dd_scope=effective_dd_scope,
@@ -1262,6 +1315,7 @@ def main() -> None:
             puzzle,
             ns_script,
             args.ns_seed,
+            args.dd_source,
             dd_validator=dd_validator,
             dd_scope=effective_dd_scope,
             dd_exporter=dd_exporter,
