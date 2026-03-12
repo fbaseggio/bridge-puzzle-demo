@@ -4,8 +4,10 @@ import {
   apply,
   classInfoForCard,
   getSuitEquivalenceClasses,
+  InMemorySemanticEventCollector,
   init,
   legalPlays,
+  RawSemanticReducer,
   type DecisionRecord,
   type EngineEvent,
   type Play,
@@ -88,6 +90,9 @@ let currentProblem = demoProblems[0].problem;
 let currentProblemId = demoProblems[0].id;
 let currentSeed = currentProblem.rngSeed >>> 0;
 let state: State = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+const semanticReducer = new RawSemanticReducer();
+const semanticCollector = new InMemorySemanticEventCollector();
+semanticCollector.attachReducer(semanticReducer);
 warmDdDataset(currentProblemId);
 let logs: string[] = [];
 let deferredLogLines: string[] = [];
@@ -1608,6 +1613,10 @@ function syncSingletonAutoplay(): void {
 
 function refreshThreatModel(problemId: string, clearLogs: boolean): void {
   if (clearLogs) logs = [];
+  if (clearLogs) {
+    semanticCollector.clear();
+    semanticReducer.reset();
+  }
   const rawThreats = getThreatCardIds(currentProblem as ProblemWithThreats);
 
   threatCtx = (state.threat as ThreatContext | null) ?? null;
@@ -1760,7 +1769,7 @@ function runTurn(play: Play): void {
   }
 
   const before = state;
-  const result = apply(state, play);
+  const result = apply(state, play, { eventCollector: semanticCollector });
   state = result.state;
   threatCtx = (state.threat as ThreatContext | null) ?? null;
   threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
@@ -1860,6 +1869,21 @@ function runTurn(play: Play): void {
   }
 
   render();
+}
+
+function renderSemanticDebugPanel(): HTMLElement {
+  const panel = document.createElement('section');
+  panel.className = 'semantic-panel';
+
+  const title = document.createElement('strong');
+  title.textContent = 'Semantic reducer (raw)';
+  panel.appendChild(title);
+
+  const body = document.createElement('pre');
+  body.className = 'semantic-json';
+  body.textContent = JSON.stringify(semanticReducer.snapshot(), null, 2);
+  panel.appendChild(body);
+  return panel;
 }
 
 function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
@@ -2415,6 +2439,7 @@ function render(): void {
     root.appendChild(panel);
     log.scrollTop = log.scrollHeight;
   }
+  root.appendChild(renderSemanticDebugPanel());
   syncSingletonAutoplay();
 }
 

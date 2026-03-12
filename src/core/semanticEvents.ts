@@ -1,4 +1,5 @@
 import type { CardRole, CardId, Rank, Seat, Suit } from './types';
+import type { SemanticReducer } from './semanticReducer';
 
 export type SemanticEventType =
   | 'decision-start'
@@ -41,9 +42,11 @@ export interface SemanticEventCollector {
 
 export class InMemorySemanticEventCollector implements SemanticEventCollector {
   private readonly events: SemanticEvent[] = [];
+  private reducer: SemanticReducer | null = null;
 
   emit(event: SemanticEvent): void {
     this.events.push(event);
+    this.reducer?.apply(event);
   }
 
   getEvents(): SemanticEvent[] {
@@ -52,6 +55,10 @@ export class InMemorySemanticEventCollector implements SemanticEventCollector {
 
   clear(): void {
     this.events.length = 0;
+  }
+
+  attachReducer(reducer: SemanticReducer | null): void {
+    this.reducer = reducer;
   }
 }
 
