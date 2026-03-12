@@ -98,7 +98,8 @@ let logs: string[] = [];
 let deferredLogLines: string[] = [];
 let verboseLog = false;
 let showLog = true;
-let showGuides = true;
+let showGuides = false;
+let showDebugSection = true;
 let teachingMode = true;
 let autoplaySingletons = false;
 let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1871,19 +1872,130 @@ function runTurn(play: Play): void {
   render();
 }
 
-function renderSemanticDebugPanel(): HTMLElement {
+function renderDebugPanel(): HTMLElement {
   const panel = document.createElement('section');
-  panel.className = 'semantic-panel';
+  panel.className = 'debug-panel debug-subsection';
 
   const title = document.createElement('strong');
   title.textContent = 'Semantic reducer (raw)';
   panel.appendChild(title);
 
   const body = document.createElement('pre');
-  body.className = 'semantic-json';
+  body.className = 'debug-json';
   body.textContent = JSON.stringify(semanticReducer.snapshot(), null, 2);
   panel.appendChild(body);
   return panel;
+}
+
+function renderDebugControls(): HTMLElement {
+  const panel = document.createElement('section');
+  panel.className = 'debug-controls debug-subsection';
+
+  const title = document.createElement('strong');
+  title.textContent = 'Admin/debug controls';
+  panel.appendChild(title);
+
+  const row = document.createElement('div');
+  row.className = 'debug-controls-row';
+
+  const guidesLabel = document.createElement('label');
+  const guidesBox = document.createElement('input');
+  guidesBox.type = 'checkbox';
+  guidesBox.checked = showGuides;
+  guidesBox.onchange = () => {
+    showGuides = guidesBox.checked;
+    render();
+  };
+  guidesLabel.append(guidesBox, ' Show boxes');
+  row.appendChild(guidesLabel);
+
+  const showLogLabel = document.createElement('label');
+  const showLogBox = document.createElement('input');
+  showLogBox.type = 'checkbox';
+  showLogBox.checked = showLog;
+  showLogBox.onchange = () => {
+    showLog = showLogBox.checked;
+    render();
+  };
+  showLogLabel.append(showLogBox, ' Show log');
+  row.appendChild(showLogLabel);
+
+  const verboseLabel = document.createElement('label');
+  const verboseBox = document.createElement('input');
+  verboseBox.type = 'checkbox';
+  verboseBox.checked = verboseLog;
+  verboseBox.onchange = () => {
+    verboseLog = verboseBox.checked;
+    render();
+  };
+  verboseLabel.append(verboseBox, ' Verbose log');
+  row.appendChild(verboseLabel);
+
+  const variationsLabel = document.createElement('label');
+  variationsLabel.textContent = 'Variations: ';
+  const variationsSelect = document.createElement('select');
+  (['strict', 'sameLevel', 'allBusy'] as const).forEach((mode) => {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = busyBranchingLabel[mode];
+    if (mode === busyBranching) option.selected = true;
+    variationsSelect.appendChild(option);
+  });
+  variationsSelect.onchange = () => {
+    const nextMode = variationsSelect.value as 'strict' | 'sameLevel' | 'allBusy';
+    if (nextMode === busyBranching) return;
+    busyBranching = nextMode;
+    resetGame(currentSeed, `Variation mode changed: ${busyBranchingLabel[nextMode]}`);
+  };
+  variationsLabel.appendChild(variationsSelect);
+  row.appendChild(variationsLabel);
+
+  const ddLabel = document.createElement('label');
+  ddLabel.textContent = 'DD source: ';
+  const ddSelect = document.createElement('select');
+  (['off', 'runtime'] as const).forEach((source) => {
+    const option = document.createElement('option');
+    option.value = source;
+    option.textContent = ddSourceLabel[source];
+    if (source === ddSourceMode) option.selected = true;
+    ddSelect.appendChild(option);
+  });
+  ddSelect.onchange = () => {
+    const nextSource = ddSelect.value as 'off' | 'runtime';
+    if (nextSource === ddSourceMode) return;
+    ddSourceMode = nextSource;
+    resetGame(currentSeed, `DD source changed: ${ddSourceLabel[nextSource]}`);
+    if (nextSource === 'runtime') warmDdDataset(currentProblemId);
+  };
+  ddLabel.appendChild(ddSelect);
+  row.appendChild(ddLabel);
+
+  panel.appendChild(row);
+  return panel;
+}
+
+function renderDebugSection(): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'debug-section';
+  section.appendChild(renderDebugControls());
+  section.appendChild(renderDebugPanel());
+
+  if (showLog) {
+    const panel = document.createElement('section');
+    panel.className = 'log-panel debug-subsection';
+
+    const title = document.createElement('strong');
+    title.textContent = 'Log';
+    panel.appendChild(title);
+
+    const log = document.createElement('div');
+    log.className = 'log';
+    log.textContent = logs.length > 0 ? logs.join('\n') : 'No events yet';
+    panel.appendChild(log);
+    section.appendChild(panel);
+    log.scrollTop = log.scrollHeight;
+  }
+  return section;
 }
 
 function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
@@ -2164,58 +2276,46 @@ function renderStatusPanel(view: State): HTMLElement {
     <div class="tricks"><span class="k">Tricks</span><span class="v heavy">NS ${view.tricksWon.NS} - EW ${view.tricksWon.EW}</span></div>
     <div class="meta-row"><span class="k">Leader</span><span class="v turn-meta">${view.leader}</span></div>
     <div class="meta-row"><span class="k">Turn</span><span class="v turn-meta turn-emph">${view.turn}</span></div>
-    <div class="meta-row"><span class="k">Seed</span><span class="v seed">${currentSeed}</span></div>
   `;
-  const variationsRow = document.createElement('div');
-  variationsRow.className = 'meta-row';
-  const variationsKey = document.createElement('span');
-  variationsKey.className = 'k';
-  variationsKey.textContent = 'Variations';
-  const variationsValue = document.createElement('span');
-  variationsValue.className = 'v turn-meta';
-  const variationsSelect = document.createElement('select');
-  (['strict', 'sameLevel', 'allBusy'] as const).forEach((mode) => {
-    const option = document.createElement('option');
-    option.value = mode;
-    option.textContent = busyBranchingLabel[mode];
-    if (mode === busyBranching) option.selected = true;
-    variationsSelect.appendChild(option);
-  });
-  variationsSelect.onchange = () => {
-    const nextMode = variationsSelect.value as 'strict' | 'sameLevel' | 'allBusy';
-    if (nextMode === busyBranching) return;
-    busyBranching = nextMode;
-    resetGame(currentSeed, `Variation mode changed: ${busyBranchingLabel[nextMode]}`);
-  };
-  variationsValue.appendChild(variationsSelect);
-  variationsRow.append(variationsKey, variationsValue);
-  facts.appendChild(variationsRow);
+  const seedRow = document.createElement('div');
+  seedRow.className = 'meta-row';
+  const seedKey = document.createElement('span');
+  seedKey.className = 'k';
+  seedKey.textContent = 'Seed';
+  const seedValue = document.createElement('span');
+  seedValue.className = 'v turn-meta';
+  const seedText = document.createElement('span');
+  seedText.className = 'seed';
+  seedText.textContent = String(currentSeed);
+  const seedBtn = document.createElement('button');
+  seedBtn.type = 'button';
+  seedBtn.className = 'seed-refresh-btn';
+  seedBtn.textContent = 'New seed';
+  seedBtn.onclick = () => resetGame(Date.now() >>> 0, 'newSeed');
+  seedValue.append(seedText, seedBtn);
+  seedRow.append(seedKey, seedValue);
+  facts.appendChild(seedRow);
 
-  const ddRow = document.createElement('div');
-  ddRow.className = 'meta-row';
-  const ddKey = document.createElement('span');
-  ddKey.className = 'k';
-  ddKey.textContent = 'DD source';
-  const ddValue = document.createElement('span');
-  ddValue.className = 'v turn-meta';
-  const ddSelect = document.createElement('select');
-  (['off', 'runtime'] as const).forEach((source) => {
-    const option = document.createElement('option');
-    option.value = source;
-    option.textContent = ddSourceLabel[source];
-    if (source === ddSourceMode) option.selected = true;
-    ddSelect.appendChild(option);
-  });
-  ddSelect.onchange = () => {
-    const nextSource = ddSelect.value as 'off' | 'runtime';
-    if (nextSource === ddSourceMode) return;
-    ddSourceMode = nextSource;
-    resetGame(currentSeed, `DD source changed: ${ddSourceLabel[nextSource]}`);
-    if (nextSource === 'runtime') warmDdDataset(currentProblemId);
+  const debugRow = document.createElement('div');
+  debugRow.className = 'meta-row';
+  const debugKey = document.createElement('span');
+  debugKey.className = 'k';
+  debugKey.textContent = 'Debug';
+  const debugValue = document.createElement('span');
+  debugValue.className = 'v turn-meta';
+  const debugLabel = document.createElement('label');
+  const debugBox = document.createElement('input');
+  debugBox.type = 'checkbox';
+  debugBox.checked = showDebugSection;
+  debugBox.onchange = () => {
+    showDebugSection = debugBox.checked;
+    render();
   };
-  ddValue.appendChild(ddSelect);
-  ddRow.append(ddKey, ddValue);
-  facts.appendChild(ddRow);
+  debugLabel.append(debugBox, ' Show debug');
+  debugValue.appendChild(debugLabel);
+  debugRow.append(debugKey, debugValue);
+  facts.appendChild(debugRow);
+
   panel.appendChild(facts);
 
   if (currentProblem.status === 'underConstruction') {
@@ -2252,36 +2352,6 @@ function renderControlsBanner(): HTMLElement {
   puzzleLabel.appendChild(puzzleSelect);
   row.appendChild(puzzleLabel);
 
-  const resetBtn = document.createElement('button');
-  resetBtn.type = 'button';
-  resetBtn.textContent = 'Reset';
-  resetBtn.onclick = () => resetGame(currentSeed, 'reset');
-  row.appendChild(resetBtn);
-
-  const backupBtn = document.createElement('button');
-  backupBtn.type = 'button';
-  backupBtn.textContent = 'Backup';
-  backupBtn.disabled = undoStack.length === 0;
-  backupBtn.onclick = () => backupLastUserPlay();
-  row.appendChild(backupBtn);
-
-  const seedBtn = document.createElement('button');
-  seedBtn.type = 'button';
-  seedBtn.textContent = 'New seed';
-  seedBtn.onclick = () => resetGame(Date.now() >>> 0, 'newSeed');
-  row.appendChild(seedBtn);
-
-  const guidesLabel = document.createElement('label');
-  const guidesBox = document.createElement('input');
-  guidesBox.type = 'checkbox';
-  guidesBox.checked = showGuides;
-  guidesBox.onchange = () => {
-    showGuides = guidesBox.checked;
-    render();
-  };
-  guidesLabel.append(guidesBox, ' Show boxes');
-  row.appendChild(guidesLabel);
-
   const teachLabel = document.createElement('label');
   const teachBox = document.createElement('input');
   teachBox.type = 'checkbox';
@@ -2305,30 +2375,52 @@ function renderControlsBanner(): HTMLElement {
   singletonLabel.append(singletonBox, ' Autoplay singletons');
   row.appendChild(singletonLabel);
 
-  const showLogLabel = document.createElement('label');
-  const showLogBox = document.createElement('input');
-  showLogBox.type = 'checkbox';
-  showLogBox.checked = showLog;
-  showLogBox.onchange = () => {
-    showLog = showLogBox.checked;
-    render();
-  };
-  showLogLabel.append(showLogBox, ' Show log');
-  row.appendChild(showLogLabel);
-
-  const verboseLabel = document.createElement('label');
-  const verboseBox = document.createElement('input');
-  verboseBox.type = 'checkbox';
-  verboseBox.checked = verboseLog;
-  verboseBox.onchange = () => {
-    verboseLog = verboseBox.checked;
-    render();
-  };
-  verboseLabel.append(verboseBox, ' Verbose log');
-  row.appendChild(verboseLabel);
-
   bar.appendChild(row);
   return bar;
+}
+
+function renderBoardNavigationArea(view: State): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'board-navigation-area';
+
+  const outcome = document.createElement('div');
+  outcome.className = `outcome-module ${runStatus === 'success' ? 'ok' : runStatus === 'failure' ? 'fail' : 'neutral'}`;
+  if (runStatus === 'success' || runStatus === 'failure') {
+    const earlyGuaranteedFailure = runStatus === 'failure' && view.goalStatus === 'assuredFailure' && !handsAreEmpty(view);
+    outcome.textContent =
+      runStatus === 'success'
+        ? 'Success - goal achieved'
+        : (earlyGuaranteedFailure ? 'Goal already impossible - run stopped early' : 'Not enough tricks - try again');
+  } else {
+    outcome.textContent = 'Run in progress';
+  }
+  section.appendChild(outcome);
+
+  const transport = document.createElement('div');
+  transport.className = 'transport-bar';
+
+  const restartBtn = document.createElement('button');
+  restartBtn.type = 'button';
+  restartBtn.textContent = 'Restart';
+  restartBtn.onclick = () => resetGame(currentSeed, 'reset');
+  transport.appendChild(restartBtn);
+
+  const undoBtn = document.createElement('button');
+  undoBtn.type = 'button';
+  undoBtn.textContent = 'Undo';
+  undoBtn.disabled = undoStack.length === 0;
+  undoBtn.onclick = () => backupLastUserPlay();
+  transport.appendChild(undoBtn);
+
+  const nextVariationBtn = document.createElement('button');
+  nextVariationBtn.type = 'button';
+  nextVariationBtn.textContent = 'Next variation';
+  nextVariationBtn.disabled = !(runStatus === 'success' && playAgainAvailable);
+  nextVariationBtn.onclick = () => startPlayAgain('manual');
+  transport.appendChild(nextVariationBtn);
+
+  section.appendChild(transport);
+  return section;
 }
 
 function renderTeachingEventsPane(): HTMLElement {
@@ -2400,46 +2492,10 @@ function render(): void {
   mainRow.appendChild(tableHost);
   mainRow.appendChild(renderStatusPanel(view));
   root.appendChild(mainRow);
-
-  if (runStatus === 'success' || runStatus === 'failure') {
-    const banner = document.createElement('div');
-    banner.className = `banner ${runStatus === 'success' ? 'ok' : 'fail'}`;
-    const earlyGuaranteedFailure = runStatus === 'failure' && view.goalStatus === 'assuredFailure' && !handsAreEmpty(view);
-    banner.textContent = runStatus === 'success'
-      ? 'Success - goal achieved'
-      : (earlyGuaranteedFailure ? 'Goal already impossible - run stopped early' : 'Not enough tricks - try again');
-    root.appendChild(banner);
+  root.appendChild(renderBoardNavigationArea(view));
+  if (showLog || showDebugSection) {
+    root.appendChild(renderDebugSection());
   }
-  if (runStatus === 'success' && playAgainAvailable) {
-    const playAgainBtn = document.createElement('button');
-    playAgainBtn.type = 'button';
-    playAgainBtn.textContent = 'Play Again';
-    playAgainBtn.onclick = () => startPlayAgain('manual');
-    root.appendChild(playAgainBtn);
-  }
-  if (runStatus === 'success' && !playAgainAvailable) {
-    const note = document.createElement('div');
-    note.className = 'banner';
-    note.textContent = "No 'Play Again' variations available: defenders had no same-tier alternatives to explore.";
-    root.appendChild(note);
-  }
-
-  if (showLog) {
-    const panel = document.createElement('section');
-    panel.className = 'log-panel';
-
-    const title = document.createElement('strong');
-    title.textContent = 'Log';
-    panel.appendChild(title);
-
-    const log = document.createElement('div');
-    log.className = 'log';
-    log.textContent = logs.length > 0 ? logs.join('\n') : 'No events yet';
-    panel.appendChild(log);
-    root.appendChild(panel);
-    log.scrollTop = log.scrollHeight;
-  }
-  root.appendChild(renderSemanticDebugPanel());
   syncSingletonAutoplay();
 }
 
