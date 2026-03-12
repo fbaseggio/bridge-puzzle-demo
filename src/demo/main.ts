@@ -3,11 +3,13 @@ import './style.css';
 import {
   apply,
   classInfoForCard,
+  CompositeSemanticReducer,
   getSuitEquivalenceClasses,
   InMemorySemanticEventCollector,
   init,
   legalPlays,
   RawSemanticReducer,
+  TeachingReducer,
   type DecisionRecord,
   type EngineEvent,
   type Play,
@@ -90,7 +92,10 @@ let currentProblem = demoProblems[0].problem;
 let currentProblemId = demoProblems[0].id;
 let currentSeed = currentProblem.rngSeed >>> 0;
 let state: State = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
-const semanticReducer = new RawSemanticReducer();
+const rawSemanticReducer = new RawSemanticReducer();
+const teachingReducer = new TeachingReducer();
+teachingReducer.setTrumpSuit(state.trumpSuit);
+const semanticReducer = new CompositeSemanticReducer([rawSemanticReducer, teachingReducer]);
 const semanticCollector = new InMemorySemanticEventCollector();
 semanticCollector.attachReducer(semanticReducer);
 warmDdDataset(currentProblemId);
@@ -1666,6 +1671,7 @@ function resetGame(seed: number, reason: string): void {
   }
   currentSeed = nextSeed;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+  teachingReducer.setTrumpSuit(state.trumpSuit);
   warmDdDataset(currentProblemId);
   logs = [...logs, `${reason} seed=${currentSeed}`].slice(-500);
   runStatus = 'running';
@@ -1699,6 +1705,7 @@ function selectProblem(problemId: string): void {
   currentProblemId = entry.id;
   currentSeed = currentProblem.rngSeed >>> 0;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+  teachingReducer.setTrumpSuit(state.trumpSuit);
   warmDdDataset(currentProblemId);
   runStatus = 'running';
   runPlayCounter = 0;
@@ -1882,7 +1889,7 @@ function renderDebugPanel(): HTMLElement {
 
   const body = document.createElement('pre');
   body.className = 'debug-json';
-  body.textContent = JSON.stringify(semanticReducer.snapshot(), null, 2);
+  body.textContent = JSON.stringify(rawSemanticReducer.snapshot(), null, 2);
   panel.appendChild(body);
   return panel;
 }
@@ -2043,6 +2050,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
 
   const seed = lastSuccessfulTranscript?.seed ?? currentSeed;
   state = init({ ...currentProblem, rngSeed: seed });
+  teachingReducer.setTrumpSuit(state.trumpSuit);
   let divergenceIndex: number | null = null;
   let forcedClass: string | null = null;
   let forcedCard: CardId | null = null;
@@ -2433,33 +2441,72 @@ function renderTeachingEventsPane(): HTMLElement {
 
   const list = document.createElement('div');
   list.className = 'teaching-events';
-  const events =
-    teachingEvents.length > 0
-      ? teachingEvents
-      : [{ id: 0, kind: 'info' as const, label: 'No teaching events yet.' }];
+  const snapshot = teachingReducer.snapshot() as {
+    entries: Array<{ seq: number; seat: string; card: string; summary: string; reasons: string[]; effects: string[] }>;
+  };
+  const entries = snapshot.entries ?? [];
 
-  for (const event of events) {
+  if (entries.length === 0) {
     const row = document.createElement('div');
-    row.className = `teaching-event teaching-${event.kind}`;
+    row.className = 'teaching-event teaching-info';
 
     const marker = document.createElement('span');
     marker.className = 'teaching-at';
-    marker.textContent = event.at ?? '';
+    marker.textContent = 'Start';
     row.appendChild(marker);
 
     const text = document.createElement('span');
     text.className = 'teaching-text';
-    text.textContent = event.label;
+    text.textContent = 'No teaching events yet.';
     row.appendChild(text);
-
-    if (event.detail) {
-      const detail = document.createElement('pre');
-      detail.className = 'teaching-detail';
-      detail.textContent = event.detail;
-      row.appendChild(detail);
-    }
-
     list.appendChild(row);
+  } else {
+    const parseDdReason = (reason: string): { short: string; full: string } | null => {
+      if (!reason.startsWith('DD:')) return null;
+      const full = reason.slice(3);
+      const short = full.split('; alternatives')[0] ?? full;
+      return { short: short.trim(), full: full.trim() };
+    };
+    const isIdleTransitionEffect = (effect: string): boolean =>
+      effect.includes('becomes idle.') || effect.includes('becomes idle');
+
+    for (const entry of entries) {
+      const row = document.createElement('div');
+      row.className = 'teaching-event teaching-info';
+
+      const marker = document.createElement('span');
+      marker.className = 'teaching-at';
+      marker.textContent = `#${entry.seq} ${entry.seat}`;
+      row.appendChild(marker);
+
+      const text = document.createElement('span');
+      text.className = 'teaching-text';
+      const ddReasons = (entry.reasons ?? [])
+        .map(parseDdReason)
+        .filter((item): item is { short: string; full: string } => Boolean(item));
+      const nonDdReasons = (entry.reasons ?? []).filter((reason) => !reason.startsWith('DD:'));
+      const bracketParts: string[] = [];
+      if (ddReasons.length > 0) {
+        bracketParts.push(...ddReasons.map((item) => (verboseLog ? item.full : item.short)));
+      }
+      if (verboseLog && nonDdReasons.length > 0) {
+        bracketParts.push(...nonDdReasons);
+      }
+      text.textContent = bracketParts.length > 0 ? `${entry.summary} [${bracketParts.join('; ')}]` : entry.summary;
+      row.appendChild(text);
+
+      const shownEffects = (entry.effects ?? []).filter((effect) => verboseLog || !isIdleTransitionEffect(effect));
+      if (shownEffects.length > 0) {
+        const detail = document.createElement('pre');
+        detail.className = 'teaching-detail';
+        const lines: string[] = [];
+        for (const effect of shownEffects) lines.push(`Effect: ${effect}`);
+        detail.textContent = lines.join('\n');
+        row.appendChild(detail);
+      }
+
+      list.appendChild(row);
+    }
   }
 
   pane.appendChild(list);

@@ -1,6 +1,13 @@
 import type { EngineEvent, Goal, Hand, Play, Policy, Problem, Rank, Seat, State, Suit } from './types';
 import { evaluatePolicy } from '../ai/evaluatePolicy';
-import { initClassification, parseCardId, toCardId, updateClassificationAfterPlay, type CardId } from '../ai/threatModel';
+import {
+  initClassification,
+  parseCardId,
+  toCardId,
+  updateClassificationAfterPlay,
+  type CardId,
+  type ClassificationTrigger
+} from '../ai/threatModel';
 import { classInfoForCard } from './equivalence';
 import { computeGoalStatus, remainingTricksFromHands } from './goal';
 import type { SemanticEventCollector, SemanticEventInput, SemanticTag } from './semanticEvents';
@@ -548,6 +555,10 @@ function applyOnePlay(
   const events: EngineEvent[] = [];
   const playedId = toCardId(play.suit, play.rank) as CardId;
   const playedClass = classInfoForCard(state, play.seat, playedId).classId;
+  const priorTrickLength = state.trick.length;
+  const leadSuit = state.trick[0]?.suit ?? null;
+  const trigger: ClassificationTrigger =
+    priorTrickLength === 0 ? 'lead' : leadSuit === play.suit ? 'follow' : 'discard';
   const ok = removeCard(state.hands[play.seat], play.suit, play.rank);
   if (!ok) {
     events.push({ type: 'illegal', reason: `Card ${play.suit}${play.rank} not in ${play.seat} hand` });
@@ -572,23 +583,92 @@ function applyOnePlay(
   }
 
   if (state.threat && state.threatLabels) {
-    const beforeThreat = state.threat;
+    const applyClassificationUpdate = (
+      stageTrigger: ClassificationTrigger,
+      stagePhase: 'immediate' | 'deferred'
+    ): void => {
+      const beforeThreat = state.threat as NonNullable<State['threat']>;
+      const beforeRoles = state.cardRoles;
+      const updated = updateClassificationAfterPlay(
+        {
+          threat: beforeThreat,
+          labels: state.threatLabels as NonNullable<State['threatLabels']>,
+          perCardRole: beforeRoles
+        },
+        { hands: state.hands },
+        playedId,
+        {
+          trick: state.trick,
+          trumpSuit: state.trumpSuit,
+          goal: state.goal,
+          tricksWon: state.tricksWon,
+          goalStatus: state.goalStatus
+        },
+        stageTrigger,
+        stagePhase
+      );
+      state.threat = updated.threat as State['threat'];
+      state.threatLabels = updated.labels as State['threatLabels'];
+      state.cardRoles = { ...updated.perCardRole };
+      emitSemantic(collector, {
+        type: 'threat-updated',
+        seat: play.seat,
+        card: playedId,
+        suit: play.suit,
+        rank: play.rank,
+        details: {
+          before: beforeThreat,
+          after: updated.threat
+        }
+      });
+      const changedRoles: Array<{ card: CardId; before?: string; after?: string }> = [];
+      const roleKeys = new Set<string>([...Object.keys(beforeRoles), ...Object.keys(updated.perCardRole)]);
+      for (const key of roleKeys) {
+        const before = beforeRoles[key as CardId];
+        const after = updated.perCardRole[key as CardId];
+        if (before !== after) changedRoles.push({ card: key as CardId, before, after });
+      }
+      emitSemantic(collector, {
+        type: 'classifications-updated',
+        tags: changedRoles
+          .flatMap((item) => [cardRoleToSemanticTag(item.before as any), cardRoleToSemanticTag(item.after as any)])
+          .filter((tag): tag is SemanticTag => Boolean(tag)),
+        details: { changedRoles }
+      });
+    };
+
+    applyClassificationUpdate(trigger, 'immediate');
+    if (trigger === 'discard') {
+      applyClassificationUpdate(trigger, 'deferred');
+    }
+  }
+
+  const trickCompleted = state.trick.length === 4;
+  if (!trickCompleted) {
+    state.turn = nextSeat(state.turn);
+    return events;
+  }
+
+  if (state.threat && state.threatLabels) {
+    const beforeThreat = state.threat as NonNullable<State['threat']>;
     const beforeRoles = state.cardRoles;
     const updated = updateClassificationAfterPlay(
       {
-        threat: state.threat,
-        labels: state.threatLabels,
-        perCardRole: state.cardRoles
+        threat: beforeThreat,
+        labels: state.threatLabels as NonNullable<State['threatLabels']>,
+        perCardRole: beforeRoles
       },
       { hands: state.hands },
-      toCardId(play.suit, play.rank) as CardId,
+      playedId,
       {
         trick: state.trick,
         trumpSuit: state.trumpSuit,
         goal: state.goal,
         tricksWon: state.tricksWon,
         goalStatus: state.goalStatus
-      }
+      },
+      'end-of-trick',
+      'deferred'
     );
     state.threat = updated.threat as State['threat'];
     state.threatLabels = updated.labels as State['threatLabels'];
@@ -618,11 +698,6 @@ function applyOnePlay(
         .filter((tag): tag is SemanticTag => Boolean(tag)),
       details: { changedRoles }
     });
-  }
-
-  if (state.trick.length < 4) {
-    state.turn = nextSeat(state.turn);
-    return events;
   }
 
   const completedTrick = state.trick.map((p) => ({ ...p }));

@@ -28,6 +28,8 @@ export type ClassificationState = {
   labels: DefenderLabels;
   perCardRole: Partial<Record<CardId, CardRole>>;
 };
+export type ClassificationTrigger = 'lead' | 'follow' | 'discard' | 'end-of-trick';
+export type ClassificationPhase = 'immediate' | 'deferred' | 'all';
 
 export type RuntimeThreatContext = {
   trick?: Play[];
@@ -141,7 +143,13 @@ function forcedNextTrickLeader(
   trumpSuit: Suit | null
 ): Seat | null {
   const current = trick ?? [];
-  if (current.length === 0 || current.length >= 4) return null;
+  if (current.length === 0) return null;
+  if (current.length === 4) {
+    // On the 4th card the current trick winner is fully determined, so
+    // next-trick leader is forced and can be used for strandedness checks.
+    return rankWinnerOfTrick(current, trumpSuit);
+  }
+  if (current.length > 4) return null;
   const toPlay: Seat[] = [];
   let seat = nextSeat(current[current.length - 1].seat);
   for (let i = current.length; i < 4; i += 1) {
@@ -511,6 +519,31 @@ function updateRolesForSuit(
   }
 }
 
+function recomputeMechanicalWinnersForSuit(
+  perCardRole: Partial<Record<CardId, CardRole>>,
+  position: Position,
+  suit: Suit
+): void {
+  const seats: Seat[] = ['N', 'E', 'S', 'W'];
+  for (const seat of seats) {
+    const opponents: Seat[] = seat === 'N' || seat === 'S' ? ['E', 'W'] : ['N', 'S'];
+    let highestOpponent = 0;
+    for (const opp of opponents) {
+      for (const oppRank of position.hands[opp][suit]) {
+        highestOpponent = Math.max(highestOpponent, rankValue(oppRank));
+      }
+    }
+    for (const rank of position.hands[seat][suit]) {
+      const cardId = toCardId(suit, rank);
+      const current = perCardRole[cardId] ?? 'default';
+      if (current === 'busy' || current === 'idle' || current === 'threat' || current === 'strandedThreat' || current === 'promotedWinner') {
+        continue;
+      }
+      perCardRole[cardId] = rankValue(rank) > highestOpponent ? 'winner' : 'default';
+    }
+  }
+}
+
 export function initClassification(position: Position, threatCardIds: CardId[], runtime?: RuntimeThreatContext): ClassificationState {
   const threat = applyStrandedFlags(initThreatContext(position, threatCardIds), position, runtime);
   const labels = computeDefenderLabels(threat, position);
@@ -533,7 +566,9 @@ export function updateClassificationAfterPlay(
   state: ClassificationState,
   position: Position,
   playedCardId: CardId,
-  runtime?: RuntimeThreatContext
+  runtime?: RuntimeThreatContext,
+  trigger: ClassificationTrigger = 'follow',
+  phase: ClassificationPhase = 'all'
 ): ClassificationState {
   const nextThreat: ThreatContext = {
     threatCardIds: [...state.threat.threatCardIds],
@@ -544,34 +579,54 @@ export function updateClassificationAfterPlay(
   delete nextRoles[playedCardId];
 
   const playedSuit = parseCardId(playedCardId).suit;
-  const dirtySuits = new Set<Suit>();
-  if (nextThreat.threatsBySuit[playedSuit]) dirtySuits.add(playedSuit);
 
-  for (const suit of dirtySuits) {
-    const threat = nextThreat.threatsBySuit[suit];
-    if (!threat) continue;
-    const owners = ownersOfCard(position, threat.threatCardId);
-    const stillEstablished = owners.length === 1 && owners[0] === threat.establishedOwner;
-    nextThreat.threatsBySuit[suit] = {
-      ...threat,
-      active: stillEstablished,
-      threatLength: stillEstablished
-        ? countThreatLength(position, threat.establishedOwner, suit, threat.threatRank)
-        : 0,
-      stopStatus: undefined
-    };
-    recomputeSuitLabels(nextThreat, position, nextLabels, suit);
-    const updatedThreat = nextThreat.threatsBySuit[suit];
-    if (updatedThreat) {
-      nextThreat.threatsBySuit[suit] = {
-        ...updatedThreat,
-        stopStatus: computeStopStatus(nextThreat, nextLabels, suit)
-      };
+  let immediateThreat = nextThreat;
+  if (phase === 'immediate' || phase === 'all') {
+    if (immediateThreat.threatsBySuit[playedSuit]) {
+      const threat = immediateThreat.threatsBySuit[playedSuit];
+      if (threat) {
+        const owners = ownersOfCard(position, threat.threatCardId);
+        const stillEstablished = owners.length === 1 && owners[0] === threat.establishedOwner;
+        immediateThreat.threatsBySuit[playedSuit] = {
+          ...threat,
+          active: stillEstablished,
+          threatLength: stillEstablished ? threat.threatLength : 0
+        };
+      }
     }
-    updateRolesForSuit(nextRoles, nextThreat, nextLabels, position, suit);
+    immediateThreat = applyStrandedFlags(immediateThreat, position, runtime);
+    for (const suit of SUITS) {
+      const t = immediateThreat.threatsBySuit[suit];
+      if (!t || !t.active) continue;
+      const currentRole = nextRoles[t.threatCardId];
+      if (t.stranded) {
+        nextRoles[t.threatCardId] = 'strandedThreat';
+      } else if (currentRole !== 'promotedWinner') {
+        nextRoles[t.threatCardId] = 'threat';
+      }
+    }
+    recomputeMechanicalWinnersForSuit(nextRoles, position, playedSuit);
+  }
+  if (phase === 'immediate') {
+    return {
+      threat: immediateThreat,
+      labels: nextLabels,
+      perCardRole: nextRoles
+    };
   }
 
-  const substitutedThreat = applyTrickEndThreatSubstitution(nextThreat, position, runtime);
+  if (phase === 'all' && trigger === 'lead') {
+    return {
+      threat: immediateThreat,
+      labels: nextLabels,
+      perCardRole: nextRoles
+    };
+  }
+
+  const substitutedThreat =
+    trigger === 'end-of-trick' || (runtime?.trick?.length ?? 0) === 4
+      ? applyTrickEndThreatSubstitution(immediateThreat, position, runtime)
+      : immediateThreat;
   const strandedThreat = applyStrandedFlags(substitutedThreat, position, runtime);
   const recomputedLabels = computeDefenderLabels(strandedThreat, position);
   for (const suit of SUITS) {
