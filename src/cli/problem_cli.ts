@@ -1,8 +1,11 @@
 /// <reference types="node" />
 
 import { demoProblems } from '../demo/problems';
+import type { ProblemStatus } from '../core';
 
-type Request = { id: string };
+type GetRequest = { mode?: 'get'; id: string };
+type ListRequest = { mode: 'list' };
+type Request = GetRequest | ListRequest;
 
 async function readStdin(): Promise<string> {
   let data = '';
@@ -15,9 +18,23 @@ async function main(): Promise<void> {
   try {
     const raw = await readStdin();
     const req = JSON.parse(raw) as Request;
-    const found = demoProblems.find((p) => p.id === req.id);
+    if (req.mode === 'list') {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: true,
+          problemIds: demoProblems.map((p) => p.id),
+          problems: demoProblems.map((p) => ({
+            id: p.id,
+            status: (p.problem.status ?? 'active') as ProblemStatus
+          }))
+        })}\n`
+      );
+      return;
+    }
+    const id = req.id;
+    const found = demoProblems.find((p) => p.id === id);
     if (!found) {
-      process.stdout.write(`${JSON.stringify({ ok: false, error: { message: `Unknown problem id: ${req.id}` } })}\n`);
+      process.stdout.write(`${JSON.stringify({ ok: false, error: { message: `Unknown problem id: ${id}` } })}\n`);
       return;
     }
     process.stdout.write(`${JSON.stringify({ ok: true, problem: found.problem })}\n`);

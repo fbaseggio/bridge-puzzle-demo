@@ -50,9 +50,11 @@ export type Play = { seat: Seat; suit: Suit; rank: Rank };
 export type Goal = { type: 'minTricks'; side: Side; n: number };
 export type GoalStatus = 'live' | 'assuredSuccess' | 'assuredFailure';
 export type Policy = { kind: 'randomLegal' | 'threatAware'; ddSource?: 'off' | 'runtime' };
+export type ProblemStatus = 'active' | 'underConstruction';
 
 export type Problem = {
   id: string;
+  status?: ProblemStatus;
   contract: Contract;
   leader: Seat;
   userControls: Seat[];

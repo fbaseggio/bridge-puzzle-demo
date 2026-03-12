@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 import argparse
 import copy
+import datetime as dt
 import json
 import os
 import random
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any
+
+try:
+    from tools.dd_env import has_endplay
+except Exception:
+    from dd_env import has_endplay
 
 SEAT_ORDER = ["N", "E", "S", "W"]
 SUIT_ORDER = ["S", "H", "D", "C"]
@@ -58,6 +65,37 @@ class DDDiscrepancy:
     optimal_cards: List[str]
     max_tricks: int
     severity: str
+
+
+@dataclass
+class DDDiscrepancyAnalysis:
+    run_no: int
+    position_index: int
+    trick_no: int
+    seat: str
+    chosen: str
+    direct_optimal: List[str]
+    signature: str
+    legal: List[str]
+    base: List[str]
+    runtime_optimal: List[str]
+    lookup: bool
+    found: bool
+    path: str
+    category: str
+    transcript_prefix: List[Tuple[str, str]]
+    failing_play: Tuple[str, str]
+
+
+@dataclass
+class EnumProfile:
+    policy_queries: int = 0
+    policy_query_s: float = 0.0
+    dd_checks: int = 0
+    dd_check_s: float = 0.0
+    threat_updates: int = 0
+    threat_update_s: float = 0.0
+    terminal_runs: int = 0
 
 
 class DDRecordExporter:
@@ -192,6 +230,23 @@ class DoubleDummyValidator:
         self.solve_board = solve_board
         self._rank_order = "AKQJT98765432"
         self._card_re = re.compile(r"([SHDC♠♥♦♣])([AKQJT98765432])")
+        self._dd_calls = 0
+        self._dd_total_s = 0.0
+        self._dd_signatures_seen: set[str] = set()
+        self._dd_signature_repeats = 0
+        self._dd_cache: Dict[str, DDResult] = {}
+        self._dd_cache_hits = 0
+        self._dd_cache_misses = 0
+        self._dd_signature_s = 0.0
+        self._dd_cache_hit_s = 0.0
+        self._dd_cache_miss_s = 0.0
+
+    def _clone_dd_result(self, value: DDResult) -> DDResult:
+        return DDResult(
+            optimal_cards=list(value.optimal_cards),
+            max_tricks=int(value.max_tricks),
+            tricks_by_card=dict(value.tricks_by_card),
+        )
 
     def _sort_ranks_desc(self, ranks: List[str]) -> List[str]:
         return sorted(ranks, key=lambda r: self._rank_order.index(r))
@@ -234,6 +289,23 @@ class DoubleDummyValidator:
         turn: str,
         contract_strain: str
     ) -> DDResult:
+        t_sig = time.perf_counter()
+        sig = canonical_position_signature(contract_strain, turn, hands, trick)
+        self._dd_signature_s += time.perf_counter() - t_sig
+        self._dd_calls += 1
+        if sig in self._dd_signatures_seen:
+            self._dd_signature_repeats += 1
+        else:
+            self._dd_signatures_seen.add(sig)
+        cached = self._dd_cache.get(sig)
+        if cached is not None:
+            t_hit = time.perf_counter()
+            self._dd_cache_hits += 1
+            out = self._clone_dd_result(cached)
+            self._dd_cache_hit_s += time.perf_counter() - t_hit
+            return out
+        self._dd_cache_misses += 1
+        t0 = time.perf_counter()
         # Build a fresh deal per query. Hands in runner state already exclude cards in `trick`,
         # so restore those cards first, then replay `trick` onto the deal.
         hands_for_deal = {
@@ -278,11 +350,37 @@ class DoubleDummyValidator:
                 continue
             scored.append((card, int(tricks)))
         if not scored:
-            return DDResult(optimal_cards=[], max_tricks=-1, tricks_by_card={})
+            miss_elapsed = time.perf_counter() - t0
+            self._dd_total_s += miss_elapsed
+            self._dd_cache_miss_s += miss_elapsed
+            out = DDResult(optimal_cards=[], max_tricks=-1, tricks_by_card={})
+            self._dd_cache[sig] = self._clone_dd_result(out)
+            return out
         best = max(v for _, v in scored)
         optimal = sorted_cards([c for c, v in scored if v == best])
         tricks_by_card = {c: v for c, v in scored}
-        return DDResult(optimal_cards=optimal, max_tricks=best, tricks_by_card=tricks_by_card)
+        miss_elapsed = time.perf_counter() - t0
+        self._dd_total_s += miss_elapsed
+        self._dd_cache_miss_s += miss_elapsed
+        out = DDResult(optimal_cards=optimal, max_tricks=best, tricks_by_card=tricks_by_card)
+        self._dd_cache[sig] = self._clone_dd_result(out)
+        return out
+
+    def profile_snapshot(self) -> Dict[str, Any]:
+        unique = len(self._dd_signatures_seen)
+        hit_rate = (self._dd_cache_hits / self._dd_calls) if self._dd_calls else 0.0
+        return {
+            "ddCalls": self._dd_calls,
+            "ddTotalSeconds": self._dd_total_s,
+            "ddUniqueSignatures": unique,
+            "ddRepeatedSignatures": self._dd_signature_repeats,
+            "ddCacheHits": self._dd_cache_hits,
+            "ddCacheMisses": self._dd_cache_misses,
+            "ddCacheHitRate": hit_rate,
+            "ddSignatureSeconds": self._dd_signature_s,
+            "ddCacheHitSeconds": self._dd_cache_hit_s,
+            "ddCacheMissSeconds": self._dd_cache_miss_s,
+        }
 
 
 def legal_cards(hands: Dict[str, Dict[str, List[str]]], seat: str, trick: List[Play]) -> List[str]:
@@ -482,8 +580,9 @@ def update_threat_state(hands: Dict[str, Dict[str, List[str]]], state: Dict[str,
 
 
 class PersistentPolicyClient:
-    def __init__(self) -> None:
+    def __init__(self, *, ts_dd_trace: bool = True) -> None:
         self.proc: Optional[subprocess.Popen[str]] = None
+        self.ts_dd_trace = ts_dd_trace
 
     def start(self) -> None:
         self.proc = subprocess.Popen(
@@ -525,6 +624,7 @@ class PersistentPolicyClient:
         payload = {
             "schemaVersion": 1,
             "policyVersion": 1,
+            "debug": {"ddTrace": self.ts_dd_trace},
             "input": {
                 "policy": {"kind": policy_kind, "ddSource": dd_source},
                 "problemId": problem_id,
@@ -766,6 +866,19 @@ def derive_dd_scope_from_goal_side(goal_side: str) -> str:
     raise RuntimeError(f"Unsupported goal side for DD scope derivation: {goal_side}")
 
 
+def safe_list(x: Any) -> List[str]:
+    if x is None:
+        return []
+    if isinstance(x, list):
+        return list(x)
+    if isinstance(x, (tuple, set)):
+        return list(x)
+    try:
+        return list(x)
+    except TypeError:
+        return []
+
+
 def enumerate_runs(
     puzzle: Dict[str, Any],
     policy_client: PersistentPolicyClient,
@@ -777,12 +890,16 @@ def enumerate_runs(
     dd_discrepancies_only: bool = False,
     emit_summaries: bool = True,
     dd_exporter: Optional[DDRecordExporter] = None,
+    profile: Optional[EnumProfile] = None,
+    profile_mode: bool = False,
+    profile_heartbeat_sec: float = 15.0,
 ) -> Tuple[
     int,
     Optional[List[Tuple[str, str]]],
     Optional[str],
     Optional[List[Tuple[int, int, str, str, List[str], int, str]]],
     List[DDDiscrepancy],
+    List[DDDiscrepancyAnalysis],
 ]:
     goal_context = lambda tricks: {"goal": puzzle["goal"], "tricksWon": {"NS": tricks["NS"], "EW": tricks["EW"]}}
     hands = {seat: {suit: list(ranks) for suit, ranks in puzzle["hands"][seat].items()} for seat in SEAT_ORDER}
@@ -804,6 +921,7 @@ def enumerate_runs(
     selected_summary: Optional[str] = None
     selected_dd_failures: Optional[List[Tuple[int, int, str, str, List[str], int, str]]] = None
     discrepancies: List[DDDiscrepancy] = []
+    discrepancy_analysis: List[DDDiscrepancyAnalysis] = []
     stack: List[EnumState] = [
         EnumState(
             hands=hands,
@@ -818,11 +936,34 @@ def enumerate_runs(
             dd_failures=[],
         )
     ]
+    enum_started_at = time.perf_counter()
+    last_profile_heartbeat = enum_started_at
 
     while stack:
+        if profile_mode:
+            now = time.perf_counter()
+            if now - last_profile_heartbeat >= profile_heartbeat_sec:
+                dd_unique = "-"
+                dd_hits = "-"
+                dd_misses = "-"
+                if dd_validator is not None:
+                    snap = dd_validator.profile_snapshot()
+                    dd_unique = str(snap.get("ddUniqueSignatures", "-"))
+                    dd_hits = str(snap.get("ddCacheHits", "-"))
+                    dd_misses = str(snap.get("ddCacheMisses", "-"))
+                dd_checks = profile.dd_checks if profile is not None else 0
+                stamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print(
+                    f"{stamp} [PROFILE] problem={puzzle.get('id', '?')} elapsed={int(now - enum_started_at)}s "
+                    f"runs={run_no} ddChecks={dd_checks} uniqueSigs={dd_unique} cacheHits={dd_hits} cacheMisses={dd_misses}",
+                    flush=True,
+                )
+                last_profile_heartbeat = now
         node = stack.pop()
         if all_hands_empty(node.hands) or (node.goal_status == "assuredFailure" and len(node.trick) == 0):
             run_no += 1
+            if profile is not None:
+                profile.terminal_runs = run_no
             line_text = format_compact_line(node.line)
             for position_index, trick_no, seat, actual_card, optimal_cards, max_tricks, severity in node.dd_failures:
                 discrepancies.append(
@@ -851,7 +992,7 @@ def enumerate_runs(
                 selected_line = list(node.line)
                 selected_summary = summary_line
                 selected_dd_failures = list(node.dd_failures)
-                return run_no, selected_line, selected_summary, selected_dd_failures, discrepancies
+                return run_no, selected_line, selected_summary, selected_dd_failures, discrepancies, discrepancy_analysis
             continue
 
         legal = legal_cards(node.hands, node.turn, node.trick)
@@ -868,6 +1009,7 @@ def enumerate_runs(
             policy = puzzle["policies"][node.turn]["kind"]
             position_index = len(node.line) + 1
             trick_index = (len(node.line) // 4) + 1
+            t_policy = time.perf_counter()
             chosen, next_rng, policy_result = policy_client.query(
                 puzzle["id"],
                 node.turn,
@@ -880,6 +1022,9 @@ def enumerate_runs(
                 position_index,
                 trick_index,
             )
+            if profile is not None:
+                profile.policy_queries += 1
+                profile.policy_query_s += time.perf_counter() - t_policy
             candidates = [c for c in policy_candidates(policy_result, chosen) if c in legal]
             expected_policy_moves = sorted_cards(candidates)
             for c in candidates:
@@ -887,7 +1032,11 @@ def enumerate_runs(
 
         dd_for_node: Optional[DDResult] = None
         if dd_validator is not None and should_validate_dd(dd_scope, node.turn):
+            t_dd = time.perf_counter()
             dd_for_node = dd_validator.optimal_for_position(node.hands, node.trick, node.turn, puzzle["contract"]["strain"])
+            if profile is not None:
+                profile.dd_checks += 1
+                profile.dd_check_s += time.perf_counter() - t_dd
             if dd_exporter is not None and dd_for_node.optimal_cards:
                 record = build_dd_record(
                     puzzle,
@@ -903,7 +1052,7 @@ def enumerate_runs(
                     dd_exporter.emit(record)
 
         # DFS: push in reverse so smallest deterministic choice is visited first.
-        for chosen, next_rng, _policy_result in reversed(choices_with_rng):
+        for chosen, next_rng, policy_result_for_choice in reversed(choices_with_rng):
             next_dd_failures = list(node.dd_failures)
             if dd_for_node is not None:
                 if dd_for_node.optimal_cards and chosen not in dd_for_node.optimal_cards:
@@ -917,6 +1066,48 @@ def enumerate_runs(
                             dd_for_node.optimal_cards,
                             dd_for_node.max_tricks,
                             severity,
+                        )
+                    )
+                    dd_trace = policy_result_for_choice.get("ddTrace") if isinstance(policy_result_for_choice, dict) else None
+                    lookup = bool(dd_trace.get("lookup")) if isinstance(dd_trace, dict) else False
+                    found = bool(dd_trace.get("found")) if isinstance(dd_trace, dict) else False
+                    path = str(dd_trace.get("path")) if isinstance(dd_trace, dict) and dd_trace.get("path") is not None else "unknown"
+                    signature = str(dd_trace.get("sig")) if isinstance(dd_trace, dict) and isinstance(dd_trace.get("sig"), str) else "-"
+                    legal = [c for c in safe_list(dd_trace.get("legal") if isinstance(dd_trace, dict) else None) if isinstance(c, str)]
+                    base = [c for c in safe_list(dd_trace.get("base") if isinstance(dd_trace, dict) else None) if isinstance(c, str)]
+                    runtime_optimal = [c for c in safe_list(dd_trace.get("optimal") if isinstance(dd_trace, dict) else None) if isinstance(c, str)]
+                    if not isinstance(dd_trace, dict):
+                        category = "runtime-trace-missing"
+                    elif not lookup or path == "disabled":
+                        category = "runtime-lookup-disabled"
+                    elif not found:
+                        category = "runtime-record-not-found"
+                    elif path == "base-fallback":
+                        category = "runtime-found-base-fallback"
+                    elif path == "dd-fallback":
+                        category = "runtime-found-dd-fallback"
+                    elif path == "intersection":
+                        category = "runtime-found-intersection-mismatch"
+                    else:
+                        category = "runtime-other"
+                    discrepancy_analysis.append(
+                        DDDiscrepancyAnalysis(
+                            run_no=run_no + 1,
+                            position_index=len(node.line) + 1,
+                            trick_no=(len(node.line) // 4) + 1,
+                            seat=node.turn,
+                            chosen=chosen,
+                            direct_optimal=safe_list(dd_for_node.optimal_cards),
+                            signature=signature,
+                            legal=legal,
+                            base=base,
+                            runtime_optimal=runtime_optimal,
+                            lookup=lookup,
+                            found=found,
+                            path=path,
+                            category=category,
+                            transcript_prefix=list(node.line),
+                            failing_play=(node.turn, chosen),
                         )
                     )
             next_hands = copy.deepcopy(node.hands)
@@ -933,6 +1124,7 @@ def enumerate_runs(
             next_threat_state = node.threat_state
             next_goal_status = node.goal_status
             if next_threat_state is not None and threat_client is not None:
+                t_threat = time.perf_counter()
                 next_threat_state = threat_client.update_state(
                     next_hands,
                     next_threat_state,
@@ -940,6 +1132,9 @@ def enumerate_runs(
                     goal_context(next_tricks_won),
                     runtime_context_for_threat(next_trick, contract_strain),
                 )
+                if profile is not None:
+                    profile.threat_updates += 1
+                    profile.threat_update_s += time.perf_counter() - t_threat
                 # Goal-status is reliable for terminal checks at trick boundaries.
                 if len(next_trick) == 4:
                     next_goal_status = threat_client.last_goal_status()
@@ -967,7 +1162,7 @@ def enumerate_runs(
                 )
             )
 
-    return run_no, selected_line, selected_summary, selected_dd_failures, discrepancies
+    return run_no, selected_line, selected_summary, selected_dd_failures, discrepancies, discrepancy_analysis
 
 
 def run_movie(
@@ -980,6 +1175,7 @@ def run_movie(
     dd_scope: str = "none",
     forced_dd_failures: Optional[List[Tuple[int, int, str, str, List[str], int, str]]] = None,
     dd_exporter: Optional[DDRecordExporter] = None,
+    ts_dd_trace: bool = True,
 ) -> None:
     goal_context = lambda tricks: {"goal": puzzle["goal"], "tricksWon": {"NS": tricks["NS"], "EW": tricks["EW"]}}
     hands = {
@@ -1009,7 +1205,7 @@ def run_movie(
         for rec in forced_dd_failures:
             forced_dd_by_position[rec[0]] = rec
 
-    policy_client = PersistentPolicyClient()
+    policy_client = PersistentPolicyClient(ts_dd_trace=ts_dd_trace)
     policy_client.start()
     threat_client: Optional[PersistentThreatStateClient] = None
     if threat_card_ids:
@@ -1217,6 +1413,7 @@ def run_movie(
 
 
 def main() -> None:
+    t_main_start = time.perf_counter()
     parser = argparse.ArgumentParser(description="Play one puzzle movie using policy CLI for E/W.")
     parser.add_argument("--problem-id", default="p009", help="Existing repo problem id, e.g. p009")
     parser.add_argument(
@@ -1228,6 +1425,12 @@ def main() -> None:
     parser.add_argument("--enumerate", action="store_true", help="Enumerate all deterministic runs (DFS)")
     parser.add_argument("--show-run", type=int, default=None, help="When used with --enumerate, replay this run number")
     parser.add_argument(
+        "--run-lines",
+        choices=["on", "off"],
+        default="on",
+        help="Emit per-run enumeration lines ('Run N ...'). Use off for maintenance/profiling workflows.",
+    )
+    parser.add_argument(
         "--dd-scope",
         choices=["auto", "none", "ns", "ew", "all"],
         default="auto",
@@ -1237,11 +1440,42 @@ def main() -> None:
     parser.add_argument("--dd-export-jsonl", default=None, help="Write factual DD records (keyed by canonical signature) to this JSONL file")
     parser.add_argument("--dd-export-all", action="store_true", help="With --dd-export-jsonl, emit all validated positions (default filters to useful varying states)")
     parser.add_argument("--dd-source", choices=["off", "runtime"], default="off", help="TS DD backstop source passed into policy layer")
+    parser.add_argument(
+        "--ts-dd-trace",
+        choices=["on", "off"],
+        default="on",
+        help="Emit TS per-decision DD trace lines from policy:serve (bulk workflows should use off)",
+    )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Emit compact timing/profile summary (intended for focused investigation, e.g. p007)",
+    )
+    parser.add_argument(
+        "--profile-heartbeat-sec",
+        type=float,
+        default=15.0,
+        help="In --profile mode, emit heartbeat every N seconds during enumeration",
+    )
+    parser.add_argument(
+        "--dd-analyze",
+        action="store_true",
+        help="Group runtime DD discrepancies into root-cause categories with compact samples",
+    )
+    parser.add_argument(
+        "--dd-analyze-samples",
+        type=int,
+        default=2,
+        help="Max representative samples per category for --dd-analyze",
+    )
     args = parser.parse_args()
 
     ns_script = [c.strip().upper() for c in args.ns_script.split(",") if c.strip()]
     puzzle = load_problem(args.problem_id)
     effective_dd_scope = derive_dd_scope_from_goal_side(puzzle["goal"]["side"]) if args.dd_scope == "auto" else args.dd_scope
+    if effective_dd_scope != "none" and not has_endplay():
+        print("DDS/endplay not available — execution skipped (edit-only environment).")
+        raise SystemExit(0)
     dd_validator: Optional[DoubleDummyValidator] = None
     if effective_dd_scope != "none":
         dd_validator = DoubleDummyValidator()
@@ -1256,41 +1490,124 @@ def main() -> None:
         dd_exporter = DDRecordExporter(export_path, emit_all_states=args.dd_export_all)
 
     print(f"DD source: {args.dd_source}")
+    ts_dd_trace_enabled = args.ts_dd_trace == "on"
 
     try:
         if args.enumerate:
-            policy_client = PersistentPolicyClient()
+            enum_profile = EnumProfile()
+            policy_client = PersistentPolicyClient(ts_dd_trace=ts_dd_trace_enabled)
             threat_client: Optional[PersistentThreatStateClient] = None
+            t_enum_start = time.perf_counter()
+            total: Optional[int] = None
+            selected: Optional[List[Tuple[str, str]]] = None
+            selected_summary: Optional[str] = None
+            selected_dd_failures: Optional[List[Tuple[int, int, str, str, List[str], int, str]]] = None
+            discrepancies: List[DDDiscrepancy] = []
+            discrepancy_analysis: List[DDDiscrepancyAnalysis] = []
+            interrupted = False
             policy_client.start()
             if puzzle.get("threatCardIds"):
                 threat_client = PersistentThreatStateClient()
                 threat_client.start()
             try:
-                total, selected, selected_summary, selected_dd_failures, discrepancies = enumerate_runs(
-                    puzzle,
-                    policy_client,
-                    threat_client,
-                    args.dd_source,
-                    args.show_run,
+                try:
+                    total, selected, selected_summary, selected_dd_failures, discrepancies, discrepancy_analysis = enumerate_runs(
+                        puzzle,
+                        policy_client,
+                        threat_client,
+                        args.dd_source,
+                        args.show_run,
                     dd_validator=dd_validator,
                     dd_scope=effective_dd_scope,
                     dd_discrepancies_only=args.dd_discrepancies_only,
-                    emit_summaries=(args.show_run is None),
+                    emit_summaries=(args.run_lines == "on" and args.show_run is None),
                     dd_exporter=dd_exporter,
-                )
+                    profile=enum_profile,
+                    profile_mode=args.profile,
+                        profile_heartbeat_sec=max(1.0, float(args.profile_heartbeat_sec)),
+                    )
+                except KeyboardInterrupt:
+                    interrupted = True
             finally:
                 policy_client.stop()
                 if threat_client is not None:
                     threat_client.stop()
+                if args.profile:
+                    t_now = time.perf_counter()
+                    enum_s = t_now - t_enum_start
+                    total_s = t_now - t_main_start
+                    setup_s = max(0.0, total_s - enum_s)
+                    status = "interrupted" if interrupted else "complete"
+                    print(
+                        "PROFILE "
+                        f"problem={args.problem_id} status={status} setup_s={setup_s:.3f} enumerate_s={enum_s:.3f} total_s={total_s:.3f}",
+                        flush=True,
+                    )
+                    print(
+                        "PROFILE "
+                        f"policy_queries={enum_profile.policy_queries} policy_query_s={enum_profile.policy_query_s:.3f} "
+                        f"dd_checks={enum_profile.dd_checks} dd_check_s={enum_profile.dd_check_s:.3f} "
+                        f"threat_updates={enum_profile.threat_updates} threat_update_s={enum_profile.threat_update_s:.3f}",
+                        flush=True,
+                    )
+                    if dd_validator is not None:
+                        snap = dd_validator.profile_snapshot()
+                        avg_ms = (1000.0 * snap["ddTotalSeconds"] / snap["ddCalls"]) if snap["ddCalls"] else 0.0
+                        avg_miss_ms = (1000.0 * snap["ddCacheMissSeconds"] / snap["ddCacheMisses"]) if snap["ddCacheMisses"] else 0.0
+                        avg_hit_ms = (1000.0 * snap["ddCacheHitSeconds"] / snap["ddCacheHits"]) if snap["ddCacheHits"] else 0.0
+                        avg_sig_ms = (1000.0 * snap["ddSignatureSeconds"] / snap["ddCalls"]) if snap["ddCalls"] else 0.0
+                        avg_run_ms = (1000.0 * enum_s / enum_profile.terminal_runs) if enum_profile.terminal_runs else 0.0
+                        non_dd_loop_s = max(
+                            0.0,
+                            enum_s - enum_profile.policy_query_s - enum_profile.dd_check_s - enum_profile.threat_update_s
+                        )
+                        print(
+                            "PROFILE "
+                            f"dd_calls={snap['ddCalls']} dd_solver_s={snap['ddTotalSeconds']:.3f} "
+                            f"dd_unique_signatures={snap['ddUniqueSignatures']} dd_repeated_signatures={snap['ddRepeatedSignatures']} "
+                            f"dd_cache_hits={snap['ddCacheHits']} dd_cache_misses={snap['ddCacheMisses']} "
+                            f"dd_cache_hit_rate={100.0 * snap['ddCacheHitRate']:.1f}% dd_avg_ms={avg_ms:.2f} "
+                            f"dd_miss_avg_ms={avg_miss_ms:.2f} dd_hit_avg_ms={avg_hit_ms:.4f} dd_sig_avg_ms={avg_sig_ms:.4f} "
+                            f"non_dd_loop_s={non_dd_loop_s:.3f} avg_run_ms={avg_run_ms:.4f}",
+                            flush=True,
+                        )
+            if interrupted:
+                raise SystemExit(130)
             if args.show_run is None:
                 print(f"Total runs: {total}")
             if dd_validator is not None and args.show_run is None:
                 print(f"DD discrepancies: {len(discrepancies)}")
-                for d in discrepancies:
-                    print(
-                        f"DD Run {d.run_no}  pos {d.position_index} trick {d.trick_no}  {d.seat} played {pretty_card(d.actual_card)}  "
-                        f"optimal {{{', '.join(pretty_card(c) for c in d.optimal_cards)}}} max={d.max_tricks} severity={d.severity}"
-                    )
+                if not args.dd_analyze:
+                    for d in discrepancies:
+                        print(
+                            f"DD Run {d.run_no}  pos {d.position_index} trick {d.trick_no}  {d.seat} played {pretty_card(d.actual_card)}  "
+                            f"optimal {{{', '.join(pretty_card(c) for c in safe_list(d.optimal_cards))}}} max={d.max_tricks} severity={d.severity}"
+                        )
+            if args.dd_analyze and args.show_run is None and discrepancy_analysis:
+                by_cat: Dict[str, List[DDDiscrepancyAnalysis]] = {}
+                for rec in discrepancy_analysis:
+                    by_cat.setdefault(rec.category, []).append(rec)
+                print("DD analysis (runtime discrepancy categories):")
+                ordered = sorted(by_cat.items(), key=lambda kv: len(kv[1]), reverse=True)
+                for cat, recs in ordered:
+                    print(f"DD category {cat}: {len(recs)}")
+                    for sample in recs[: max(1, int(args.dd_analyze_samples))]:
+                        prefix_with_fail = sample.transcript_prefix + [sample.failing_play]
+                        print(
+                            "  "
+                            f"run={sample.run_no} pos={sample.position_index} trick={sample.trick_no} seat={sample.seat} "
+                            f"chosen={sample.chosen} directOptimal={{{','.join(safe_list(sample.direct_optimal))}}} "
+                            f"lookup={'yes' if sample.lookup else 'no'} found={'yes' if sample.found else 'no'} path={sample.path}"
+                        )
+                        print(
+                            "  "
+                            f"transcript={format_compact_line(prefix_with_fail)}  FAIL={sample.failing_play[0]}:{sample.failing_play[1]}"
+                        )
+                        print(
+                            "  "
+                            f"sig={sample.signature} legal=[{','.join(safe_list(sample.legal))}] "
+                            f"base=[{','.join(safe_list(sample.base))}] runtimeOptimal=[{','.join(safe_list(sample.runtime_optimal))}]"
+                        )
             if args.show_run is not None:
                 if selected is None:
                     raise RuntimeError(f"Requested run {args.show_run} not found (total {total})")
@@ -1308,6 +1625,7 @@ def main() -> None:
                     dd_scope=effective_dd_scope,
                     forced_dd_failures=selected_dd_failures,
                     dd_exporter=dd_exporter,
+                    ts_dd_trace=ts_dd_trace_enabled,
                 )
             return
 
@@ -1318,6 +1636,7 @@ def main() -> None:
             args.dd_source,
             dd_validator=dd_validator,
             dd_scope=effective_dd_scope,
+            ts_dd_trace=ts_dd_trace_enabled,
             dd_exporter=dd_exporter,
         )
     finally:

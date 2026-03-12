@@ -7,6 +7,7 @@ export const p002Experimental = true as const;
 // - goal shape was mapped to v0.1 Goal ({ type:'minTricks', n:7 })
 export const p002: Problem = {
   id: 'p002',
+  status: 'underConstruction',
   contract: { strain: 'C' },
   leader: 'S',
   userControls: ['N', 'S'],

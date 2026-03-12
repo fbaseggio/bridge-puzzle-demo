@@ -10,6 +10,9 @@ export type PolicyCliRequest = {
   schemaVersion: 1;
   policyVersion: 1;
   input: Omit<EvaluatePolicyInput, 'threatLabels'> & { threatLabels: JsonDefenderLabels | null };
+  debug?: {
+    ddTrace?: boolean;
+  };
 };
 
 export type PolicyCliSuccess = {

@@ -1,7 +1,5 @@
 import type { CardId } from '../core/types';
 import type { EvaluatePolicyInput } from './evaluatePolicy';
-import p003Records from '../data/dd/p003.json';
-import p004Records from '../data/dd/p004.json';
 
 type DdRecord = {
   signature: string;
@@ -70,15 +68,58 @@ function buildIndex(records: DdRecord[]): Map<string, DdAdvice> {
   return out;
 }
 
-const ddByProblem = new Map<string, Map<string, DdAdvice>>([
-  ['p003', buildIndex(p003Records as DdRecord[])],
-  ['p004', buildIndex(p004Records as DdRecord[])]
-]);
+const ddRuntimeDataModules = import.meta.env.SSR
+  ? (import.meta.glob('../data/dd/*.json', { eager: true, import: 'default' }) as Record<string, DdRecord[]>)
+  : {};
+const ddRuntimeDataLoaders = import.meta.glob('../data/dd/*.json', { import: 'default' }) as Record<
+  string,
+  () => Promise<DdRecord[]>
+>;
 
-const ddSourceByProblem = new Map<string, string>([
-  ['p003', 'src/data/dd/p003.json'],
-  ['p004', 'src/data/dd/p004.json']
-]);
+function problemIdFromDataPath(path: string): string | null {
+  const slash = path.lastIndexOf('/');
+  const file = slash >= 0 ? path.slice(slash + 1) : path;
+  if (!file.endsWith('.json')) return null;
+  return file.slice(0, -'.json'.length);
+}
+
+const ddByProblem = new Map<string, Map<string, DdAdvice>>();
+const ddSourceByProblem = new Map<string, string>();
+const ddLoadPromiseByProblem = new Map<string, Promise<boolean>>();
+for (const path of Object.keys(ddRuntimeDataLoaders)) {
+  const problemId = problemIdFromDataPath(path);
+  if (!problemId) continue;
+  ddSourceByProblem.set(problemId, `src/data/dd/${problemId}.json`);
+}
+for (const [path, records] of Object.entries(ddRuntimeDataModules)) {
+  const problemId = problemIdFromDataPath(path);
+  if (!problemId) continue;
+  ddByProblem.set(problemId, buildIndex(records));
+  ddSourceByProblem.set(problemId, `src/data/dd/${problemId}.json`);
+}
+
+export async function ensureDdDatasetLoaded(problemId: string | undefined): Promise<boolean> {
+  if (!problemId) return false;
+  if (ddByProblem.has(problemId)) return true;
+  const inFlight = ddLoadPromiseByProblem.get(problemId);
+  if (inFlight) return inFlight;
+  const loaderPath = Object.keys(ddRuntimeDataLoaders).find((path) => problemIdFromDataPath(path) === problemId);
+  if (!loaderPath) return false;
+  const loader = ddRuntimeDataLoaders[loaderPath];
+  if (!loader) return false;
+  const loadPromise = loader()
+    .then((records) => {
+      ddByProblem.set(problemId, buildIndex(records));
+      ddSourceByProblem.set(problemId, `src/data/dd/${problemId}.json`);
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => {
+      ddLoadPromiseByProblem.delete(problemId);
+    });
+  ddLoadPromiseByProblem.set(problemId, loadPromise);
+  return loadPromise;
+}
 
 export function buildCanonicalPositionSignature(input: Pick<EvaluatePolicyInput, 'contractStrain' | 'seat' | 'hands' | 'trick'>): string {
   const trickText = input.trick.length > 0 ? input.trick.map((p) => `${p.seat}:${p.suit}${p.rank}`).join(',') : '-';

@@ -29,6 +29,7 @@ async function main(): Promise<void> {
         const req = JSON.parse(trimmed) as PolicyCliRequest;
         const response = executePolicyRequest(req) as any;
         const debugLines: string[] = [];
+        const includeDdTrace = req.debug?.ddTrace ?? true;
         if (!ddConfigLogged) {
           const effectiveDdSource = req.input.policy.ddSource ?? 'runtime';
           debugLines.push(`[TS-DD-CONFIG] ddSource=${effectiveDdSource}`);
@@ -43,7 +44,7 @@ async function main(): Promise<void> {
           ddConfigLogged = true;
         }
         const trace = response?.ok ? response?.result?.ddTrace : null;
-        if (trace && typeof trace === 'object') {
+        if (includeDdTrace && trace && typeof trace === 'object') {
           debugLines.push(formatDdTraceLine(trace as DdDecisionTrace));
         }
         if (debugLines.length > 0) response.debugLines = debugLines;
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
       const req = JSON.parse(tail) as PolicyCliRequest;
       const response = executePolicyRequest(req) as any;
       const debugLines: string[] = [];
+      const includeDdTrace = req.debug?.ddTrace ?? true;
       if (!ddConfigLogged) {
         const effectiveDdSource = req.input.policy.ddSource ?? 'runtime';
         debugLines.push(`[TS-DD-CONFIG] ddSource=${effectiveDdSource}`);
@@ -80,7 +82,7 @@ async function main(): Promise<void> {
         ddConfigLogged = true;
       }
       const trace = response?.ok ? response?.result?.ddTrace : null;
-      if (trace && typeof trace === 'object') {
+      if (includeDdTrace && trace && typeof trace === 'object') {
         debugLines.push(formatDdTraceLine(trace as DdDecisionTrace));
       }
       if (debugLines.length > 0) response.debugLines = debugLines;

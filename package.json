@@ -9,7 +9,12 @@
     "test": "vitest run",
     "policy:cli": "vite-node src/cli/policy_cli.ts",
     "policy:serve": "vite-node src/cli/policy_server.ts",
-    "threat:serve": "vite-node src/cli/threat_state_server.ts"
+    "threat:serve": "vite-node src/cli/threat_state_server.ts",
+    "dd:refresh-all": "python3 tools/dd_maintenance.py refresh",
+    "dd:refresh-profile-p007": "python3 tools/dd_maintenance.py refresh --problem-id p007 --profile",
+    "dd:verify-all": "python3 tools/dd_maintenance.py verify",
+    "dd:verify-runtime": "python3 tools/dd_maintenance.py verify --runtime-only",
+    "dd:profile-p007": "python3 tools/dd_maintenance.py verify --runtime-only --problem-id p007 --profile"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -26,6 +26,7 @@ import {
   type Position,
   type ThreatContext,
 } from '../ai/threatModel';
+import { ensureDdDatasetLoaded } from '../ai/ddPolicy';
 import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock, formatInitBlock } from '../ai/threatModelVerbose';
 import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/features';
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
@@ -87,6 +88,7 @@ let currentProblem = demoProblems[0].problem;
 let currentProblemId = demoProblems[0].id;
 let currentSeed = currentProblem.rngSeed >>> 0;
 let state: State = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+warmDdDataset(currentProblemId);
 let logs: string[] = [];
 let deferredLogLines: string[] = [];
 let verboseLog = false;
@@ -245,6 +247,15 @@ function withRun(line: string): string {
 
 function withRunVisit(nodeKey: string, line: string): string {
   return `run=${currentLogRunId} visit=${nextVisitId(nodeKey)} ${line}`;
+}
+
+function warmDdDataset(problemId: string): void {
+  if (ddSourceMode !== 'runtime') return;
+  void ensureDdDatasetLoaded(problemId).then((loaded) => {
+    if (!verboseLog) return;
+    logs = [...logs, `[DD] browser preload problem=${problemId} loaded=${loaded ? 'yes' : 'no'}`].slice(-500);
+    render();
+  });
 }
 
 function sortRanksDesc(ranks: Rank[]): Rank[] {
@@ -1645,6 +1656,7 @@ function resetGame(seed: number, reason: string): void {
   }
   currentSeed = nextSeed;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+  warmDdDataset(currentProblemId);
   logs = [...logs, `${reason} seed=${currentSeed}`].slice(-500);
   runStatus = 'running';
   runPlayCounter = 0;
@@ -1677,6 +1689,7 @@ function selectProblem(problemId: string): void {
   currentProblemId = entry.id;
   currentSeed = currentProblem.rngSeed >>> 0;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+  warmDdDataset(currentProblemId);
   runStatus = 'running';
   runPlayCounter = 0;
   invEqVersion = 0;
@@ -2174,11 +2187,19 @@ function renderStatusPanel(view: State): HTMLElement {
     if (nextSource === ddSourceMode) return;
     ddSourceMode = nextSource;
     resetGame(currentSeed, `DD source changed: ${ddSourceLabel[nextSource]}`);
+    if (nextSource === 'runtime') warmDdDataset(currentProblemId);
   };
   ddValue.appendChild(ddSelect);
   ddRow.append(ddKey, ddValue);
   facts.appendChild(ddRow);
   panel.appendChild(facts);
+
+  if (currentProblem.status === 'underConstruction') {
+    const notice = document.createElement('div');
+    notice.className = 'status-notice status-notice-warning';
+    notice.textContent = 'Under construction: this puzzle may be buggy or incomplete.';
+    panel.appendChild(notice);
+  }
 
   return panel;
 }

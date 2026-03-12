@@ -485,6 +485,20 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+.status-notice {
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.status-notice-warning {
+  border: 1px solid #f5c57a;
+  background: #fff7e8;
+  color: #8a4b08;
+}
+
 .banner {
   padding: 6px 8px;
   border-radius: 6px;
