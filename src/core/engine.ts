@@ -3,6 +3,8 @@ import { evaluatePolicy } from '../ai/evaluatePolicy';
 import { initClassification, parseCardId, toCardId, updateClassificationAfterPlay, type CardId } from '../ai/threatModel';
 import { classInfoForCard } from './equivalence';
 import { computeGoalStatus, remainingTricksFromHands } from './goal';
+import type { SemanticEvent, SemanticEventCollector, SemanticTag } from './semanticEvents';
+import { cardRoleToSemanticTag } from './semanticEvents';
 
 const TURN_ORDER: Seat[] = ['N', 'E', 'S', 'W'];
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
@@ -231,6 +233,30 @@ type AutoChoice = {
   };
 };
 
+type ApplyOptions = {
+  eventCollector?: SemanticEventCollector;
+};
+
+export type EngineRunInput = {
+  state: State;
+  play: Play;
+  eventCollector?: SemanticEventCollector;
+};
+
+function emitSemantic(collector: SemanticEventCollector | undefined, event: SemanticEvent): void {
+  collector?.emit(event);
+}
+
+function semanticTagsForBucket(bucket: string | undefined): SemanticTag[] {
+  if (!bucket) return [];
+  if (bucket.startsWith('tier1') || bucket === 'follow:idle-cheap-win') return ['tier1', 'idle'];
+  if (bucket === 'tier2') return ['tier2'];
+  if (bucket.startsWith('tier3')) return ['tier3', 'busy'];
+  if (bucket.startsWith('tier4')) return ['tier4', 'busy'];
+  if (bucket.startsWith('tier5')) return ['tier5'];
+  return [];
+}
+
 function decisionSignature(state: State): string {
   const seat = state.turn;
   const leadSuit = state.trick[0]?.suit ?? '-';
@@ -315,10 +341,18 @@ function buildPolicyClassByCard(
   return out;
 }
 
-function chooseAutoplay(state: State, policy: Policy): AutoChoice {
+function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventCollector): AutoChoice {
   const isDefender = state.turn === 'E' || state.turn === 'W';
   const decisionSig = isDefender ? decisionSignature(state) : undefined;
   let replayNote: AutoChoice['replay'];
+  emitSemantic(collector, {
+    type: 'decision-start',
+    seat: state.turn,
+    details: {
+      policyKind: policy.kind,
+      legalCount: legalPlays(state).length
+    }
+  });
 
   if (isDefender && state.replay.enabled && state.replay.transcript) {
     const rec = state.replay.transcript.decisions[state.replay.cursor];
@@ -483,6 +517,7 @@ function chooseAutoplay(state: State, policy: Policy): AutoChoice {
 function applyOnePlay(
   state: State,
   play: Play,
+  collector: SemanticEventCollector | undefined,
   eventType: 'played' | 'autoplay',
   preferredDiscard?: PreferredDiscardDecision,
   chosenBucket?: string,
@@ -521,6 +556,15 @@ function applyOnePlay(
 
   state.trick.push({ ...play });
   state.trickClassIds.push(`${play.seat}:${playedClass}`);
+  emitSemantic(collector, {
+    type: 'card-played',
+    seat: play.seat,
+    card: playedId,
+    suit: play.suit,
+    rank: play.rank,
+    tags: playedClass.startsWith('busy:') ? ['busy'] : playedClass.startsWith('idle:') ? ['idle'] : [],
+    details: { classId: playedClass, eventType }
+  });
   if (eventType === 'autoplay') {
     events.push({ type: eventType, play: { ...play }, preferredDiscard, chosenBucket, bucketCards, policyClassByCard, tierBuckets, ddPolicy, decisionSig, replay });
   } else {
@@ -528,6 +572,8 @@ function applyOnePlay(
   }
 
   if (state.threat && state.threatLabels) {
+    const beforeThreat = state.threat;
+    const beforeRoles = state.cardRoles;
     const updated = updateClassificationAfterPlay(
       {
         threat: state.threat,
@@ -547,6 +593,31 @@ function applyOnePlay(
     state.threat = updated.threat as State['threat'];
     state.threatLabels = updated.labels as State['threatLabels'];
     state.cardRoles = { ...updated.perCardRole };
+    emitSemantic(collector, {
+      type: 'threat-updated',
+      seat: play.seat,
+      card: playedId,
+      suit: play.suit,
+      rank: play.rank,
+      details: {
+        before: beforeThreat,
+        after: updated.threat
+      }
+    });
+    const changedRoles: Array<{ card: CardId; before?: string; after?: string }> = [];
+    const roleKeys = new Set<string>([...Object.keys(beforeRoles), ...Object.keys(updated.perCardRole)]);
+    for (const key of roleKeys) {
+      const before = beforeRoles[key as CardId];
+      const after = updated.perCardRole[key as CardId];
+      if (before !== after) changedRoles.push({ card: key as CardId, before, after });
+    }
+    emitSemantic(collector, {
+      type: 'classifications-updated',
+      tags: changedRoles
+        .flatMap((item) => [cardRoleToSemanticTag(item.before as any), cardRoleToSemanticTag(item.after as any)])
+        .filter((tag): tag is SemanticTag => Boolean(tag)),
+      details: { changedRoles }
+    });
   }
 
   if (state.trick.length < 4) {
@@ -658,9 +729,10 @@ export function legalPlays(state: State): Play[] {
 }
 
 
-export function apply(state: State, play: Play): { state: State; events: EngineEvent[] } {
+export function apply(state: State, play: Play, options?: ApplyOptions): { state: State; events: EngineEvent[] } {
   const next = cloneState(state);
   const events: EngineEvent[] = [];
+  const collector = options?.eventCollector;
 
   if (next.phase === 'end') {
     events.push({ type: 'illegal', reason: 'Hand already complete' });
@@ -681,7 +753,15 @@ export function apply(state: State, play: Play): { state: State; events: EngineE
     return { state: next, events };
   }
 
-  events.push(...applyOnePlay(next, play, 'played'));
+  emitSemantic(collector, {
+    type: 'decision-chosen',
+    seat: play.seat,
+    card: toCardId(play.suit, play.rank) as CardId,
+    suit: play.suit,
+    rank: play.rank,
+    details: { source: 'user' }
+  });
+  events.push(...applyOnePlay(next, play, collector, 'played'));
 
   while (next.phase !== 'end' && !isUserTurn(next)) {
     if (allHandsEmpty(next.hands)) break;
@@ -691,7 +771,7 @@ export function apply(state: State, play: Play): { state: State; events: EngineE
       events.push({ type: 'illegal', reason: `No policy configured for auto seat ${next.turn}` });
       break;
     }
-    const auto = chooseAutoplay(next, policy);
+    const auto = chooseAutoplay(next, policy, collector);
     if (!auto.play) {
       const legalNow = legalPlays(next);
       events.push({
@@ -700,11 +780,37 @@ export function apply(state: State, play: Play): { state: State; events: EngineE
       });
       break;
     }
+    emitSemantic(collector, {
+      type: 'decision-evaluated',
+      seat: next.turn,
+      card: auto.play ? (toCardId(auto.play.suit, auto.play.rank) as CardId) : undefined,
+      tags: semanticTagsForBucket(auto.chosenBucket),
+      details: {
+        chosenBucket: auto.chosenBucket,
+        bucketCards: auto.bucketCards,
+        policyClassByCard: auto.policyClassByCard,
+        tierBuckets: auto.tierBuckets
+      }
+    });
+    emitSemantic(collector, {
+      type: 'decision-chosen',
+      seat: auto.play.seat,
+      card: toCardId(auto.play.suit, auto.play.rank) as CardId,
+      suit: auto.play.suit,
+      rank: auto.play.rank,
+      tags: semanticTagsForBucket(auto.chosenBucket),
+      details: {
+        chosenBucket: auto.chosenBucket,
+        ddPolicy: auto.ddPolicy,
+        decisionSig: auto.decisionSig
+      }
+    });
 
     events.push(
       ...applyOnePlay(
         next,
         auto.play,
+        collector,
         'autoplay',
         auto.preferredDiscard,
         auto.chosenBucket,
@@ -730,4 +836,8 @@ export function apply(state: State, play: Play): { state: State; events: EngineE
   next.phase = isUserTurn(next) ? 'awaitUser' : 'auto';
 
   return { state: next, events };
+}
+
+export function run(input: EngineRunInput): { state: State; events: EngineEvent[] } {
+  return apply(input.state, input.play, { eventCollector: input.eventCollector });
 }

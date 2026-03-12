@@ -609,6 +609,7 @@ class PersistentPolicyClient:
     def query(
         self,
         problem_id: str,
+        contract_strain: str,
         seat: str,
         policy_kind: str,
         dd_source: str,
@@ -628,6 +629,7 @@ class PersistentPolicyClient:
             "input": {
                 "policy": {"kind": policy_kind, "ddSource": dd_source},
                 "problemId": problem_id,
+                "contractStrain": contract_strain,
                 "seat": seat,
                 "debugPositionIndex": position_index,
                 "debugTrickIndex": trick_index,
@@ -1012,6 +1014,7 @@ def enumerate_runs(
             t_policy = time.perf_counter()
             chosen, next_rng, policy_result = policy_client.query(
                 puzzle["id"],
+                puzzle["contract"]["strain"],
                 node.turn,
                 policy,
                 dd_source,
@@ -1242,6 +1245,7 @@ def run_movie(
                     policy = puzzle["policies"][turn]["kind"]
                     _picked, policy_rng, policy_result = policy_client.query(
                         puzzle["id"],
+                        puzzle["contract"]["strain"],
                         turn,
                         policy,
                         dd_source,
@@ -1284,6 +1288,7 @@ def run_movie(
                 current_position_index = len(trick_details) + trick_no * 4 + 1
                 chosen, policy_rng, policy_result = policy_client.query(
                     puzzle["id"],
+                    puzzle["contract"]["strain"],
                     turn,
                     policy,
                     dd_source,
