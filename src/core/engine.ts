@@ -3,7 +3,7 @@ import { evaluatePolicy } from '../ai/evaluatePolicy';
 import { initClassification, parseCardId, toCardId, updateClassificationAfterPlay, type CardId } from '../ai/threatModel';
 import { classInfoForCard } from './equivalence';
 import { computeGoalStatus, remainingTricksFromHands } from './goal';
-import type { SemanticEvent, SemanticEventCollector, SemanticTag } from './semanticEvents';
+import type { SemanticEventCollector, SemanticEventInput, SemanticTag } from './semanticEvents';
 import { cardRoleToSemanticTag } from './semanticEvents';
 
 const TURN_ORDER: Seat[] = ['N', 'E', 'S', 'W'];
@@ -243,7 +243,7 @@ export type EngineRunInput = {
   eventCollector?: SemanticEventCollector;
 };
 
-function emitSemantic(collector: SemanticEventCollector | undefined, event: SemanticEvent): void {
+function emitSemantic(collector: SemanticEventCollector | undefined, event: SemanticEventInput): void {
   collector?.emit(event);
 }
 

@@ -25,6 +25,17 @@ export type SemanticTag =
   | 'default';
 
 export type SemanticEvent = {
+  seq: number;
+  type: SemanticEventType;
+  seat?: Seat;
+  card?: CardId;
+  suit?: Suit;
+  rank?: Rank;
+  tags?: SemanticTag[];
+  details?: Record<string, unknown>;
+};
+
+export type SemanticEventInput = {
   type: SemanticEventType;
   seat?: Seat;
   card?: CardId;
@@ -35,7 +46,7 @@ export type SemanticEvent = {
 };
 
 export interface SemanticEventCollector {
-  emit(event: SemanticEvent): void;
+  emit(event: SemanticEventInput): void;
   getEvents(): SemanticEvent[];
   clear(): void;
 }
@@ -43,10 +54,13 @@ export interface SemanticEventCollector {
 export class InMemorySemanticEventCollector implements SemanticEventCollector {
   private readonly events: SemanticEvent[] = [];
   private reducer: SemanticReducer | null = null;
+  private seq = 0;
 
-  emit(event: SemanticEvent): void {
-    this.events.push(event);
-    this.reducer?.apply(event);
+  emit(event: SemanticEventInput): void {
+    this.seq += 1;
+    const enriched: SemanticEvent = { seq: this.seq, ...event };
+    this.events.push(enriched);
+    this.reducer?.apply(enriched);
   }
 
   getEvents(): SemanticEvent[] {
@@ -55,6 +69,7 @@ export class InMemorySemanticEventCollector implements SemanticEventCollector {
 
   clear(): void {
     this.events.length = 0;
+    this.seq = 0;
   }
 
   attachReducer(reducer: SemanticReducer | null): void {
