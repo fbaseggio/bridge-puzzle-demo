@@ -22,6 +22,7 @@ import {
   type Suit
 } from '../core';
 import { computeDiscardTiers, getIdleThreatThresholdRank } from '../ai/defenderDiscard';
+import { queryDdsNextPlays, warmDdsRuntime } from '../ai/ddsBrowser';
 import {
   toCardId,
   updateClassificationAfterPlay,
@@ -107,6 +108,8 @@ let showGuides = false;
 let showDebugSection = true;
 let teachingMode = true;
 let autoplaySingletons = false;
+let ddsPlayHistory: string[] = [];
+let ddsTeachingSummaries: string[] = [];
 let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
 
@@ -136,6 +139,8 @@ type GameSnapshot = {
   replaySuppressedForRun: boolean;
   teachingEvents: TeachingEvent[];
   nextTeachingEventId: number;
+  ddsPlayHistory: string[];
+  ddsTeachingSummaries: string[];
 };
 const undoStack: GameSnapshot[] = [];
 let currentRunTranscript: DecisionRecord[] = [];
@@ -485,7 +490,9 @@ function makeSnapshot(play: Play): GameSnapshot {
     playAgainLastCandidateIndex,
     replaySuppressedForRun,
     teachingEvents: teachingEvents.map((e) => ({ ...e })),
-    nextTeachingEventId
+    nextTeachingEventId,
+    ddsPlayHistory: [...ddsPlayHistory],
+    ddsTeachingSummaries: [...ddsTeachingSummaries]
   };
 }
 
@@ -509,6 +516,8 @@ function restoreSnapshot(snapshot: GameSnapshot): void {
   replaySuppressedForRun = snapshot.replaySuppressedForRun;
   teachingEvents = snapshot.teachingEvents.map((e) => ({ ...e }));
   nextTeachingEventId = snapshot.nextTeachingEventId;
+  ddsPlayHistory = [...snapshot.ddsPlayHistory];
+  ddsTeachingSummaries = [...snapshot.ddsTeachingSummaries];
 }
 
 function totalCards(s: State, seat: Seat): number {
@@ -1131,12 +1140,38 @@ function applyEventToShadow(s: State, event: EngineEvent): void {
   }
 }
 
-function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent[], after: State): string[] {
+function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent[], after: State, ddsHistory: string[]): string[] {
   const lines: string[] = [];
   const shadow = cloneStateForLog(before);
 
   for (const event of events) {
     if (event.type === 'played' || event.type === 'autoplay') {
+      const dds = queryDdsNextPlays({
+        openingLeader: currentProblem.leader,
+        initialHands: currentProblem.hands,
+        contract: currentProblem.contract,
+        playedCardIds: ddsHistory
+      });
+      if (dds.ok) {
+        const compact = (dds.result.plays ?? []).map((p) => `${typeof p.score === 'number' ? p.score : '-'}: ${p.suit}${p.rank}`);
+        ddsTeachingSummaries.push(`DDS: ${compact.join(' ')}`.trim());
+      } else {
+        ddsTeachingSummaries.push(`DDS: unavailable (${dds.reason}${dds.detail ? `: ${dds.detail}` : ''})`);
+      }
+
+      if (verboseLog) {
+        const trickNo = shadow.tricksWon.NS + shadow.tricksWon.EW + 1;
+        const seat = event.play.seat;
+        if (dds.ok) {
+          lines.push(`[DDS] trick=${trickNo} seat=${seat}`);
+          for (const p of dds.result.plays ?? []) {
+            const score = typeof p.score === 'number' ? p.score : '-';
+            lines.push(`${score}: ${p.suit}${p.rank}`);
+          }
+        } else {
+          lines.push(`[DDS] trick=${trickNo} seat=${seat} unavailable: ${dds.reason}${dds.detail ? ` (${dds.detail})` : ''}`);
+        }
+      }
       if (runPlayCounter > 0) {
         lines.push('');
       }
@@ -1290,6 +1325,10 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
       );
     } else {
       applyEventToShadow(shadow, event);
+    }
+
+    if (event.type === 'played' || event.type === 'autoplay') {
+      ddsHistory.push(toCardId(event.play.suit, event.play.rank));
     }
 
     if (verboseLog && event.type === 'illegal') {
@@ -1685,6 +1724,8 @@ function resetGame(seed: number, reason: string): void {
   currentRunTranscript = [];
   currentRunUserPlays = [];
   currentRunEqTokens = [];
+  ddsPlayHistory = [];
+  ddsTeachingSummaries = [];
   clearTeachingEvents();
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -1718,6 +1759,8 @@ function selectProblem(problemId: string): void {
   currentRunTranscript = [];
   currentRunUserPlays = [];
   currentRunEqTokens = [];
+  ddsPlayHistory = [];
+  ddsTeachingSummaries = [];
   clearTeachingEvents();
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -1777,6 +1820,7 @@ function runTurn(play: Play): void {
   }
 
   const before = state;
+  const ddsHistoryForTurn = [...ddsPlayHistory];
   const result = apply(state, play, { eventCollector: semanticCollector });
   state = result.state;
   threatCtx = (state.threat as ThreatContext | null) ?? null;
@@ -1803,17 +1847,18 @@ function runTurn(play: Play): void {
 
     canLeadDismiss = state.phase !== 'end' && state.trick.length === 0 && state.userControls.includes(state.turn);
 
-    const visibleLines = logLinesForStep(before, play, visibleEvents, visibleShadow);
+    const visibleLines = logLinesForStep(before, play, visibleEvents, visibleShadow, ddsHistoryForTurn);
     logs = [...logs, ...visibleLines].slice(-500);
 
     if (deferredEvents.length > 0) {
-      const deferredLines = logLinesForStep(visibleShadow, play, deferredEvents, state);
+      const deferredLines = logLinesForStep(visibleShadow, play, deferredEvents, state, ddsHistoryForTurn);
       deferredLogLines = [...deferredLogLines, ...deferredLines].slice(-500);
     }
   } else {
-    const lines = logLinesForStep(before, play, result.events, state);
+    const lines = logLinesForStep(before, play, result.events, state, ddsHistoryForTurn);
     logs = [...logs, ...lines].slice(-500);
   }
+  ddsPlayHistory = ddsHistoryForTurn;
 
   const complete = result.events.find((e) => e.type === 'handComplete');
   if (complete?.type === 'handComplete' && complete.success) {
@@ -2470,7 +2515,7 @@ function renderTeachingEventsPane(): HTMLElement {
     const isIdleTransitionEffect = (effect: string): boolean =>
       effect.includes('becomes idle.') || effect.includes('becomes idle');
 
-    for (const entry of entries) {
+    for (const [idx, entry] of entries.entries()) {
       const row = document.createElement('div');
       row.className = 'teaching-event teaching-info';
 
@@ -2494,6 +2539,14 @@ function renderTeachingEventsPane(): HTMLElement {
       }
       text.textContent = bracketParts.length > 0 ? `${entry.summary} [${bracketParts.join('; ')}]` : entry.summary;
       row.appendChild(text);
+
+      const ddsSummary = ddsTeachingSummaries[idx];
+      if (ddsSummary) {
+        const ddsLine = document.createElement('div');
+        ddsLine.className = 'teaching-dds';
+        ddsLine.textContent = ddsSummary;
+        row.appendChild(ddsLine);
+      }
 
       const shownEffects = (entry.effects ?? []).filter((effect) => verboseLog || !isIdleTransitionEffect(effect));
       if (shownEffects.length > 0) {
@@ -2547,4 +2600,5 @@ function render(): void {
 }
 
 refreshThreatModel(currentProblemId, false);
+warmDdsRuntime();
 render();

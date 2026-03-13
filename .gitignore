@@ -12,3 +12,9 @@ __pycache__/
 tools/__pycache__/
 
 logs/
+
+# node / vite
+node_modules/
+dist/
+.vite/
+node_modules/.vite/
