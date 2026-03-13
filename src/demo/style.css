@@ -234,6 +234,12 @@ body {
   text-decoration: underline;
 }
 
+.rank-text.legal.hint-best {
+  outline: 2px solid #3aa657;
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
 .rank-text.muted {
   opacity: 1;
 }
@@ -640,6 +646,7 @@ body {
   font-size: 13px;
   width: fit-content;
   max-width: min(720px, 95%);
+  white-space: nowrap;
 }
 
 .outcome-module.neutral {
@@ -656,6 +663,39 @@ body {
 .outcome-module.fail {
   background: #fee2e2;
   color: #991b1b;
+}
+
+.outcome-module.hint-active {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hint-prefix {
+  color: #111827;
+}
+
+.hint-card {
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.hint-card.heart,
+.hint-card.diamond {
+  color: #c22;
+}
+
+.hint-card.spade,
+.hint-card.club {
+  color: #111;
+}
+
+.hint-text {
+  color: #475569;
+  font-weight: 600;
 }
 
 .transport-bar {

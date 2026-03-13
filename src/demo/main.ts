@@ -57,6 +57,11 @@ const ddSourceLabel: Record<'off' | 'runtime', string> = {
   off: 'Off',
   runtime: 'Runtime'
 };
+type HintState = {
+  bestCards: CardId[];
+  badCards: CardId[];
+  textLine: string;
+};
 type ProblemWithThreats = typeof demoProblems[number]['problem'] & { threatCardIds?: CardId[] };
 
 const maxSuitLineLen = Math.max(
@@ -110,6 +115,7 @@ let teachingMode = true;
 let autoplaySingletons = false;
 let ddsPlayHistory: string[] = [];
 let ddsTeachingSummaries: string[] = [];
+let activeHint: HintState | null = null;
 let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
 
@@ -272,6 +278,164 @@ function warmDdDataset(problemId: string): void {
     logs = [...logs, `[DD] browser preload problem=${problemId} loaded=${loaded ? 'yes' : 'no'}`].slice(-500);
     render();
   });
+}
+
+function clearHint(): void {
+  activeHint = null;
+}
+
+function hintDiag(message: string): void {
+  console.info(`[HINT] ${message}`);
+  if (!verboseLog) return;
+  logs = [...logs, `[HINT] ${message}`].slice(-500);
+}
+
+function normalizeDdsRank(raw: unknown): Rank | null {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return null;
+  const value = String(raw).toUpperCase();
+  if (value === '10') return 'T';
+  return rankOrder.includes(value as Rank) ? (value as Rank) : null;
+}
+
+function normalizeDdsCardId(suitRaw: unknown, rankRaw: unknown): CardId | null {
+  const suit = typeof suitRaw === 'string' ? suitRaw.toUpperCase() : '';
+  const rank = normalizeDdsRank(rankRaw);
+  if (!['S', 'H', 'D', 'C'].includes(suit) || !rank) return null;
+  return `${suit}${rank}` as CardId;
+}
+
+function hintGateStatus(): {
+  allowed: boolean;
+  phase: State['phase'];
+  trickFrozen: boolean;
+  canLeadDismiss: boolean;
+  turn: Seat;
+  userTurn: boolean;
+  legalCount: number;
+} {
+  const userTurn = state.userControls.includes(state.turn);
+  const legalCount = legalPlays(state).filter((p) => p.seat === state.turn).length;
+  const allowed = state.phase !== 'end' && userTurn && (!trickFrozen || canLeadDismiss) && legalCount > 0;
+  return {
+    allowed,
+    phase: state.phase,
+    trickFrozen,
+    canLeadDismiss,
+    turn: state.turn,
+    userTurn,
+    legalCount
+  };
+}
+
+function classifyHintForCurrentPosition(): HintState | null {
+  const gate = hintGateStatus();
+  hintDiag(
+    `classify gate phase=${gate.phase} trickFrozen=${gate.trickFrozen} canLeadDismiss=${gate.canLeadDismiss} turn=${gate.turn} userTurn=${gate.userTurn} legal=${gate.legalCount} allowed=${gate.allowed}`
+  );
+  if (!gate.allowed) return null;
+  const legal = legalPlays(state).filter((p) => p.seat === state.turn);
+  const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
+  hintDiag(`dds query start legal=${legalCardIds.join(' ') || '-'}`);
+  try {
+    const dds = queryDdsNextPlays({
+      openingLeader: currentProblem.leader,
+      initialHands: currentProblem.hands,
+      contract: state.contract,
+      playedCardIds: ddsPlayHistory
+    });
+    if (!dds.ok) {
+      hintDiag(`dds query result ok=no reason=${dds.reason}${dds.detail ? ` detail=${dds.detail}` : ''}`);
+      return {
+        bestCards: [],
+        badCards: [],
+        textLine: 'BEST: (DDS unavailable)'
+      };
+    }
+    hintDiag(`dds query result ok=yes plays=${dds.result.plays?.length ?? 0}`);
+    const compactBrowserDds = (dds.result.plays ?? [])
+      .map((p) => `${String(p.suit).toUpperCase()}${String(p.rank).toUpperCase()}:${typeof p.score === 'number' ? p.score : '-'}`)
+      .join(' ');
+    hintDiag(`browser DDS result ${compactBrowserDds || '-'}`);
+
+    const scoreByCard = new Map<CardId, number>();
+    const rawDdsCards: string[] = [];
+    for (const play of dds.result.plays ?? []) {
+      rawDdsCards.push(`${play.suit}${String(play.rank)}`);
+      const baseCard = normalizeDdsCardId(play.suit, play.rank);
+      if (baseCard && typeof play.score === 'number') scoreByCard.set(baseCard, play.score);
+
+      const equalsRaw = Array.isArray(play.equals)
+        ? play.equals
+        : (typeof play.equals === 'string' ? [play.equals] : []);
+      for (const eq of equalsRaw) {
+        if (!eq) continue;
+        const normalized = String(eq).toUpperCase();
+        if (normalized.length === 1) {
+          const eqCard = normalizeDdsCardId(play.suit, normalized);
+          if (eqCard && typeof play.score === 'number') scoreByCard.set(eqCard, play.score);
+          continue;
+        }
+        const suitRank = normalizeDdsCardId(normalized.slice(0, 1), normalized.slice(1));
+        const rankSuit = normalizeDdsCardId(normalized.slice(-1), normalized.slice(0, -1));
+        const eqCard = suitRank ?? rankSuit;
+        if (eqCard && typeof play.score === 'number') scoreByCard.set(eqCard, play.score);
+      }
+    }
+
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (const cardId of legalCardIds) {
+      const score = scoreByCard.get(cardId);
+      if (typeof score === 'number' && score > bestScore) bestScore = score;
+    }
+
+    if (!Number.isFinite(bestScore)) {
+      hintDiag(`dds mapping empty legal=${legalCardIds.join(' ') || '-'} dds=${rawDdsCards.join(' ') || '-'}`);
+      return {
+        bestCards: [],
+        badCards: [],
+        textLine: 'BEST: (DDS unavailable)'
+      };
+    }
+
+    const bestCards: CardId[] = [];
+    const badCards: CardId[] = [];
+    for (const cardId of legalCardIds) {
+      const score = scoreByCard.get(cardId);
+      if (typeof score === 'number' && score === bestScore) bestCards.push(cardId);
+      else badCards.push(cardId);
+    }
+
+    const textLine = `BEST: ${bestCards.join(' ')}`;
+    hintDiag(`classify result BEST=${bestCards.join(' ') || '-'} BAD=${badCards.join(' ') || '-'}`);
+    return { bestCards, badCards, textLine };
+  } catch (error) {
+    hintDiag(`classify exception ${error instanceof Error ? error.message : String(error)}`);
+    return {
+      bestCards: [],
+      badCards: [],
+      textLine: 'BEST: (DDS unavailable)'
+    };
+  }
+}
+
+function requestHint(): void {
+  hintDiag('requestHint start');
+  const hint = classifyHintForCurrentPosition();
+  if (!hint) {
+    hintDiag('classify null');
+    activeHint = {
+      bestCards: [],
+      badCards: [],
+      textLine: 'BEST: (hint available on your turn)'
+    };
+    hintDiag('activeHint set (fallback)');
+    render();
+    return;
+  }
+  hintDiag(`classify ok BEST=${hint.bestCards.join(' ') || '-'} BAD=${hint.badCards.join(' ') || '-'}`);
+  activeHint = hint;
+  hintDiag(`activeHint set best=${hint.bestCards.join(' ')} bad=${hint.badCards.join(' ') || '-'}`);
+  render();
 }
 
 function sortRanksDesc(ranks: Rank[]): Rank[] {
@@ -1726,6 +1890,7 @@ function resetGame(seed: number, reason: string): void {
   currentRunEqTokens = [];
   ddsPlayHistory = [];
   ddsTeachingSummaries = [];
+  clearHint();
   clearTeachingEvents();
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -1761,6 +1926,7 @@ function selectProblem(problemId: string): void {
   currentRunEqTokens = [];
   ddsPlayHistory = [];
   ddsTeachingSummaries = [];
+  clearHint();
   clearTeachingEvents();
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -1779,6 +1945,7 @@ function backupLastUserPlay(): void {
   clearSingletonAutoplayTimer();
   const snapshot = undoStack.pop();
   if (!snapshot) return;
+  clearHint();
   restoreSnapshot(snapshot);
   clearPulseTimer();
   pulseUntilByCardKey.clear();
@@ -1788,6 +1955,7 @@ function backupLastUserPlay(): void {
 
 function runTurn(play: Play): void {
   clearSingletonAutoplayTimer();
+  clearHint();
   if (state.replay.enabled && state.replay.transcript && (play.seat === 'N' || play.seat === 'S')) {
     const playId = toCardId(play.suit, play.rank) as CardId;
     const actualClass = getImmutableUserEqClass(play.seat, playId);
@@ -2052,6 +2220,7 @@ function renderDebugSection(): HTMLElement {
 
 function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   clearSingletonAutoplayTimer();
+  clearHint();
   if (!lastSuccessfulTranscript) {
     playAgainAvailable = false;
     playAgainUnavailableReason = 'exhausted-all-variations';
@@ -2193,7 +2362,14 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   render();
 }
 
-function renderSuitRow(view: State, seat: Seat, suit: Suit, legalSet: Set<string>, canAct: boolean): HTMLDivElement {
+function renderSuitRow(
+  view: State,
+  seat: Seat,
+  suit: Suit,
+  legalSet: Set<string>,
+  canAct: boolean,
+  hintBestSet: Set<CardId>
+): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'suit-row';
 
@@ -2224,10 +2400,12 @@ function renderSuitRow(view: State, seat: Seat, suit: Suit, legalSet: Set<string
         const rankBtn = document.createElement('button');
         rankBtn.type = 'button';
         rankBtn.className = 'rank-text legal';
-        if ((pulseUntilByCardKey.get(cardPulseKey(seat, toCardId(suit, rank) as CardId)) ?? 0) > Date.now()) {
+        const cardId = toCardId(suit, rank) as CardId;
+        if (hintBestSet.has(cardId)) rankBtn.classList.add('hint-best');
+        if ((pulseUntilByCardKey.get(cardPulseKey(seat, cardId)) ?? 0) > Date.now()) {
           rankBtn.classList.add('card-pulse');
         }
-        appendRankContent(rankBtn, rank, rankColorClass(toCardId(suit, rank) as CardId, view), isEquivalent);
+        appendRankContent(rankBtn, rank, rankColorClass(cardId, view), isEquivalent);
         rankBtn.onclick = () => runTurn({ seat, suit, rank });
         cards.appendChild(rankBtn);
       } else {
@@ -2259,6 +2437,7 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   const legal = !trickFrozen && active ? legalPlays(view) : [];
   const legalSet = new Set(legal.map((p) => `${p.suit}${p.rank}`));
   const canAct = !trickFrozen && view.phase !== 'end' && view.userControls.includes(seat) && active;
+  const hintBestSet = new Set<CardId>();
 
   if (trickFrozen && canLeadDismiss && state.userControls.includes(state.turn) && seat === state.turn) {
     const leadLegal = legalPlays(state);
@@ -2268,9 +2447,15 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   }
 
   const effectiveCanAct = canAct || (trickFrozen && canLeadDismiss && seat === state.turn);
+  if (effectiveCanAct && activeHint) {
+    for (const card of activeHint.bestCards) hintBestSet.add(card);
+  }
+  if (activeHint && effectiveCanAct && seat === state.turn) {
+    hintDiag(`highlight sets best=${hintBestSet.size} bad=0`);
+  }
 
   for (const suit of suitOrder) {
-    card.appendChild(renderSuitRow(view, seat, suit, legalSet, effectiveCanAct));
+    card.appendChild(renderSuitRow(view, seat, suit, legalSet, effectiveCanAct, hintBestSet));
   }
 
   return card;
@@ -2438,7 +2623,29 @@ function renderBoardNavigationArea(view: State): HTMLElement {
 
   const outcome = document.createElement('div');
   outcome.className = `outcome-module ${runStatus === 'success' ? 'ok' : runStatus === 'failure' ? 'fail' : 'neutral'}`;
-  if (runStatus === 'success' || runStatus === 'failure') {
+  if (activeHint) {
+    outcome.classList.add('hint-active');
+    const prefix = document.createElement('span');
+    prefix.className = 'hint-prefix';
+    prefix.textContent = 'BEST:';
+    outcome.appendChild(prefix);
+    if (activeHint.bestCards.length > 0) {
+      for (const cardId of activeHint.bestCards) {
+        const suit = cardId[0] as Suit;
+        const rank = cardId.slice(1) as Rank;
+        const chip = document.createElement('span');
+        chip.className = `hint-card ${suit === 'H' ? 'heart' : suit === 'D' ? 'diamond' : suit === 'S' ? 'spade' : 'club'}`;
+        chip.textContent = `${suitSymbol[suit]}${displayRank(rank)}`;
+        outcome.appendChild(chip);
+      }
+    } else {
+      const fallback = document.createElement('span');
+      fallback.className = 'hint-text';
+      fallback.textContent = activeHint.textLine.replace(/^BEST:\s*/, '');
+      outcome.appendChild(fallback);
+    }
+    hintDiag(`message area using activeHint lines=${activeHint.textLine}`);
+  } else if (runStatus === 'success' || runStatus === 'failure') {
     const earlyGuaranteedFailure = runStatus === 'failure' && view.goalStatus === 'assuredFailure' && !handsAreEmpty(view);
     outcome.textContent =
       runStatus === 'success'
@@ -2471,6 +2678,17 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   nextVariationBtn.disabled = !(runStatus === 'success' && playAgainAvailable);
   nextVariationBtn.onclick = () => startPlayAgain('manual');
   transport.appendChild(nextVariationBtn);
+
+  const hintBtn = document.createElement('button');
+  hintBtn.type = 'button';
+  hintBtn.textContent = 'Hint';
+  hintBtn.onclick = (event) => {
+    hintDiag('button click');
+    event.preventDefault();
+    event.stopPropagation();
+    requestHint();
+  };
+  transport.appendChild(hintBtn);
 
   section.appendChild(transport);
   return section;
@@ -2567,6 +2785,7 @@ function renderTeachingEventsPane(): HTMLElement {
 }
 
 function render(): void {
+  hintDiag(`render with activeHint=${activeHint ? 'yes' : 'no'}`);
   const view = currentViewState();
 
   root.innerHTML = '';
