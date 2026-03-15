@@ -58,8 +58,10 @@ html.mode-widget {
 }
 
 .main-row.mode-widget {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
+  grid-template-columns: auto minmax(185px, 230px);
+  gap: 8px;
+  justify-content: center;
+  align-items: start;
 }
 
 .table-host {
@@ -70,7 +72,34 @@ html.mode-widget {
 
 .mode-widget .table-host {
   width: fit-content;
-  margin: 0 auto;
+  margin: 0;
+}
+
+.mode-widget .teaching-pane.widget-mirror-pane {
+  border: 1px solid rgba(203, 213, 225, 0.7);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 4px 7px 6px;
+  gap: 2px;
+  width: 100%;
+  max-height: calc(var(--play-area-height) + 2px);
+  min-height: 140px;
+  align-self: start;
+  overflow: hidden;
+}
+
+.mode-widget .teaching-pane.widget-mirror-pane strong {
+  font-size: 11px;
+  color: #475569;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.mode-widget .teaching-pane.widget-mirror-pane .teaching-events {
+  overflow-y: auto;
+  min-height: 0;
+  max-height: calc(var(--play-area-height) - 28px);
+  padding-right: 2px;
 }
 
 .mode-widget .hand-head {
@@ -567,6 +596,20 @@ html.mode-widget {
   gap: 4px;
 }
 
+.controls-link {
+  border: 1px solid #9aa5b5;
+  background: #fff;
+  border-radius: 5px;
+  padding: 3px 7px;
+  font-size: 12px;
+  color: #334155;
+  text-decoration: none;
+}
+
+.controls-link:hover {
+  background: #f3f6fa;
+}
+
 .status-facts {
   display: grid;
   gap: 3px;
@@ -981,7 +1024,7 @@ html.mode-widget {
 }
 
 @media (max-width: 860px) {
-  .main-row {
+  .main-row:not(.mode-widget) {
     grid-template-columns: 1fr;
   }
 

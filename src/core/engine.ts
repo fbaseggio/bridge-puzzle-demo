@@ -238,10 +238,25 @@ type AutoChoice = {
     card?: CardId;
     forcedClassId?: string;
   };
+  browserDdBackstop?: {
+    source: 'browser-dds';
+    legalCandidates: CardId[];
+    policyChoice: CardId;
+    safeCandidates: CardId[];
+    finalChoice: CardId;
+    overridden: boolean;
+    reason: 'applied' | 'runtime-unavailable' | 'no-safe-match';
+  };
 };
 
 type ApplyOptions = {
   eventCollector?: SemanticEventCollector;
+  autoplayBackstop?: (input: {
+    state: State;
+    policy: Policy;
+    legalPlays: Play[];
+    autoChoice: AutoChoice;
+  }) => { play: Play; trace?: AutoChoice['browserDdBackstop'] } | null;
 };
 
 export type EngineRunInput = {
@@ -550,7 +565,8 @@ function applyOnePlay(
     reason?: 'sig-mismatch' | 'card-not-legal' | 'class-not-legal';
     card?: CardId;
     forcedClassId?: string;
-  }
+  },
+  browserDdBackstop?: AutoChoice['browserDdBackstop']
 ): EngineEvent[] {
   const events: EngineEvent[] = [];
   const playedId = toCardId(play.suit, play.rank) as CardId;
@@ -577,7 +593,19 @@ function applyOnePlay(
     details: { classId: playedClass, eventType }
   });
   if (eventType === 'autoplay') {
-    events.push({ type: eventType, play: { ...play }, preferredDiscard, chosenBucket, bucketCards, policyClassByCard, tierBuckets, ddPolicy, decisionSig, replay });
+    events.push({
+      type: eventType,
+      play: { ...play },
+      preferredDiscard,
+      chosenBucket,
+      bucketCards,
+      policyClassByCard,
+      tierBuckets,
+      ddPolicy,
+      decisionSig,
+      replay,
+      browserDdBackstop
+    });
   } else {
     events.push({ type: eventType, play: { ...play } });
   }
@@ -846,7 +874,7 @@ export function apply(state: State, play: Play, options?: ApplyOptions): { state
       events.push({ type: 'illegal', reason: `No policy configured for auto seat ${next.turn}` });
       break;
     }
-    const auto = chooseAutoplay(next, policy, collector);
+    let auto = chooseAutoplay(next, policy, collector);
     if (!auto.play) {
       const legalNow = legalPlays(next);
       events.push({
@@ -854,6 +882,22 @@ export function apply(state: State, play: Play, options?: ApplyOptions): { state
         reason: `Autoplay failed for ${next.turn} (policy=${(policy as any)?.kind ?? 'none'}, legal=${legalNow.length}${auto.replay?.reason ? `, replay=${auto.replay.reason}` : ''})`,
       });
       break;
+    }
+    const legalNow = legalPlays(next);
+    if (options?.autoplayBackstop) {
+      const adjusted = options.autoplayBackstop({
+        state: next,
+        policy,
+        legalPlays: legalNow,
+        autoChoice: auto
+      });
+      if (adjusted?.play) {
+        auto = {
+          ...auto,
+          play: adjusted.play,
+          browserDdBackstop: adjusted.trace ?? auto.browserDdBackstop
+        };
+      }
     }
     emitSemantic(collector, {
       type: 'decision-evaluated',
@@ -894,7 +938,8 @@ export function apply(state: State, play: Play, options?: ApplyOptions): { state
         auto.tierBuckets,
         auto.ddPolicy,
         auto.decisionSig,
-        auto.replay
+        auto.replay,
+        auto.browserDdBackstop
       )
     );
   }

@@ -97,9 +97,12 @@ root.style.setProperty('--table-gap-y', `${verticalGap}px`);
 root.style.setProperty('--table-gap-x', `${horizontalGap}px`);
 root.style.setProperty('--slot-offset', '12%');
 let busyBranching: 'strict' | 'sameLevel' | 'allBusy' = 'sameLevel';
-let ddSourceMode: 'off' | 'runtime' = 'runtime';
+// Legacy runtime ddPolicy backstop stays available behind DD source toggles,
+// but browser DDS backstop is the active default in widget/analysis runtime.
+let ddSourceMode: 'off' | 'runtime' = 'off';
 const threatDetail = false;
 const verboseCoverageDetail = false;
+const browserDdsBackstopEnabled = true;
 const initialProblemIdFromUrl: string = (() => {
   if (typeof window === 'undefined') return demoProblems[0].id;
   const requested = new URLSearchParams(window.location.search).get('problem');
@@ -336,8 +339,9 @@ function scheduleNarrationFromTeaching(): void {
   if (!line) return;
   lastNarratedSeq = latest.seq;
   const seat = seatOrder.includes(latest.seat as Seat) ? (latest.seat as Seat) : null;
+  const narr: NarrationBubble = { text: line, seat, seq: latest.seq };
   widgetStatus = { type: 'narration', text: line };
-  narrationBubble = { text: line, seat, seq: latest.seq };
+  narrationBubble = narr;
 }
 
 function widgetReadingMode(): boolean {
@@ -363,6 +367,79 @@ function normalizeDdsCardId(suitRaw: unknown, rankRaw: unknown): CardId | null {
   const rank = normalizeDdsRank(rankRaw);
   if (!['S', 'H', 'D', 'C'].includes(suit) || !rank) return null;
   return `${suit}${rank}` as CardId;
+}
+
+function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameters<typeof apply>[2]>['autoplayBackstop'] {
+  return ({ state: liveState, legalPlays, autoChoice }) => {
+    if (!browserDdsBackstopEnabled || !autoChoice.play) return null;
+    if (liveState.turn !== 'E' && liveState.turn !== 'W') return null;
+    const legalCandidates = legalPlays.map((p) => toCardId(p.suit, p.rank) as CardId);
+    const policyChoice = toCardId(autoChoice.play.suit, autoChoice.play.rank) as CardId;
+    const dds = queryDdsNextPlays({
+      openingLeader: currentProblem.leader,
+      initialHands: currentProblem.hands,
+      contract: currentProblem.contract,
+      playedCardIds
+    });
+
+    if (!dds.ok) {
+      playedCardIds.push(policyChoice);
+      return {
+        play: autoChoice.play,
+        trace: {
+          source: 'browser-dds',
+          legalCandidates,
+          policyChoice,
+          safeCandidates: [],
+          finalChoice: policyChoice,
+          overridden: false,
+          reason: 'runtime-unavailable'
+        }
+      };
+    }
+
+    const scoreByCard = new Map<CardId, number>();
+    for (const candidate of dds.result.plays ?? []) {
+      const cardId = normalizeDdsCardId(candidate.suit, candidate.rank);
+      if (!cardId || typeof candidate.score !== 'number') continue;
+      scoreByCard.set(cardId, candidate.score);
+    }
+
+    const scoredLegal = legalCandidates.filter((card) => scoreByCard.has(card));
+    if (scoredLegal.length === 0) {
+      playedCardIds.push(policyChoice);
+      return {
+        play: autoChoice.play,
+        trace: {
+          source: 'browser-dds',
+          legalCandidates,
+          policyChoice,
+          safeCandidates: [],
+          finalChoice: policyChoice,
+          overridden: false,
+          reason: 'no-safe-match'
+        }
+      };
+    }
+
+    const maxScore = Math.max(...scoredLegal.map((card) => scoreByCard.get(card) ?? Number.NEGATIVE_INFINITY));
+    const safeCandidates = legalCandidates.filter((card) => (scoreByCard.get(card) ?? Number.NEGATIVE_INFINITY) === maxScore);
+    const finalChoice = safeCandidates.includes(policyChoice) ? policyChoice : safeCandidates[0];
+    const finalPlay = legalPlays.find((p) => (toCardId(p.suit, p.rank) as CardId) === finalChoice) ?? autoChoice.play;
+    playedCardIds.push(finalChoice);
+    return {
+      play: finalPlay,
+      trace: {
+        source: 'browser-dds',
+        legalCandidates,
+        policyChoice,
+        safeCandidates,
+        finalChoice,
+        overridden: finalChoice !== policyChoice,
+        reason: 'applied'
+      }
+    };
+  };
 }
 
 function hintGateStatus(): {
@@ -1454,6 +1531,11 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
     }
 
     if (verboseLog && event.type === 'autoplay') {
+      if (event.browserDdBackstop) {
+        lines.push(
+          `[DDS-BACKSTOP] legal={${event.browserDdBackstop.legalCandidates.join(',') || '-'}} policy=${event.browserDdBackstop.policyChoice} safe={${event.browserDdBackstop.safeCandidates.join(',') || '-'}} final=${event.browserDdBackstop.finalChoice} override=${event.browserDdBackstop.overridden ? 'yes' : 'no'} reason=${event.browserDdBackstop.reason}`
+        );
+      }
       if (event.replay?.action === 'forced') {
         lines.push(`[PLAYAGAIN] forcing index=${event.replay.index ?? '?'} card=${event.replay.card ?? `${event.play.suit}${event.play.rank}`}`);
       }
@@ -2090,7 +2172,11 @@ function runTurn(play: Play): void {
 
   const before = state;
   const ddsHistoryForTurn = [...ddsPlayHistory];
-  const result = apply(state, play, { eventCollector: semanticCollector });
+  const backstopHistoryForTurn = [...ddsHistoryForTurn, `${play.suit}${play.rank}`];
+  const result = apply(state, play, {
+    eventCollector: semanticCollector,
+    autoplayBackstop: buildBrowserDdsBackstop(backstopHistoryForTurn)
+  });
   state = result.state;
   threatCtx = (state.threat as ThreatContext | null) ?? null;
   threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
@@ -2704,6 +2790,18 @@ function renderControlsBanner(): HTMLElement {
   puzzleLabel.appendChild(puzzleSelect);
   row.appendChild(puzzleLabel);
 
+  const currentEntry = demoProblems.find((p) => p.id === currentProblemId);
+  if (currentEntry?.articlePath) {
+    const articleLink = document.createElement('a');
+    const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
+    articleLink.href = `${base}${currentEntry.articlePath.replace(/^\/+/, '')}`;
+    articleLink.target = '_blank';
+    articleLink.rel = 'noopener noreferrer';
+    articleLink.className = 'controls-link';
+    articleLink.textContent = 'Open article';
+    row.appendChild(articleLink);
+  }
+
   const teachLabel = document.createElement('label');
   const teachBox = document.createElement('input');
   teachBox.type = 'checkbox';
@@ -2918,9 +3016,9 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   return section;
 }
 
-function renderTeachingEventsPane(): HTMLElement {
+function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTMLElement {
   const pane = document.createElement('aside');
-  pane.className = 'teaching-pane';
+  pane.className = mode === 'widget' ? 'teaching-pane widget-mirror-pane' : 'teaching-pane';
 
   const title = document.createElement('strong');
   title.textContent = 'Key teaching events';
@@ -3046,9 +3144,12 @@ function render(): void {
 
   tableHost.appendChild(tableCanvas);
   if (displayMode === 'analysis') {
-    mainRow.appendChild(renderTeachingEventsPane());
+    mainRow.appendChild(renderTeachingEventsPane('analysis'));
   }
   mainRow.appendChild(tableHost);
+  if (displayMode === 'widget') {
+    mainRow.appendChild(renderTeachingEventsPane('widget'));
+  }
   if (displayMode === 'analysis') {
     mainRow.appendChild(renderStatusPanel(view));
   }

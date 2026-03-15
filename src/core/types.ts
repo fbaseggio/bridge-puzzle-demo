@@ -149,6 +149,15 @@ export type EngineEvent =
         card?: CardId;
         forcedClassId?: string;
       };
+      browserDdBackstop?: {
+        source: 'browser-dds';
+        legalCandidates: CardId[];
+        policyChoice: CardId;
+        safeCandidates: CardId[];
+        finalChoice: CardId;
+        overridden: boolean;
+        reason: 'applied' | 'runtime-unavailable' | 'no-safe-match';
+      };
     }
   | { type: 'illegal'; reason: string }
   | { type: 'trickComplete'; winner: Seat; trick: Play[] }
