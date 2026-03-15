@@ -594,7 +594,31 @@ export function updateClassificationAfterPlay(
         };
       }
     }
+    const beforeStrandedBySuit = new Map<Suit, boolean>();
+    for (const suit of SUITS) {
+      beforeStrandedBySuit.set(suit, Boolean(immediateThreat.threatsBySuit[suit]?.stranded));
+    }
     immediateThreat = applyStrandedFlags(immediateThreat, position, runtime);
+    const strandedChangedSuits: Suit[] = [];
+    for (const suit of SUITS) {
+      const before = beforeStrandedBySuit.get(suit) ?? false;
+      const after = Boolean(immediateThreat.threatsBySuit[suit]?.stranded);
+      if (before !== after) strandedChangedSuits.push(suit);
+    }
+    // Strandedness changes alter whether defenders must keep guards in a suit.
+    // Recompute that suit's defender labels/roles immediately so policy sees it
+    // on the very next defender decision, without waiting for deferred phases.
+    for (const suit of strandedChangedSuits) {
+      recomputeSuitLabels(immediateThreat, position, nextLabels, suit);
+      const updatedThreat = immediateThreat.threatsBySuit[suit];
+      if (updatedThreat) {
+        immediateThreat.threatsBySuit[suit] = {
+          ...updatedThreat,
+          stopStatus: computeStopStatus(immediateThreat, nextLabels, suit)
+        };
+      }
+      updateRolesForSuit(nextRoles, immediateThreat, nextLabels, position, suit);
+    }
     for (const suit of SUITS) {
       const t = immediateThreat.threatsBySuit[suit];
       if (!t || !t.active) continue;
