@@ -62,7 +62,14 @@ type HintState = {
   badCards: CardId[];
   textLine: string;
 };
+type DisplayMode = 'analysis' | 'widget';
 type ProblemWithThreats = typeof demoProblems[number]['problem'] & { threatCardIds?: CardId[] };
+const displayMode: DisplayMode = (() => {
+  if (typeof window === 'undefined') return 'analysis';
+  const mode = new URLSearchParams(window.location.search).get('mode');
+  return mode === 'widget' ? 'widget' : 'analysis';
+})();
+const compactWidgetLayout = displayMode === 'widget';
 
 const maxSuitLineLen = Math.max(
   ...demoProblems.flatMap(({ problem }) => seatOrder.flatMap((seat) => suitOrder.map((suit) => problem.hands[seat][suit].length)))
@@ -70,18 +77,18 @@ const maxSuitLineLen = Math.max(
 const suitColWidth = 12;
 const suitGap = 4;
 const rankGlyphWidth = 9;
-const rankGap = 4;
-const handPadX = 4;
-const handPadY = 6;
-const rowHeight = 17;
-const seatRowHeight = 16;
-const seatToSuitGap = 3;
-const suitRowSpacingTotal = 16; // 4 rows with 2px top/bottom row margins.
+const rankGap = compactWidgetLayout ? 3 : 4;
+const handPadX = compactWidgetLayout ? 3 : 4;
+const handPadY = compactWidgetLayout ? 4 : 6;
+const rowHeight = compactWidgetLayout ? 15 : 17;
+const seatRowHeight = compactWidgetLayout ? 14 : 16;
+const seatToSuitGap = compactWidgetLayout ? 2 : 3;
+const suitRowSpacingTotal = compactWidgetLayout ? 12 : 16; // 4 rows with compact top/bottom margins.
 const verticalGap = Math.round(rowHeight * 0.6);
 const horizontalGap = Math.round(rowHeight * 0.6);
 const handBoxWidth = suitColWidth + suitGap + maxSuitLineLen * rankGlyphWidth + Math.max(0, maxSuitLineLen - 1) * rankGap + handPadX;
 const handBoxHeight = seatRowHeight + seatToSuitGap + rowHeight * 4 + suitRowSpacingTotal + handPadY;
-const trickBoxSize = handBoxHeight + 6;
+const trickBoxSize = compactWidgetLayout ? Math.max(74, handBoxHeight + 2) : handBoxHeight + 6;
 root.style.setProperty('--hand-box-w', `${handBoxWidth}px`);
 root.style.setProperty('--hand-box-h', `${handBoxHeight}px`);
 root.style.setProperty('--trick-box-w', `${trickBoxSize}px`);
@@ -93,9 +100,15 @@ let busyBranching: 'strict' | 'sameLevel' | 'allBusy' = 'sameLevel';
 let ddSourceMode: 'off' | 'runtime' = 'runtime';
 const threatDetail = false;
 const verboseCoverageDetail = false;
+const initialProblemIdFromUrl: string = (() => {
+  if (typeof window === 'undefined') return demoProblems[0].id;
+  const requested = new URLSearchParams(window.location.search).get('problem');
+  if (!requested) return demoProblems[0].id;
+  return demoProblems.some((p) => p.id === requested) ? requested : demoProblems[0].id;
+})();
 
-let currentProblem = demoProblems[0].problem;
-let currentProblemId = demoProblems[0].id;
+let currentProblem = demoProblems.find((p) => p.id === initialProblemIdFromUrl)?.problem ?? demoProblems[0].problem;
+let currentProblemId = demoProblems.find((p) => p.id === initialProblemIdFromUrl)?.id ?? demoProblems[0].id;
 let currentSeed = currentProblem.rngSeed >>> 0;
 let state: State = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
 const rawSemanticReducer = new RawSemanticReducer();
@@ -113,11 +126,23 @@ let showGuides = false;
 let showDebugSection = true;
 let teachingMode = true;
 let autoplaySingletons = false;
+let alwaysHint = false;
+let cardColoringEnabled = true;
+let narrate = false;
+let advancedPanelOpen = false;
 let ddsPlayHistory: string[] = [];
 let ddsTeachingSummaries: string[] = [];
 let activeHint: HintState | null = null;
+let activeHintKey: string | null = null;
+type WidgetStatusType = 'hint' | 'narration' | 'default';
+type WidgetStatus = { type: WidgetStatusType; text: string };
+let widgetStatus: WidgetStatus = { type: 'default', text: '' };
+type NarrationBubble = { text: string; seat: Seat | null; seq: number };
+let narrationBubble: NarrationBubble | null = null;
+let lastNarratedSeq = 0;
 let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
+let renderingNow = false;
 
 let trickFrozen = false;
 let lastCompletedTrick: Play[] | null = null;
@@ -282,6 +307,42 @@ function warmDdDataset(problemId: string): void {
 
 function clearHint(): void {
   activeHint = null;
+  activeHintKey = null;
+  if (widgetStatus.type === 'hint') widgetStatus = { type: 'default', text: '' };
+}
+
+function clearNarration(): void {
+  if (widgetStatus.type === 'narration') widgetStatus = { type: 'default', text: '' };
+  narrationBubble = null;
+}
+
+function summarizeForNarration(summary: string): string {
+  const trimmed = summary.replace(/^\s*#\d+\s*/, '').trim();
+  return trimmed.replace(/\b([SHDC])(10|[AKQJT2-9])\b/g, (_m, suit: string, rank: string) => {
+    const sym = suit === 'S' ? '♠' : suit === 'H' ? '♥' : suit === 'D' ? '♦' : '♣';
+    const r = rank === '10' ? '10' : rank;
+    return `${sym}${r}`;
+  });
+}
+
+function scheduleNarrationFromTeaching(): void {
+  if (!narrate || displayMode !== 'widget') return;
+  const snapshot = teachingReducer.snapshot() as {
+    entries: Array<{ seq: number; seat: string; summary: string }>;
+  };
+  const latest = snapshot.entries?.[snapshot.entries.length - 1];
+  if (!latest || latest.seq <= lastNarratedSeq) return;
+  const line = summarizeForNarration(latest.summary ?? '');
+  if (!line) return;
+  lastNarratedSeq = latest.seq;
+  const seat = seatOrder.includes(latest.seat as Seat) ? (latest.seat as Seat) : null;
+  widgetStatus = { type: 'narration', text: line };
+  narrationBubble = { text: line, seat, seq: latest.seq };
+}
+
+function widgetReadingMode(): boolean {
+  if (displayMode !== 'widget') return false;
+  return ddsPlayHistory.length === 0 && state.trick.length === 0 && !trickFrozen;
 }
 
 function hintDiag(message: string): void {
@@ -325,6 +386,16 @@ function hintGateStatus(): {
     userTurn,
     legalCount
   };
+}
+
+function hintPositionKey(): string | null {
+  const gate = hintGateStatus();
+  if (!gate.allowed) return null;
+  const trickKey = state.trick.map((p) => `${p.seat}${p.suit}${p.rank}`).join(',');
+  const handsKey = seatOrder
+    .map((seat) => `${seat}:${suitOrder.map((suit) => state.hands[seat][suit].join('')).join('/')}`)
+    .join('|');
+  return `${state.phase}|${state.turn}|${trickKey}|${handsKey}`;
 }
 
 function classifyHintForCurrentPosition(): HintState | null {
@@ -420,6 +491,7 @@ function classifyHintForCurrentPosition(): HintState | null {
 
 function requestHint(): void {
   hintDiag('requestHint start');
+  const key = hintPositionKey();
   const hint = classifyHintForCurrentPosition();
   if (!hint) {
     hintDiag('classify null');
@@ -434,8 +506,30 @@ function requestHint(): void {
   }
   hintDiag(`classify ok BEST=${hint.bestCards.join(' ') || '-'} BAD=${hint.badCards.join(' ') || '-'}`);
   activeHint = hint;
+  activeHintKey = key;
+  widgetStatus = { type: 'hint', text: hint.textLine };
   hintDiag(`activeHint set best=${hint.bestCards.join(' ')} bad=${hint.badCards.join(' ') || '-'}`);
   render();
+}
+
+function syncAlwaysHint(): void {
+  if (!alwaysHint) return;
+  const key = hintPositionKey();
+  if (!key) {
+    if (activeHint) {
+      clearHint();
+      if (!renderingNow) render();
+    }
+    return;
+  }
+  if (activeHint && activeHintKey === key) return;
+  const hint = classifyHintForCurrentPosition();
+  if (!hint) return;
+  activeHint = hint;
+  activeHintKey = key;
+  widgetStatus = { type: 'hint', text: hint.textLine };
+  hintDiag(`always-hint updated BEST=${hint.bestCards.join(' ') || '-'} BAD=${hint.badCards.join(' ') || '-'}`);
+  if (!renderingNow) render();
 }
 
 function sortRanksDesc(ranks: Rank[]): Rank[] {
@@ -476,6 +570,7 @@ function formatHandInitSummary(s: State, seat: Seat): string {
 }
 
 function rankColorClass(cardId: CardId, featureSource: Pick<State, 'cardRoles' | 'threat' | 'threatLabels'> = state): string {
+  if (!cardColoringEnabled) return 'rank--black';
   const features = buildFeatureStateFromRuntime({
     threat: (featureSource.threat as ThreatContext | null) ?? null,
     threatLabels: featureSource.threatLabels,
@@ -1890,6 +1985,8 @@ function resetGame(seed: number, reason: string): void {
   currentRunEqTokens = [];
   ddsPlayHistory = [];
   ddsTeachingSummaries = [];
+  clearNarration();
+  lastNarratedSeq = 0;
   clearHint();
   clearTeachingEvents();
   rebuildUserEqClassMapping(state);
@@ -1926,6 +2023,8 @@ function selectProblem(problemId: string): void {
   currentRunEqTokens = [];
   ddsPlayHistory = [];
   ddsTeachingSummaries = [];
+  clearNarration();
+  lastNarratedSeq = 0;
   clearHint();
   clearTeachingEvents();
   rebuildUserEqClassMapping(state);
@@ -1945,6 +2044,7 @@ function backupLastUserPlay(): void {
   clearSingletonAutoplayTimer();
   const snapshot = undoStack.pop();
   if (!snapshot) return;
+  clearNarration();
   clearHint();
   restoreSnapshot(snapshot);
   clearPulseTimer();
@@ -1955,6 +2055,7 @@ function backupLastUserPlay(): void {
 
 function runTurn(play: Play): void {
   clearSingletonAutoplayTimer();
+  clearNarration();
   clearHint();
   if (state.replay.enabled && state.replay.transcript && (play.seat === 'N' || play.seat === 'S')) {
     const playId = toCardId(play.suit, play.rank) as CardId;
@@ -2220,6 +2321,7 @@ function renderDebugSection(): HTMLElement {
 
 function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   clearSingletonAutoplayTimer();
+  clearNarration();
   clearHint();
   if (!lastSuccessfulTranscript) {
     playAgainAvailable = false;
@@ -2359,6 +2461,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
     ''
   ].slice(-500);
   refreshThreatModel(currentProblemId, false);
+  lastNarratedSeq = 0;
   render();
 }
 
@@ -2461,11 +2564,13 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   return card;
 }
 
-function renderTrickTable(view: State): HTMLElement {
+function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
   const table = document.createElement('section');
-  table.className = `trick-table${trickFrozen ? ' frozen' : ''}`;
+  table.className = `trick-table${trickFrozen ? ' frozen' : ''}${visuallyHidden ? ' reading-hidden' : ''}`;
   if (trickFrozen) {
-    table.title = 'Click to dismiss trick';
+    if (displayMode !== 'widget') {
+      table.title = 'Click to dismiss trick';
+    }
     table.onclick = () => {
       unfreezeTrick(true);
       render();
@@ -2495,6 +2600,15 @@ function renderTrickTable(view: State): HTMLElement {
   }
 
   return table;
+}
+
+function renderNarrationBubble(): HTMLElement | null {
+  if (displayMode !== 'widget' || !narrate || !narrationBubble?.text) return null;
+  const bubble = document.createElement('aside');
+  const anchor = narrationBubble.seat ? ` seat-${narrationBubble.seat}` : ' seat-neutral';
+  bubble.className = `narration-bubble${anchor}`;
+  bubble.textContent = narrationBubble.text;
+  return bubble;
 }
 
 function renderStatusPanel(view: State): HTMLElement {
@@ -2619,10 +2733,11 @@ function renderControlsBanner(): HTMLElement {
 
 function renderBoardNavigationArea(view: State): HTMLElement {
   const section = document.createElement('section');
-  section.className = 'board-navigation-area';
+  section.className = `board-navigation-area mode-${displayMode}`;
 
   const outcome = document.createElement('div');
   outcome.className = `outcome-module ${runStatus === 'success' ? 'ok' : runStatus === 'failure' ? 'fail' : 'neutral'}`;
+  const noPlayYet = ddsPlayHistory.length === 0 && view.tricksWon.NS === 0 && view.tricksWon.EW === 0 && view.trick.length === 0;
   if (activeHint) {
     outcome.classList.add('hint-active');
     const prefix = document.createElement('span');
@@ -2645,6 +2760,21 @@ function renderBoardNavigationArea(view: State): HTMLElement {
       outcome.appendChild(fallback);
     }
     hintDiag(`message area using activeHint lines=${activeHint.textLine}`);
+  } else if (displayMode === 'widget') {
+    if (activeHint) {
+      widgetStatus = { type: 'hint', text: activeHint.textLine };
+    } else if (widgetStatus.type === 'hint') {
+      widgetStatus = { type: 'default', text: '' };
+    }
+    if (widgetStatus.type === 'narration' && widgetStatus.text) {
+      outcome.textContent = widgetStatus.text;
+    } else if (noPlayYet) {
+      const strain = view.contract.strain;
+      const takeN = view.goal.type === 'minTricks' ? view.goal.n : '-';
+      outcome.textContent = `${strain} take ${takeN}`;
+    } else {
+      outcome.textContent = `NS ${view.tricksWon.NS}  EW ${view.tricksWon.EW}`;
+    }
   } else if (runStatus === 'success' || runStatus === 'failure') {
     const earlyGuaranteedFailure = runStatus === 'failure' && view.goalStatus === 'assuredFailure' && !handsAreEmpty(view);
     outcome.textContent =
@@ -2657,31 +2787,42 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   section.appendChild(outcome);
 
   const transport = document.createElement('div');
-  transport.className = 'transport-bar';
+  transport.className = `transport-bar mode-${displayMode}`;
 
   const restartBtn = document.createElement('button');
   restartBtn.type = 'button';
-  restartBtn.textContent = 'Restart';
+  restartBtn.textContent = displayMode === 'widget' ? '⏮' : 'Restart';
+  restartBtn.title = 'Restart';
+  restartBtn.setAttribute('aria-label', 'Restart');
+  if (displayMode === 'widget') restartBtn.classList.add('icon-btn');
   restartBtn.onclick = () => resetGame(currentSeed, 'reset');
   transport.appendChild(restartBtn);
 
   const undoBtn = document.createElement('button');
   undoBtn.type = 'button';
-  undoBtn.textContent = 'Undo';
+  undoBtn.textContent = displayMode === 'widget' ? '⟲' : 'Undo';
+  undoBtn.title = 'Undo';
+  undoBtn.setAttribute('aria-label', 'Undo');
+  if (displayMode === 'widget') undoBtn.classList.add('icon-btn');
   undoBtn.disabled = undoStack.length === 0;
   undoBtn.onclick = () => backupLastUserPlay();
   transport.appendChild(undoBtn);
 
-  const nextVariationBtn = document.createElement('button');
-  nextVariationBtn.type = 'button';
-  nextVariationBtn.textContent = 'Next variation';
-  nextVariationBtn.disabled = !(runStatus === 'success' && playAgainAvailable);
-  nextVariationBtn.onclick = () => startPlayAgain('manual');
-  transport.appendChild(nextVariationBtn);
+  if (displayMode === 'analysis') {
+    const nextVariationBtn = document.createElement('button');
+    nextVariationBtn.type = 'button';
+    nextVariationBtn.textContent = 'Next variation';
+    nextVariationBtn.disabled = !(runStatus === 'success' && playAgainAvailable);
+    nextVariationBtn.onclick = () => startPlayAgain('manual');
+    transport.appendChild(nextVariationBtn);
+  }
 
   const hintBtn = document.createElement('button');
   hintBtn.type = 'button';
-  hintBtn.textContent = 'Hint';
+  hintBtn.textContent = displayMode === 'widget' ? '💡' : 'Hint';
+  hintBtn.title = 'Hint';
+  hintBtn.setAttribute('aria-label', 'Hint');
+  if (displayMode === 'widget') hintBtn.classList.add('icon-btn');
   hintBtn.onclick = (event) => {
     hintDiag('button click');
     event.preventDefault();
@@ -2689,6 +2830,89 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     requestHint();
   };
   transport.appendChild(hintBtn);
+
+  if (displayMode === 'widget' && typeof window !== 'undefined') {
+    const pop = document.createElement('a');
+    const u = new URL(window.location.href);
+    u.searchParams.set('mode', 'analysis');
+    u.searchParams.set('problem', currentProblemId);
+    pop.href = u.toString();
+    pop.target = '_blank';
+    pop.rel = 'noopener noreferrer';
+    pop.className = 'transport-popout icon-btn';
+    pop.textContent = '↗';
+    pop.title = 'Pop Out (open full analysis)';
+    pop.setAttribute('aria-label', 'Pop Out (open full analysis)');
+    transport.appendChild(pop);
+
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button';
+    moreBtn.className = 'icon-btn';
+    moreBtn.textContent = '⋯';
+    moreBtn.title = 'Advanced options';
+    moreBtn.setAttribute('aria-label', 'More options');
+    moreBtn.onclick = () => {
+      advancedPanelOpen = !advancedPanelOpen;
+      render();
+    };
+    const moreWrap = document.createElement('div');
+    moreWrap.className = 'advanced-wrap';
+    moreWrap.appendChild(moreBtn);
+
+    if (advancedPanelOpen) {
+      const panel = document.createElement('section');
+      panel.className = 'advanced-panel';
+
+      const mkToggle = (label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement => {
+        const row = document.createElement('label');
+        row.className = 'advanced-toggle';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = checked;
+        box.onchange = () => onChange(box.checked);
+        const text = document.createElement('span');
+        text.textContent = label;
+        row.append(box, text);
+        return row;
+      };
+
+      panel.appendChild(
+        mkToggle('Autoplay singletons', autoplaySingletons, (checked) => {
+          autoplaySingletons = checked;
+          syncSingletonAutoplay();
+          render();
+        })
+      );
+      panel.appendChild(
+        mkToggle('Always hint', alwaysHint, (checked) => {
+          alwaysHint = checked;
+          if (!checked) clearHint();
+          render();
+        })
+      );
+      panel.appendChild(
+        mkToggle('Card coloring', cardColoringEnabled, (checked) => {
+          cardColoringEnabled = checked;
+          render();
+        })
+      );
+      panel.appendChild(
+        mkToggle('Narrate', narrate, (checked) => {
+          narrate = checked;
+          if (!checked) {
+            clearNarration();
+          } else {
+            scheduleNarrationFromTeaching();
+          }
+          render();
+        })
+      );
+
+      moreWrap.appendChild(panel);
+    }
+
+    transport.appendChild(moreWrap);
+  }
 
   section.appendChild(transport);
   return section;
@@ -2785,37 +3009,58 @@ function renderTeachingEventsPane(): HTMLElement {
 }
 
 function render(): void {
+  renderingNow = true;
   hintDiag(`render with activeHint=${activeHint ? 'yes' : 'no'}`);
   const view = currentViewState();
+  const isWidgetReadingMode = widgetReadingMode();
 
   root.innerHTML = '';
+  root.classList.toggle('mode-widget', displayMode === 'widget');
+  root.classList.toggle('mode-analysis', displayMode === 'analysis');
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('mode-widget', displayMode === 'widget');
+    document.documentElement.classList.toggle('mode-analysis', displayMode === 'analysis');
+    document.body.classList.toggle('mode-widget', displayMode === 'widget');
+    document.body.classList.toggle('mode-analysis', displayMode === 'analysis');
+  }
 
-  root.appendChild(renderControlsBanner());
+  if (displayMode === 'analysis') {
+    root.appendChild(renderControlsBanner());
+  }
 
   const mainRow = document.createElement('section');
-  mainRow.className = 'main-row';
+  mainRow.className = `main-row mode-${displayMode}`;
 
   const tableHost = document.createElement('div');
   tableHost.className = 'table-host';
 
   const tableCanvas = document.createElement('main');
   tableCanvas.className = `table-canvas${showGuides ? ' show-guides' : ''}`;
-  tableCanvas.appendChild(renderTrickTable(view));
+  tableCanvas.appendChild(renderTrickTable(view, isWidgetReadingMode));
   tableCanvas.appendChild(renderSeatHand(view, 'N'));
   tableCanvas.appendChild(renderSeatHand(view, 'W'));
   tableCanvas.appendChild(renderSeatHand(view, 'E'));
   tableCanvas.appendChild(renderSeatHand(view, 'S'));
+  const bubble = renderNarrationBubble();
+  if (bubble) tableCanvas.appendChild(bubble);
 
   tableHost.appendChild(tableCanvas);
-  mainRow.appendChild(renderTeachingEventsPane());
+  if (displayMode === 'analysis') {
+    mainRow.appendChild(renderTeachingEventsPane());
+  }
   mainRow.appendChild(tableHost);
-  mainRow.appendChild(renderStatusPanel(view));
+  if (displayMode === 'analysis') {
+    mainRow.appendChild(renderStatusPanel(view));
+  }
   root.appendChild(mainRow);
   root.appendChild(renderBoardNavigationArea(view));
-  if (showLog || showDebugSection) {
+  if (displayMode === 'analysis' && (showLog || showDebugSection)) {
     root.appendChild(renderDebugSection());
   }
+  renderingNow = false;
   syncSingletonAutoplay();
+  syncAlwaysHint();
+  scheduleNarrationFromTeaching();
 }
 
 refreshThreatModel(currentProblemId, false);

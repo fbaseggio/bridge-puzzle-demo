@@ -9,6 +9,7 @@ import { p007 } from '../puzzles/p007';
 import { p008 } from '../puzzles/p008';
 import { p009 } from '../puzzles/p009';
 import { p010 } from '../puzzles/p010';
+import { squeezeSelf01 } from '../puzzles/squeeze_self_01';
 
 export type DemoProblem = {
   id: string;
@@ -18,6 +19,7 @@ export type DemoProblem = {
 };
 
 export const demoProblems: DemoProblem[] = [
+  { id: 'squeeze_self_01', label: 'Focus on the squeeze against yourself', problem: squeezeSelf01 },
   { id: 'p001', label: 'p001', problem: p001 },
   { id: 'p002', label: 'p002', problem: p002, experimental: p002Experimental },
   { id: 'p003', label: 'p003', problem: p003 },

@@ -623,10 +623,17 @@ export function updateClassificationAfterPlay(
     };
   }
 
-  const substitutedThreat =
-    trigger === 'end-of-trick' || (runtime?.trick?.length ?? 0) === 4
-      ? applyTrickEndThreatSubstitution(immediateThreat, position, runtime)
-      : immediateThreat;
+  const isTrickEnd = trigger === 'end-of-trick' || (runtime?.trick?.length ?? 0) === 4;
+  const trickAdjustedThreat = isTrickEnd
+    ? updateThreatContextAfterTrick(
+        immediateThreat,
+        position,
+        (runtime?.trick ?? []).map((p) => toCardId(p.suit, p.rank))
+      )
+    : immediateThreat;
+  const substitutedThreat = isTrickEnd
+    ? applyTrickEndThreatSubstitution(trickAdjustedThreat, position, runtime)
+    : trickAdjustedThreat;
   const strandedThreat = applyStrandedFlags(substitutedThreat, position, runtime);
   const recomputedLabels = computeDefenderLabels(strandedThreat, position);
   for (const suit of SUITS) {
