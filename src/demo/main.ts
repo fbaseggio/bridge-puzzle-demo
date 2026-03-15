@@ -62,6 +62,11 @@ type HintState = {
   badCards: CardId[];
   textLine: string;
 };
+type DdErrorVisualState = {
+  seat: Seat;
+  goodCards: CardId[];
+  badCard: CardId;
+};
 type DisplayMode = 'analysis' | 'widget';
 type ProblemWithThreats = typeof demoProblems[number]['problem'] & { threatCardIds?: CardId[] };
 const displayMode: DisplayMode = (() => {
@@ -109,6 +114,16 @@ const initialProblemIdFromUrl: string = (() => {
   if (!requested) return demoProblems[0].id;
   return demoProblems.some((p) => p.id === requested) ? requested : demoProblems[0].id;
 })();
+const initialUserHistoryFromUrl: CardId[] = (() => {
+  if (typeof window === 'undefined') return [];
+  const raw = new URLSearchParams(window.location.search).get('history');
+  if (!raw) return [];
+  return raw
+    .split('.')
+    .map((token) => token.trim().toUpperCase())
+    .filter((token) => /^[SHDC](10|[AKQJT2-9])$/.test(token))
+    .map((token) => `${token[0]}${token.slice(1) === '10' ? 'T' : token.slice(1)}` as CardId);
+})();
 
 let currentProblem = demoProblems.find((p) => p.id === initialProblemIdFromUrl)?.problem ?? demoProblems[0].problem;
 let currentProblemId = demoProblems.find((p) => p.id === initialProblemIdFromUrl)?.id ?? demoProblems[0].id;
@@ -140,6 +155,7 @@ let activeHint: HintState | null = null;
 let activeHintKey: string | null = null;
 let hintLoading = false;
 let hintRequestSeq = 0;
+let ddErrorVisual: DdErrorVisualState | null = null;
 type WidgetStatusType = 'hint' | 'narration' | 'default';
 type WidgetStatus = { type: WidgetStatusType; text: string };
 let widgetStatus: WidgetStatus = { type: 'default', text: '' };
@@ -180,6 +196,8 @@ type GameSnapshot = {
   nextTeachingEventId: number;
   ddsPlayHistory: string[];
   ddsTeachingSummaries: string[];
+  ddErrorVisual: DdErrorVisualState | null;
+  userPlayHistory: CardId[];
 };
 const undoStack: GameSnapshot[] = [];
 let currentRunTranscript: DecisionRecord[] = [];
@@ -199,6 +217,7 @@ let playAgainLastCandidateIndex: number | null = null;
 let runPlayCounter = 0;
 let replayMismatchCutoffIdx: number | null = null;
 let replaySuppressedForRun = false;
+let userPlayHistory: CardId[] = [];
 type TeachingEventKind = 'threatSummary' | 'recolor' | 'info';
 type TeachingEvent = { id: number; kind: TeachingEventKind; label: string; detail?: string; at?: string };
 let teachingEvents: TeachingEvent[] = [];
@@ -318,6 +337,10 @@ function clearHint(): void {
   activeHintKey = null;
   hintLoading = false;
   if (widgetStatus.type === 'hint') widgetStatus = { type: 'default', text: '' };
+}
+
+function clearDdErrorVisual(): void {
+  ddErrorVisual = null;
 }
 
 function clearNarration(): void {
@@ -594,6 +617,47 @@ function classifyHintForCurrentPosition(): HintState | null {
   }
 }
 
+function classifyDdErrorForUserPlay(
+  play: Play,
+  playedCardIds: string[]
+): { ddError: boolean; goodCards: CardId[] } | undefined {
+  const legal = legalPlays(state).filter((p) => p.seat === state.turn);
+  if (legal.length === 0) return undefined;
+  const chosen = toCardId(play.suit, play.rank) as CardId;
+  const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
+  try {
+    const dds = queryDdsNextPlays({
+      openingLeader: currentProblem.leader,
+      initialHands: currentProblem.hands,
+      contract: state.contract,
+      playedCardIds
+    });
+    if (!dds.ok) return undefined;
+    const scoreByCard = new Map<CardId, number>();
+    for (const candidate of dds.result.plays ?? []) {
+      const cardId = normalizeDdsCardId(candidate.suit, candidate.rank);
+      if (!cardId || typeof candidate.score !== 'number') continue;
+      scoreByCard.set(cardId, candidate.score);
+    }
+    const scoredLegal = legalCardIds.filter((card) => scoreByCard.has(card));
+    if (scoredLegal.length === 0) return undefined;
+    const maxScore = Math.max(...scoredLegal.map((card) => scoreByCard.get(card) ?? Number.NEGATIVE_INFINITY));
+    const safeCards = legalCardIds.filter((card) => (scoreByCard.get(card) ?? Number.NEGATIVE_INFINITY) === maxScore);
+    const chosenScore = scoreByCard.get(chosen);
+    if (typeof chosenScore !== 'number') return undefined;
+    return {
+      ddError: chosenScore < maxScore,
+      goodCards: safeCards.filter((card) => card !== chosen)
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function encodeUserHistoryForUrl(history: CardId[]): string {
+  return history.map((card) => `${card[0]}${card.slice(1) === 'T' ? '10' : card.slice(1)}`).join('.');
+}
+
 function requestHint(): void {
   hintDiag('requestHint start');
   const reqSeq = ++hintRequestSeq;
@@ -745,6 +809,12 @@ function nextSeat(seat: Seat): Seat {
   return seatOrder[(idx + 1) % seatOrder.length];
 }
 
+function canonicalRunStatusText(status: typeof runStatus): string {
+  if (status === 'success') return 'Success - Goal Achieved';
+  if (status === 'failure') return 'Not enough tricks - try again';
+  return 'Run in Progress';
+}
+
 function withDdSource(problem: ProblemWithThreats): ProblemWithThreats {
   const policies: Partial<Record<Seat, Policy>> = {};
   for (const seat of seatOrder) {
@@ -866,7 +936,9 @@ function makeSnapshot(play: Play): GameSnapshot {
     teachingEvents: teachingEvents.map((e) => ({ ...e })),
     nextTeachingEventId,
     ddsPlayHistory: [...ddsPlayHistory],
-    ddsTeachingSummaries: [...ddsTeachingSummaries]
+    ddsTeachingSummaries: [...ddsTeachingSummaries],
+    ddErrorVisual: ddErrorVisual ? { ...ddErrorVisual, goodCards: [...ddErrorVisual.goodCards] } : null,
+    userPlayHistory: [...userPlayHistory]
   };
 }
 
@@ -892,6 +964,8 @@ function restoreSnapshot(snapshot: GameSnapshot): void {
   nextTeachingEventId = snapshot.nextTeachingEventId;
   ddsPlayHistory = [...snapshot.ddsPlayHistory];
   ddsTeachingSummaries = [...snapshot.ddsTeachingSummaries];
+  ddErrorVisual = snapshot.ddErrorVisual ? { ...snapshot.ddErrorVisual, goodCards: [...snapshot.ddErrorVisual.goodCards] } : null;
+  userPlayHistory = [...snapshot.userPlayHistory];
 }
 
 function totalCards(s: State, seat: Seat): number {
@@ -2106,8 +2180,10 @@ function resetGame(seed: number, reason: string): void {
   currentRunTranscript = [];
   currentRunUserPlays = [];
   currentRunEqTokens = [];
+  userPlayHistory = [];
   ddsPlayHistory = [];
   ddsTeachingSummaries = [];
+  clearDdErrorVisual();
   clearWidgetNarrationFeed();
   clearHint();
   clearTeachingEvents();
@@ -2144,8 +2220,10 @@ function selectProblem(problemId: string): void {
   currentRunTranscript = [];
   currentRunUserPlays = [];
   currentRunEqTokens = [];
+  userPlayHistory = [];
   ddsPlayHistory = [];
   ddsTeachingSummaries = [];
+  clearDdErrorVisual();
   clearWidgetNarrationFeed();
   clearHint();
   clearTeachingEvents();
@@ -2175,6 +2253,9 @@ function backupLastUserPlay(): void {
 }
 
 function runTurn(play: Play): void {
+  if (ddErrorVisual && !trickFrozen && state.turn === ddErrorVisual.seat) {
+    clearDdErrorVisual();
+  }
   clearSingletonAutoplayTimer();
   clearHint();
   if (state.replay.enabled && state.replay.transcript && (play.seat === 'N' || play.seat === 'S')) {
@@ -2202,6 +2283,7 @@ function runTurn(play: Play): void {
     const cls = getImmutableUserEqClass(play.seat, playId);
     currentRunUserPlays.push({ index: currentRunUserPlays.length, seat: play.seat, playClassId: cls });
     currentRunEqTokens.push(cls);
+    userPlayHistory.push(playId);
   }
   undoStack.push(makeSnapshot(play));
   if (trickFrozen) {
@@ -2211,8 +2293,23 @@ function runTurn(play: Play): void {
   const before = state;
   const ddsHistoryForTurn = [...ddsPlayHistory];
   const backstopHistoryForTurn = [...ddsHistoryForTurn, `${play.suit}${play.rank}`];
+  const userDdError = (play.seat === 'N' || play.seat === 'S')
+    ? classifyDdErrorForUserPlay(play, ddsHistoryForTurn)
+    : undefined;
+  if (play.seat === 'N' || play.seat === 'S') {
+    if (userDdError?.ddError) {
+      ddErrorVisual = {
+        seat: play.seat,
+        goodCards: [...userDdError.goodCards],
+        badCard: toCardId(play.suit, play.rank) as CardId
+      };
+    } else {
+      clearDdErrorVisual();
+    }
+  }
   const result = apply(state, play, {
     eventCollector: semanticCollector,
+    userDdError: userDdError?.ddError,
     autoplayBackstop: buildBrowserDdsBackstop(backstopHistoryForTurn)
   });
   state = result.state;
@@ -2447,6 +2544,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   clearSingletonAutoplayTimer();
   clearWidgetNarrationFeed();
   clearHint();
+  clearDdErrorVisual();
   if (!lastSuccessfulTranscript) {
     playAgainAvailable = false;
     playAgainUnavailableReason = 'exhausted-all-variations';
@@ -2558,6 +2656,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   currentRunTranscript = [];
   currentRunUserPlays = [];
   currentRunEqTokens = [];
+  userPlayHistory = [];
   clearTeachingEvents();
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -2596,7 +2695,8 @@ function renderSuitRow(
   suit: Suit,
   legalSet: Set<string>,
   canAct: boolean,
-  hintBestSet: Set<CardId>
+  hintBestSet: Set<CardId>,
+  ddErrorGoodSet: Set<CardId>
 ): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'suit-row';
@@ -2630,6 +2730,7 @@ function renderSuitRow(
         rankBtn.className = 'rank-text legal';
         const cardId = toCardId(suit, rank) as CardId;
         if (hintBestSet.has(cardId)) rankBtn.classList.add('hint-best');
+        if (ddErrorGoodSet.has(cardId)) rankBtn.classList.add('dd-error-good');
         if ((pulseUntilByCardKey.get(cardPulseKey(seat, cardId)) ?? 0) > Date.now()) {
           rankBtn.classList.add('card-pulse');
         }
@@ -2639,10 +2740,12 @@ function renderSuitRow(
       } else {
         const rankEl = document.createElement('span');
         rankEl.className = 'rank-text muted';
-        if ((pulseUntilByCardKey.get(cardPulseKey(seat, toCardId(suit, rank) as CardId)) ?? 0) > Date.now()) {
+        const cardId = toCardId(suit, rank) as CardId;
+        if (ddErrorGoodSet.has(cardId)) rankEl.classList.add('dd-error-good');
+        if ((pulseUntilByCardKey.get(cardPulseKey(seat, cardId)) ?? 0) > Date.now()) {
           rankEl.classList.add('card-pulse');
         }
-        appendRankContent(rankEl, rank, rankColorClass(toCardId(suit, rank) as CardId, view), isEquivalent);
+        appendRankContent(rankEl, rank, rankColorClass(cardId, view), isEquivalent);
         cards.appendChild(rankEl);
       }
     }
@@ -2675,6 +2778,7 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   const legalSet = new Set(legal.map((p) => `${p.suit}${p.rank}`));
   const canAct = !trickFrozen && view.phase !== 'end' && view.userControls.includes(seat) && active;
   const hintBestSet = new Set<CardId>();
+  const ddErrorGoodSet = new Set<CardId>();
 
   if (trickFrozen && canLeadDismiss && state.userControls.includes(state.turn) && seat === state.turn) {
     const leadLegal = legalPlays(state);
@@ -2690,9 +2794,12 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   if (activeHint && effectiveCanAct && seat === state.turn) {
     hintDiag(`highlight sets best=${hintBestSet.size} bad=0`);
   }
+  if (ddErrorVisual && ddErrorVisual.seat === seat) {
+    for (const card of ddErrorVisual.goodCards) ddErrorGoodSet.add(card);
+  }
 
   for (const suit of suitOrder) {
-    card.appendChild(renderSuitRow(view, seat, suit, legalSet, effectiveCanAct, hintBestSet));
+    card.appendChild(renderSuitRow(view, seat, suit, legalSet, effectiveCanAct, hintBestSet, ddErrorGoodSet));
   }
 
   return card;
@@ -2740,12 +2847,14 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
     if (play) {
       const text = document.createElement('span');
       text.className = 'played-text';
+      const cardId = toCardId(play.suit, play.rank) as CardId;
+      if (ddErrorVisual && ddErrorVisual.badCard === cardId) text.classList.add('dd-error-bad');
       const suitEl = document.createElement('span');
       suitEl.className = `played-suit suit-${play.suit}`;
       suitEl.textContent = suitSymbol[play.suit];
       const rankEl = document.createElement('span');
       rankEl.className = 'played-rank';
-      appendRankContent(rankEl, play.rank, rankColorClass(toCardId(play.suit, play.rank) as CardId, view));
+      appendRankContent(rankEl, play.rank, rankColorClass(cardId, view));
       text.append(suitEl, rankEl);
       slot.appendChild(text);
     }
@@ -2894,7 +3003,11 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   const outcome = document.createElement('div');
   outcome.className = `outcome-module ${runStatus === 'success' ? 'ok' : runStatus === 'failure' ? 'fail' : 'neutral'}`;
   const noPlayYet = ddsPlayHistory.length === 0 && view.tricksWon.NS === 0 && view.tricksWon.EW === 0 && view.trick.length === 0;
-  if (activeHint) {
+  const canonicalStatus = canonicalRunStatusText(runStatus);
+  const terminalCanonical = runStatus === 'success' || runStatus === 'failure';
+  if (displayMode === 'widget' && terminalCanonical) {
+    outcome.textContent = canonicalStatus;
+  } else if (activeHint) {
     outcome.classList.add('hint-active');
     const prefix = document.createElement('span');
     prefix.className = 'hint-prefix';
@@ -2925,36 +3038,22 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     if (widgetStatus.type === 'hint') {
       widgetStatus = { type: 'default', text: '' };
     }
-    if (runStatus === 'success' || runStatus === 'failure') {
-      const earlyGuaranteedFailure = runStatus === 'failure' && view.goalStatus === 'assuredFailure' && !handsAreEmpty(view);
-      outcome.textContent =
-        runStatus === 'success'
-          ? 'Success - contract achieved.'
-          : (earlyGuaranteedFailure ? 'Error - line fails double-dummy.' : 'Error - line fails double-dummy.');
-    } else {
-      if (narrate && widgetNarrationLatest?.text) {
-        widgetStatus = { type: 'narration', text: widgetNarrationLatest.text };
-      } else if (!narrate && widgetStatus.type === 'narration') {
-        widgetStatus = { type: 'default', text: '' };
-      }
-      if (widgetStatus.type === 'narration' && widgetStatus.text) {
-        outcome.textContent = widgetStatus.text;
-      } else if (noPlayYet) {
-        const strain = view.contract.strain;
-        const takeN = view.goal.type === 'minTricks' ? view.goal.n : '-';
-        outcome.textContent = alwaysHint ? `${strain} take ${takeN} · Press 💡` : `${strain} take ${takeN}`;
-      } else {
-        outcome.textContent = `NS ${view.tricksWon.NS}  EW ${view.tricksWon.EW}`;
-      }
+    if (narrate && widgetNarrationLatest?.text) {
+      widgetStatus = { type: 'narration', text: widgetNarrationLatest.text };
+    } else if (!narrate && widgetStatus.type === 'narration') {
+      widgetStatus = { type: 'default', text: '' };
     }
-  } else if (runStatus === 'success' || runStatus === 'failure') {
-    const earlyGuaranteedFailure = runStatus === 'failure' && view.goalStatus === 'assuredFailure' && !handsAreEmpty(view);
-    outcome.textContent =
-      runStatus === 'success'
-        ? 'Success - goal achieved'
-        : (earlyGuaranteedFailure ? 'Goal already impossible - run stopped early' : 'Not enough tricks - try again');
+    if (widgetStatus.type === 'narration' && widgetStatus.text) {
+      outcome.textContent = widgetStatus.text;
+    } else if (noPlayYet) {
+      const strain = view.contract.strain;
+      const takeN = view.goal.type === 'minTricks' ? view.goal.n : '-';
+      outcome.textContent = alwaysHint ? `${strain} take ${takeN} · Press 💡` : `${strain} take ${takeN}`;
+    } else {
+      outcome.textContent = canonicalStatus;
+    }
   } else {
-    outcome.textContent = 'Run in progress';
+    outcome.textContent = canonicalStatus;
   }
   section.appendChild(outcome);
 
@@ -3011,6 +3110,8 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     const u = new URL(window.location.href);
     u.searchParams.set('mode', 'analysis');
     u.searchParams.set('problem', currentProblemId);
+    if (userPlayHistory.length > 0) u.searchParams.set('history', encodeUserHistoryForUrl(userPlayHistory));
+    else u.searchParams.delete('history');
     pop.href = u.toString();
     pop.target = '_blank';
     pop.rel = 'noopener noreferrer';
@@ -3203,6 +3304,9 @@ function render(): void {
   renderingNow = true;
   hintDiag(`render with activeHint=${activeHint ? 'yes' : 'no'}`);
   syncWidgetNarrationFeedFromTeaching();
+  if (ddErrorVisual && !trickFrozen && state.turn === ddErrorVisual.seat) {
+    clearDdErrorVisual();
+  }
   const view = currentViewState();
   const isWidgetReadingMode = widgetReadingMode();
 
@@ -3256,6 +3360,41 @@ function render(): void {
   syncAlwaysHint();
 }
 
+function replayInitialUserHistoryIfPresent(): void {
+  if (displayMode !== 'analysis' || initialUserHistoryFromUrl.length === 0) return;
+  const applied: CardId[] = [];
+  for (const cardId of initialUserHistoryFromUrl) {
+    if (state.phase === 'end') break;
+    if (!state.userControls.includes(state.turn)) break;
+    const legal = legalPlays(state).filter((p) => p.seat === state.turn);
+    const play = legal.find((p) => (toCardId(p.suit, p.rank) as CardId) === cardId);
+    if (!play) break;
+    undoStack.push(makeSnapshot(play));
+    const ddsHistoryForTurn = [...ddsPlayHistory];
+    const backstopHistoryForTurn = [...ddsHistoryForTurn, `${play.suit}${play.rank}`];
+    const userDdError = classifyDdErrorForUserPlay(play, ddsHistoryForTurn);
+    const result = apply(state, play, {
+      eventCollector: semanticCollector,
+      userDdError: userDdError?.ddError,
+      autoplayBackstop: buildBrowserDdsBackstop(backstopHistoryForTurn)
+    });
+    state = result.state;
+    ddsPlayHistory = ddsHistoryForTurn;
+    applied.push(cardId);
+    const complete = result.events.find((e) => e.type === 'handComplete');
+    if (complete?.type === 'handComplete') {
+      runStatus = complete.success ? 'success' : 'failure';
+      break;
+    }
+  }
+  userPlayHistory = applied;
+  clearDdErrorVisual();
+  threatCtx = (state.threat as ThreatContext | null) ?? null;
+  threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
+  refreshThreatModel(currentProblemId, false);
+}
+
 refreshThreatModel(currentProblemId, false);
+replayInitialUserHistoryIfPresent();
 warmDdsRuntime();
 render();

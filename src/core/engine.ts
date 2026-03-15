@@ -251,6 +251,7 @@ type AutoChoice = {
 
 type ApplyOptions = {
   eventCollector?: SemanticEventCollector;
+  userDdError?: boolean;
   autoplayBackstop?: (input: {
     state: State;
     policy: Policy;
@@ -862,7 +863,7 @@ export function apply(state: State, play: Play, options?: ApplyOptions): { state
     card: toCardId(play.suit, play.rank) as CardId,
     suit: play.suit,
     rank: play.rank,
-    details: { source: 'user' }
+    details: { source: 'user', ddError: options?.userDdError === true }
   });
   events.push(...applyOnePlay(next, play, collector, 'played'));
 

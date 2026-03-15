@@ -146,7 +146,16 @@ function rewriteAsCashesPromoted(summary: string, card: string): string {
   const parsed = parseSummaryBrackets(summary);
   const actor = parsed.body.split(' ')[0] ?? 'Player';
   const shown = prettyCard(card);
-  const body = `${actor} cashes promoted ${shown}.`;
+  let body = parsed.body;
+  // Promoted wording depends on play context:
+  // - lead -> "cashes promoted"
+  // - follow -> "wins promoted"
+  // - discard remains a discard (no promotion verb upgrade)
+  if (parsed.body.includes(' leads ') || parsed.body.includes(' cashes ')) {
+    body = `${actor} cashes promoted ${shown}.`;
+  } else if (parsed.body.includes(' follows with ') || parsed.body.includes(' wins ')) {
+    body = `${actor} wins promoted ${shown}.`;
+  }
   if (parsed.bracket.length === 0) return body;
   return `${body} [${parsed.bracket.join('; ')}]`;
 }
@@ -209,10 +218,11 @@ export class TeachingReducer implements SemanticReducer {
       if (fact.type === 'play' && fact.seat && fact.card) {
         const actor = seatName(fact.seat);
         const shownCard = cardWithRole(fact.card, fact.role);
-        const summary =
+        let summary =
           fact.source === 'user'
             ? `${actor} ${summarizePlayVerb(fact, prettyCard(fact.card), prettyCard(fact.card))}`
             : `${actor} ${summarizePlayVerb(fact, shownCard, prettyCard(fact.card))}`;
+        if (fact.source === 'user' && fact.ddError) summary = `${summary} DD Error.`;
         this.entries.push({
           seq: fact.seq,
           seat: fact.seat,

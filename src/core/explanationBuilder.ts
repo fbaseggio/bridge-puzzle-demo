@@ -16,6 +16,7 @@ export interface TeachingFact {
   legalCount?: number;
   trickPosition?: number;
   followsSuit?: boolean;
+  ddError?: boolean;
 }
 
 type DecisionPending = {
@@ -25,6 +26,7 @@ type DecisionPending = {
   bucketCards?: CardId[];
   policyClassByCard?: Record<string, string>;
   legalCount?: number;
+  ddError?: boolean;
   ddPolicy?: {
     baseCandidates?: CardId[];
     allowedCandidates?: CardId[];
@@ -92,6 +94,7 @@ export class ExplanationBuilder {
       const startInfo = this.decisionStartBySeat.get(event.seat);
       const bucket = typeof details.chosenBucket === 'string' ? details.chosenBucket : undefined;
       const source = typeof details.source === 'string' ? details.source : undefined;
+      const ddError = details.ddError === true;
       const ddPolicyRaw = details.ddPolicy;
       const ddPolicy =
         ddPolicyRaw && typeof ddPolicyRaw === 'object'
@@ -111,6 +114,7 @@ export class ExplanationBuilder {
         bucketCards: evalInfo?.bucketCards,
         policyClassByCard: evalInfo?.policyClassByCard,
         legalCount: startInfo?.legalCount,
+        ddError,
         ddPolicy
       });
       this.decisionStartBySeat.delete(event.seat);
@@ -139,6 +143,7 @@ export class ExplanationBuilder {
           bucket: pending?.chosenBucket,
           source: pending?.source,
           legalCount: pending?.legalCount,
+          ddError: pending?.ddError,
           inevitablyWinningThisTrick,
           trickPosition: priorTrickLength + 1,
           followsSuit
