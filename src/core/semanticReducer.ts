@@ -76,8 +76,8 @@ function summarizePlayVerb(fact: TeachingFact, cardText: string, plainCardText: 
     return iWTT ? `cashes ${cardText}.` : `leads ${cardText}.`;
   }
   if (position >= 2 && position <= 4) {
-    if (iWTT) return `wins with ${cardText}.`;
-    if (fact.followsSuit === true) return `follows suit with ${cardText}.`;
+    if (iWTT) return `wins ${cardText}.`;
+    if (fact.followsSuit === true) return `follows with ${cardText}.`;
     if (fact.followsSuit === false) return `discards ${cardText}.`;
   }
   const bucket = fact.bucket;
@@ -137,7 +137,7 @@ function rewriteAsPlayedThreat(summary: string, card: string): string {
   else if (parsed.body.includes(' leads ')) body = `${actor} leads ${shown} threat.`;
   else if (parsed.body.includes(' cashes promoted ')) body = parsed.body;
   else if (parsed.body.includes(' cashes ')) body = `${actor} cashes ${shown} threat.`;
-  else if (parsed.body.includes(' wins with ')) body = `${actor} wins with ${shown} threat.`;
+  else if (parsed.body.includes(' wins ')) body = `${actor} wins ${shown} threat.`;
   if (parsed.bracket.length === 0) return body;
   return `${body} [${parsed.bracket.join('; ')}]`;
 }

@@ -129,19 +129,24 @@ let showGuides = false;
 let showDebugSection = true;
 let teachingMode = true;
 let autoplaySingletons = false;
-let alwaysHint = false;
+let alwaysHint = displayMode === 'widget';
 let cardColoringEnabled = true;
-let narrate = false;
+let narrate = displayMode === 'widget';
+let showWidgetTeachingPane = false;
 let advancedPanelOpen = false;
 let ddsPlayHistory: string[] = [];
 let ddsTeachingSummaries: string[] = [];
 let activeHint: HintState | null = null;
 let activeHintKey: string | null = null;
+let hintLoading = false;
+let hintRequestSeq = 0;
 type WidgetStatusType = 'hint' | 'narration' | 'default';
 type WidgetStatus = { type: WidgetStatusType; text: string };
 let widgetStatus: WidgetStatus = { type: 'default', text: '' };
-type NarrationBubble = { text: string; seat: Seat | null; seq: number };
-let narrationBubble: NarrationBubble | null = null;
+type WidgetNarrationEntry = { text: string; seat: Seat | null; seq: number };
+let widgetNarrationEntries: WidgetNarrationEntry[] = [];
+let widgetNarrationLatest: WidgetNarrationEntry | null = null;
+let widgetNarrationBySeat: Partial<Record<Seat, WidgetNarrationEntry>> = {};
 let lastNarratedSeq = 0;
 let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
@@ -311,12 +316,28 @@ function warmDdDataset(problemId: string): void {
 function clearHint(): void {
   activeHint = null;
   activeHintKey = null;
+  hintLoading = false;
   if (widgetStatus.type === 'hint') widgetStatus = { type: 'default', text: '' };
 }
 
 function clearNarration(): void {
   if (widgetStatus.type === 'narration') widgetStatus = { type: 'default', text: '' };
-  narrationBubble = null;
+  widgetNarrationLatest = null;
+  widgetNarrationBySeat = {};
+}
+
+function clearWidgetNarrationFeed(): void {
+  widgetNarrationEntries = [];
+  widgetNarrationLatest = null;
+  widgetNarrationBySeat = {};
+  lastNarratedSeq = 0;
+  if (widgetStatus.type === 'narration') widgetStatus = { type: 'default', text: '' };
+}
+
+function resetSemanticStreams(): void {
+  semanticCollector.clear();
+  rawSemanticReducer.reset();
+  teachingReducer.reset();
 }
 
 function summarizeForNarration(summary: string): string {
@@ -328,20 +349,27 @@ function summarizeForNarration(summary: string): string {
   });
 }
 
-function scheduleNarrationFromTeaching(): void {
-  if (!narrate || displayMode !== 'widget') return;
+function syncWidgetNarrationFeedFromTeaching(): void {
+  if (displayMode !== 'widget') return;
   const snapshot = teachingReducer.snapshot() as {
     entries: Array<{ seq: number; seat: string; summary: string }>;
   };
-  const latest = snapshot.entries?.[snapshot.entries.length - 1];
-  if (!latest || latest.seq <= lastNarratedSeq) return;
-  const line = summarizeForNarration(latest.summary ?? '');
-  if (!line) return;
-  lastNarratedSeq = latest.seq;
-  const seat = seatOrder.includes(latest.seat as Seat) ? (latest.seat as Seat) : null;
-  const narr: NarrationBubble = { text: line, seat, seq: latest.seq };
-  widgetStatus = { type: 'narration', text: line };
-  narrationBubble = narr;
+  const entries = snapshot.entries ?? [];
+  for (const entry of entries) {
+    if (entry.seq <= lastNarratedSeq) continue;
+    const line = summarizeForNarration(entry.summary ?? '');
+    if (!line) continue;
+    const seat = seatOrder.includes(entry.seat as Seat) ? (entry.seat as Seat) : null;
+    const narr: WidgetNarrationEntry = { text: line, seat, seq: entry.seq };
+    widgetNarrationEntries.push(narr);
+    if (widgetNarrationEntries.length > 500) widgetNarrationEntries = widgetNarrationEntries.slice(-500);
+    widgetNarrationLatest = narr;
+    if (seat) widgetNarrationBySeat[seat] = narr;
+    lastNarratedSeq = entry.seq;
+  }
+  if (narrate && !activeHint && widgetNarrationLatest) {
+    widgetStatus = { type: 'narration', text: widgetNarrationLatest.text };
+  }
 }
 
 function widgetReadingMode(): boolean {
@@ -568,29 +596,39 @@ function classifyHintForCurrentPosition(): HintState | null {
 
 function requestHint(): void {
   hintDiag('requestHint start');
-  const key = hintPositionKey();
-  const hint = classifyHintForCurrentPosition();
-  if (!hint) {
-    hintDiag('classify null');
-    activeHint = {
-      bestCards: [],
-      badCards: [],
-      textLine: 'BEST: (hint available on your turn)'
-    };
-    hintDiag('activeHint set (fallback)');
-    render();
-    return;
-  }
-  hintDiag(`classify ok BEST=${hint.bestCards.join(' ') || '-'} BAD=${hint.badCards.join(' ') || '-'}`);
-  activeHint = hint;
-  activeHintKey = key;
-  widgetStatus = { type: 'hint', text: hint.textLine };
-  hintDiag(`activeHint set best=${hint.bestCards.join(' ')} bad=${hint.badCards.join(' ') || '-'}`);
+  const reqSeq = ++hintRequestSeq;
+  hintLoading = true;
   render();
+  setTimeout(() => {
+    if (reqSeq !== hintRequestSeq) return;
+    const key = hintPositionKey();
+    const hint = classifyHintForCurrentPosition();
+    hintLoading = false;
+    if (!hint) {
+      hintDiag('classify null');
+      activeHint = {
+        bestCards: [],
+        badCards: [],
+        textLine: 'BEST: (hint available on your turn)'
+      };
+      widgetStatus = { type: 'hint', text: activeHint.textLine };
+      hintDiag('activeHint set (fallback)');
+      render();
+      return;
+    }
+    hintDiag(`classify ok BEST=${hint.bestCards.join(' ') || '-'} BAD=${hint.badCards.join(' ') || '-'}`);
+    activeHint = hint;
+    activeHintKey = key;
+    widgetStatus = { type: 'hint', text: hint.textLine };
+    hintDiag(`activeHint set best=${hint.bestCards.join(' ')} bad=${hint.badCards.join(' ') || '-'}`);
+    render();
+  }, 0);
 }
 
 function syncAlwaysHint(): void {
   if (!alwaysHint) return;
+  const noPlayYet = ddsPlayHistory.length === 0 && state.trick.length === 0 && !trickFrozen;
+  if (noPlayYet) return;
   const key = hintPositionKey();
   if (!key) {
     if (activeHint) {
@@ -1880,6 +1918,8 @@ function unfreezeTrick(flushDeferredLogs: boolean): void {
   lastCompletedTrick = null;
   frozenViewState = null;
   canLeadDismiss = false;
+  // Clear active trick-scoped narration surfaces when the trick is dismissed.
+  clearNarration();
   if (flushDeferredLogs && deferredLogLines.length > 0) {
     logs = [...logs, ...deferredLogLines].slice(-500);
     deferredLogLines = [];
@@ -2051,6 +2091,7 @@ function resetGame(seed: number, reason: string): void {
   }
   currentSeed = nextSeed;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+  resetSemanticStreams();
   teachingReducer.setTrumpSuit(state.trumpSuit);
   warmDdDataset(currentProblemId);
   logs = [...logs, `${reason} seed=${currentSeed}`].slice(-500);
@@ -2067,8 +2108,7 @@ function resetGame(seed: number, reason: string): void {
   currentRunEqTokens = [];
   ddsPlayHistory = [];
   ddsTeachingSummaries = [];
-  clearNarration();
-  lastNarratedSeq = 0;
+  clearWidgetNarrationFeed();
   clearHint();
   clearTeachingEvents();
   rebuildUserEqClassMapping(state);
@@ -2090,6 +2130,7 @@ function selectProblem(problemId: string): void {
   currentProblemId = entry.id;
   currentSeed = currentProblem.rngSeed >>> 0;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+  resetSemanticStreams();
   teachingReducer.setTrumpSuit(state.trumpSuit);
   warmDdDataset(currentProblemId);
   runStatus = 'running';
@@ -2105,8 +2146,7 @@ function selectProblem(problemId: string): void {
   currentRunEqTokens = [];
   ddsPlayHistory = [];
   ddsTeachingSummaries = [];
-  clearNarration();
-  lastNarratedSeq = 0;
+  clearWidgetNarrationFeed();
   clearHint();
   clearTeachingEvents();
   rebuildUserEqClassMapping(state);
@@ -2126,7 +2166,6 @@ function backupLastUserPlay(): void {
   clearSingletonAutoplayTimer();
   const snapshot = undoStack.pop();
   if (!snapshot) return;
-  clearNarration();
   clearHint();
   restoreSnapshot(snapshot);
   clearPulseTimer();
@@ -2137,7 +2176,6 @@ function backupLastUserPlay(): void {
 
 function runTurn(play: Play): void {
   clearSingletonAutoplayTimer();
-  clearNarration();
   clearHint();
   if (state.replay.enabled && state.replay.transcript && (play.seat === 'N' || play.seat === 'S')) {
     const playId = toCardId(play.suit, play.rank) as CardId;
@@ -2407,7 +2445,7 @@ function renderDebugSection(): HTMLElement {
 
 function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   clearSingletonAutoplayTimer();
-  clearNarration();
+  clearWidgetNarrationFeed();
   clearHint();
   if (!lastSuccessfulTranscript) {
     playAgainAvailable = false;
@@ -2452,6 +2490,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
 
   const seed = lastSuccessfulTranscript?.seed ?? currentSeed;
   state = init({ ...currentProblem, rngSeed: seed });
+  resetSemanticStreams();
   teachingReducer.setTrumpSuit(state.trumpSuit);
   let divergenceIndex: number | null = null;
   let forcedClass: string | null = null;
@@ -2547,7 +2586,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
     ''
   ].slice(-500);
   refreshThreatModel(currentProblemId, false);
-  lastNarratedSeq = 0;
+  clearWidgetNarrationFeed();
   render();
 }
 
@@ -2622,6 +2661,15 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   header.className = 'hand-head';
   header.innerHTML = `<strong class="seat-name${active ? ' active-seat-name' : ''}">${seatName[seat]}</strong>`;
   card.appendChild(header);
+  if (displayMode === 'widget' && narrate) {
+    const entry = widgetNarrationBySeat[seat];
+    if (entry?.text) {
+      const bubble = document.createElement('aside');
+      bubble.className = `narration-bubble seat-${seat}${widgetNarrationLatest?.seq === entry.seq ? ' is-latest' : ' is-stale'}`;
+      bubble.textContent = entry.text;
+      card.appendChild(bubble);
+    }
+  }
 
   const legal = !trickFrozen && active ? legalPlays(view) : [];
   const legalSet = new Set(legal.map((p) => `${p.suit}${p.rank}`));
@@ -2648,6 +2696,25 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   }
 
   return card;
+}
+
+function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
+  return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+}
+
+function applyNarrationBubbleCollisionAvoidance(tableCanvas: HTMLElement): void {
+  if (displayMode !== 'widget' || !narrate) return;
+  const trick = tableCanvas.querySelector<HTMLElement>('.trick-table');
+  if (!trick) return;
+  const trickRect = trick.getBoundingClientRect();
+  const bubbles = tableCanvas.querySelectorAll<HTMLElement>('.narration-bubble');
+  for (const bubble of bubbles) {
+    bubble.classList.remove('shift-out');
+    const bubbleRect = bubble.getBoundingClientRect();
+    if (rectsOverlap(bubbleRect, trickRect)) {
+      bubble.classList.add('shift-out');
+    }
+  }
 }
 
 function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
@@ -2686,15 +2753,6 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
   }
 
   return table;
-}
-
-function renderNarrationBubble(): HTMLElement | null {
-  if (displayMode !== 'widget' || !narrate || !narrationBubble?.text) return null;
-  const bubble = document.createElement('aside');
-  const anchor = narrationBubble.seat ? ` seat-${narrationBubble.seat}` : ' seat-neutral';
-  bubble.className = `narration-bubble${anchor}`;
-  bubble.textContent = narrationBubble.text;
-  return bubble;
 }
 
 function renderStatusPanel(view: State): HTMLElement {
@@ -2859,19 +2917,35 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     }
     hintDiag(`message area using activeHint lines=${activeHint.textLine}`);
   } else if (displayMode === 'widget') {
-    if (activeHint) {
-      widgetStatus = { type: 'hint', text: activeHint.textLine };
-    } else if (widgetStatus.type === 'hint') {
+    if (hintLoading) {
+      outcome.textContent = 'Calculating hint…';
+      section.appendChild(outcome);
+      return section;
+    }
+    if (widgetStatus.type === 'hint') {
       widgetStatus = { type: 'default', text: '' };
     }
-    if (widgetStatus.type === 'narration' && widgetStatus.text) {
-      outcome.textContent = widgetStatus.text;
-    } else if (noPlayYet) {
-      const strain = view.contract.strain;
-      const takeN = view.goal.type === 'minTricks' ? view.goal.n : '-';
-      outcome.textContent = `${strain} take ${takeN}`;
+    if (runStatus === 'success' || runStatus === 'failure') {
+      const earlyGuaranteedFailure = runStatus === 'failure' && view.goalStatus === 'assuredFailure' && !handsAreEmpty(view);
+      outcome.textContent =
+        runStatus === 'success'
+          ? 'Success - contract achieved.'
+          : (earlyGuaranteedFailure ? 'Error - line fails double-dummy.' : 'Error - line fails double-dummy.');
     } else {
-      outcome.textContent = `NS ${view.tricksWon.NS}  EW ${view.tricksWon.EW}`;
+      if (narrate && widgetNarrationLatest?.text) {
+        widgetStatus = { type: 'narration', text: widgetNarrationLatest.text };
+      } else if (!narrate && widgetStatus.type === 'narration') {
+        widgetStatus = { type: 'default', text: '' };
+      }
+      if (widgetStatus.type === 'narration' && widgetStatus.text) {
+        outcome.textContent = widgetStatus.text;
+      } else if (noPlayYet) {
+        const strain = view.contract.strain;
+        const takeN = view.goal.type === 'minTricks' ? view.goal.n : '-';
+        outcome.textContent = alwaysHint ? `${strain} take ${takeN} · Press 💡` : `${strain} take ${takeN}`;
+      } else {
+        outcome.textContent = `NS ${view.tricksWon.NS}  EW ${view.tricksWon.EW}`;
+      }
     }
   } else if (runStatus === 'success' || runStatus === 'failure') {
     const earlyGuaranteedFailure = runStatus === 'failure' && view.goalStatus === 'assuredFailure' && !handsAreEmpty(view);
@@ -2898,12 +2972,15 @@ function renderBoardNavigationArea(view: State): HTMLElement {
 
   const undoBtn = document.createElement('button');
   undoBtn.type = 'button';
-  undoBtn.textContent = displayMode === 'widget' ? '⟲' : 'Undo';
+  undoBtn.textContent = displayMode === 'widget' ? '↩' : 'Undo';
   undoBtn.title = 'Undo';
   undoBtn.setAttribute('aria-label', 'Undo');
-  if (displayMode === 'widget') undoBtn.classList.add('icon-btn');
-  undoBtn.disabled = undoStack.length === 0;
-  undoBtn.onclick = () => backupLastUserPlay();
+  if (displayMode === 'widget') undoBtn.classList.add('icon-btn', 'undo-btn');
+  if (displayMode !== 'widget') undoBtn.disabled = undoStack.length === 0;
+  undoBtn.onclick = () => {
+    if (undoStack.length === 0) return;
+    backupLastUserPlay();
+  };
   transport.appendChild(undoBtn);
 
   if (displayMode === 'analysis') {
@@ -2956,10 +3033,11 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     const moreWrap = document.createElement('div');
     moreWrap.className = 'advanced-wrap';
     moreWrap.appendChild(moreBtn);
+    transport.appendChild(moreWrap);
 
     if (advancedPanelOpen) {
       const panel = document.createElement('section');
-      panel.className = 'advanced-panel';
+      panel.className = 'advanced-panel widget-advanced-panel';
 
       const mkToggle = (label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement => {
         const row = document.createElement('label');
@@ -3000,16 +3078,20 @@ function renderBoardNavigationArea(view: State): HTMLElement {
           if (!checked) {
             clearNarration();
           } else {
-            scheduleNarrationFromTeaching();
+            syncWidgetNarrationFeedFromTeaching();
           }
           render();
         })
       );
+      panel.appendChild(
+        mkToggle('Show teaching pane', showWidgetTeachingPane, (checked) => {
+          showWidgetTeachingPane = checked;
+          render();
+        })
+      );
 
-      moreWrap.appendChild(panel);
+      section.appendChild(panel);
     }
-
-    transport.appendChild(moreWrap);
   }
 
   section.appendChild(transport);
@@ -3029,20 +3111,24 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
   const snapshot = teachingReducer.snapshot() as {
     entries: Array<{ seq: number; seat: string; card: string; summary: string; reasons: string[]; effects: string[] }>;
   };
-  const entries = snapshot.entries ?? [];
+  const entries = mode === 'widget'
+    ? widgetNarrationEntries.map((entry) => ({
+        seq: entry.seq,
+        seat: entry.seat ?? '-',
+        card: '',
+        summary: entry.text,
+        reasons: [],
+        effects: []
+      }))
+    : (snapshot.entries ?? []);
 
   if (entries.length === 0) {
     const row = document.createElement('div');
     row.className = 'teaching-event teaching-info';
 
-    const marker = document.createElement('span');
-    marker.className = 'teaching-at';
-    marker.textContent = 'Start';
-    row.appendChild(marker);
-
     const text = document.createElement('span');
     text.className = 'teaching-text';
-    text.textContent = 'No teaching events yet.';
+    text.textContent = mode === 'widget' ? 'No teaching events yet.' : 'No teaching events yet.';
     row.appendChild(text);
     list.appendChild(row);
   } else {
@@ -3059,13 +3145,20 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
       const row = document.createElement('div');
       row.className = 'teaching-event teaching-info';
 
+      const text = document.createElement('span');
+      text.className = 'teaching-text';
+      if (mode === 'widget') {
+        text.textContent = entry.summary;
+        row.appendChild(text);
+        list.appendChild(row);
+        continue;
+      }
+
       const marker = document.createElement('span');
       marker.className = 'teaching-at';
       marker.textContent = `#${entry.seq} ${entry.seat}`;
       row.appendChild(marker);
 
-      const text = document.createElement('span');
-      text.className = 'teaching-text';
       const ddReasons = (entry.reasons ?? [])
         .map(parseDdReason)
         .filter((item): item is { short: string; full: string } => Boolean(item));
@@ -3109,6 +3202,7 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
 function render(): void {
   renderingNow = true;
   hintDiag(`render with activeHint=${activeHint ? 'yes' : 'no'}`);
+  syncWidgetNarrationFeedFromTeaching();
   const view = currentViewState();
   const isWidgetReadingMode = widgetReadingMode();
 
@@ -3127,7 +3221,7 @@ function render(): void {
   }
 
   const mainRow = document.createElement('section');
-  mainRow.className = `main-row mode-${displayMode}`;
+  mainRow.className = `main-row mode-${displayMode}${displayMode === 'widget' && showWidgetTeachingPane ? ' with-widget-pane' : ''}`;
 
   const tableHost = document.createElement('div');
   tableHost.className = 'table-host';
@@ -3139,15 +3233,13 @@ function render(): void {
   tableCanvas.appendChild(renderSeatHand(view, 'W'));
   tableCanvas.appendChild(renderSeatHand(view, 'E'));
   tableCanvas.appendChild(renderSeatHand(view, 'S'));
-  const bubble = renderNarrationBubble();
-  if (bubble) tableCanvas.appendChild(bubble);
 
   tableHost.appendChild(tableCanvas);
   if (displayMode === 'analysis') {
     mainRow.appendChild(renderTeachingEventsPane('analysis'));
   }
   mainRow.appendChild(tableHost);
-  if (displayMode === 'widget') {
+  if (displayMode === 'widget' && showWidgetTeachingPane) {
     mainRow.appendChild(renderTeachingEventsPane('widget'));
   }
   if (displayMode === 'analysis') {
@@ -3155,13 +3247,13 @@ function render(): void {
   }
   root.appendChild(mainRow);
   root.appendChild(renderBoardNavigationArea(view));
+  applyNarrationBubbleCollisionAvoidance(tableCanvas);
   if (displayMode === 'analysis' && (showLog || showDebugSection)) {
     root.appendChild(renderDebugSection());
   }
   renderingNow = false;
   syncSingletonAutoplay();
   syncAlwaysHint();
-  scheduleNarrationFromTeaching();
 }
 
 refreshThreatModel(currentProblemId, false);
