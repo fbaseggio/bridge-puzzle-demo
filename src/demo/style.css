@@ -57,6 +57,24 @@ html.mode-widget {
   font-size: 12px;
   font-weight: 600;
   color: #334155;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.practice-set-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.practice-set-select {
+  font: inherit;
+}
+
+.practice-session-summary {
+  white-space: nowrap;
 }
 
 .practice-puzzle-state-bar {

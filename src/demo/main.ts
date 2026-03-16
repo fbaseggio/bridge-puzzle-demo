@@ -37,6 +37,7 @@ import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock
 import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/features';
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
 import { demoProblems, resolveDemoProblem } from './problems';
+import { buildPracticeQueue, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -70,6 +71,7 @@ type DdErrorVisualState = {
 };
 type DisplayMode = 'analysis' | 'widget' | 'practice';
 type PracticeSession = {
+  setId: PracticeSetId;
   queue: string[];
   queueIndex: number;
   attempted: number;
@@ -116,17 +118,6 @@ const displayMode: DisplayMode = (() => {
 const compactWidgetLayout = displayMode !== 'analysis';
 const isWidgetShellMode = displayMode !== 'analysis';
 
-function shuffleArray<T>(items: T[]): T[] {
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const tmp = out[i];
-    out[i] = out[j];
-    out[j] = tmp;
-  }
-  return out;
-}
-
 const maxSuitLineLen = Math.max(
   ...demoProblems.flatMap((entry) => {
     const problem = entry.problem;
@@ -169,10 +160,12 @@ const initialProblemIdFromUrl: string = (() => {
   if (!requested) return demoProblems[0].id;
   return demoProblems.some((p) => p.id === requested) ? requested : demoProblems[0].id;
 })();
-const initialPracticeQueue: string[] =
-  displayMode === 'practice'
-    ? shuffleArray(demoProblems.filter((p) => p.id !== 'p002' && p.practiceEligible !== false).map((p) => p.id))
-    : [];
+let practiceSetId: PracticeSetId = 'set1';
+const initialPracticeEntries = displayMode === 'practice' ? buildPracticeQueue(practiceSetId) : [];
+let practiceProblemOverrides = new Map<string, ProblemWithThreats>(
+  initialPracticeEntries.map((entry) => [entry.id, entry.problem as ProblemWithThreats] as const)
+);
+const initialPracticeQueue: string[] = displayMode === 'practice' ? initialPracticeEntries.map((entry) => entry.id) : [];
 const initialUserHistoryFromUrl: CardId[] = (() => {
   if (typeof window === 'undefined') return [];
   const raw = new URLSearchParams(window.location.search).get('history');
@@ -184,9 +177,16 @@ const initialUserHistoryFromUrl: CardId[] = (() => {
     .map((token) => `${token[0]}${token.slice(1) === '10' ? 'T' : token.slice(1)}` as CardId);
 })();
 
-const initialEntry = demoProblems.find((p) => p.id === (initialPracticeQueue[0] ?? initialProblemIdFromUrl)) ?? demoProblems[0];
-let currentProblem = resolveDemoProblem(initialEntry);
-let currentProblemId = initialEntry.id;
+function resolveProblemById(problemId: string): ProblemWithThreats {
+  const override = practiceProblemOverrides.get(problemId);
+  if (override) return override;
+  const entry = demoProblems.find((p) => p.id === problemId) ?? demoProblems[0];
+  return resolveDemoProblem(entry) as ProblemWithThreats;
+}
+
+const initialProblemId = initialPracticeQueue[0] ?? initialProblemIdFromUrl;
+let currentProblem = resolveProblemById(initialProblemId);
+let currentProblemId = initialProblemId;
 let currentSeed = currentProblem.rngSeed >>> 0;
 let state: State = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
 const rawSemanticReducer = new RawSemanticReducer();
@@ -281,6 +281,7 @@ let userPlayHistory: CardId[] = [];
 let practiceSession: PracticeSession | null =
   displayMode === 'practice'
     ? {
+        setId: practiceSetId,
         queue: [...initialPracticeQueue],
         queueIndex: 0,
         attempted: 0,
@@ -896,6 +897,29 @@ function canonicalRunStatusText(status: typeof runStatus): string {
   return 'Run in Progress';
 }
 
+function rebuildPracticeSession(setId: PracticeSetId): void {
+  if (!practiceSession) return;
+  const entries = buildPracticeQueue(setId);
+  practiceSetId = setId;
+  practiceProblemOverrides = new Map(entries.map((entry) => [entry.id, entry.problem as ProblemWithThreats] as const));
+  practiceSession.setId = setId;
+  practiceSession.queue = entries.map((entry) => entry.id);
+  practiceSession.queueIndex = 0;
+  practiceSession.attempted = 0;
+  practiceSession.solved = 0;
+  practiceSession.perfect = 0;
+  practiceSession.currentUndoCount = 0;
+  practiceSession.perPuzzleUndoCount = {};
+  practiceSession.isTerminal = false;
+  practiceSession.terminalOutcome = null;
+  practiceSession.solutionMode = false;
+  practiceSession.scoredThisRun = false;
+
+  const firstId = practiceSession.queue[0];
+  if (!firstId) return;
+  selectProblem(firstId);
+}
+
 function applyPracticeDisplayDefaults(solutionMode: boolean): void {
   if (!practiceSession) return;
   if (solutionMode) {
@@ -1218,7 +1242,7 @@ function makeSnapshot(play: Play): GameSnapshot {
 function restoreSnapshot(snapshot: GameSnapshot): void {
   state = cloneStateForLog(snapshot.state);
   currentProblemId = snapshot.currentProblemId;
-  currentProblem = resolveDemoProblem(demoProblems.find((p) => p.id === currentProblemId) ?? demoProblems[0]);
+  currentProblem = resolveProblemById(currentProblemId);
   currentSeed = snapshot.currentSeed;
   logs = [...snapshot.logs];
   deferredLogLines = [...snapshot.deferredLogLines];
@@ -2475,9 +2499,9 @@ function selectProblem(problemId: string): void {
   clearPulseTimer();
   pulseUntilByCardKey.clear();
   const entry = demoProblems.find((p) => p.id === problemId);
-  if (!entry) return;
-  currentProblem = resolveDemoProblem(entry);
-  currentProblemId = entry.id;
+  if (!entry && !practiceProblemOverrides.has(problemId)) return;
+  currentProblem = resolveProblemById(problemId);
+  currentProblemId = problemId;
   currentSeed = currentProblem.rngSeed >>> 0;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
   resetSemanticStreams();
@@ -3289,10 +3313,34 @@ function renderPracticeHeader(view: State): HTMLElement {
     header.textContent = `Practice Mode · Goal: ${practiceGoalSummary(view)}`;
     return header;
   }
+
+  const setLabel = document.createElement('label');
+  setLabel.className = 'practice-set-label';
+  setLabel.textContent = 'Practice set: ';
+  const setSelect = document.createElement('select');
+  setSelect.className = 'practice-set-select';
+  for (const option of PRACTICE_SET_OPTIONS) {
+    const opt = document.createElement('option');
+    opt.value = option.id;
+    opt.textContent = option.label;
+    opt.selected = option.id === practiceSession.setId;
+    setSelect.appendChild(opt);
+  }
+  setSelect.onchange = () => {
+    const nextSet = setSelect.value as PracticeSetId;
+    if (nextSet === practiceSession.setId) return;
+    rebuildPracticeSession(nextSet);
+  };
+  setLabel.appendChild(setSelect);
+  header.appendChild(setLabel);
+
+  const summary = document.createElement('span');
+  summary.className = 'practice-session-summary';
   const queueSize = practiceSession.queue.length;
   const indexLabel = queueSize > 0 ? `${practiceSession.queueIndex + 1}/${queueSize}` : '-/-';
   const undoCount = practiceSession.perPuzzleUndoCount[currentProblemId] ?? practiceSession.currentUndoCount;
-  header.textContent = `Practice Mode · Puzzle ${indexLabel} · Solved ${practiceSession.solved}/${practiceSession.attempted} · Perfect ${practiceSession.perfect} · Undo ${undoCount}`;
+  summary.textContent = ` Practice Mode · Puzzle ${indexLabel} · Solved ${practiceSession.solved}/${practiceSession.attempted} · Perfect ${practiceSession.perfect} · Undo ${undoCount}`;
+  header.appendChild(summary);
   return header;
 }
 
