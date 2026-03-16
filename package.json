@@ -14,7 +14,8 @@
     "dd:refresh-profile-p007": "python3 tools/dd_maintenance.py refresh --problem-id p007 --profile",
     "dd:verify-all": "python3 tools/dd_maintenance.py verify",
     "dd:verify-runtime": "python3 tools/dd_maintenance.py verify --runtime-only",
-    "dd:profile-p007": "python3 tools/dd_maintenance.py verify --runtime-only --problem-id p007 --profile"
+    "dd:profile-p007": "python3 tools/dd_maintenance.py verify --runtime-only --problem-id p007 --profile",
+    "encap:harness": "vite-node src/encapsulation/harness.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

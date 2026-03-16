@@ -10,14 +10,35 @@ import { p008 } from '../puzzles/p008';
 import { p009 } from '../puzzles/p009';
 import { p010 } from '../puzzles/p010';
 import { squeezeSelf01 } from '../puzzles/squeeze_self_01';
+import { listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } from '../encapsulation/workbenchProblems';
 
 export type DemoProblem = {
   id: string;
   label: string;
-  problem: Problem;
+  problem?: Problem;
+  loadProblem?: () => Problem;
+  practiceEligible?: boolean;
   experimental?: boolean;
   articlePath?: string;
 };
+
+const cachedById = new Map<string, Problem>();
+
+export function resolveDemoProblem(entry: DemoProblem): Problem {
+  const cached = cachedById.get(entry.id);
+  if (cached) return cached;
+  const loaded = entry.problem ?? entry.loadProblem?.();
+  if (!loaded) throw new Error(`Demo problem '${entry.id}' has no problem payload`);
+  cachedById.set(entry.id, loaded);
+  return loaded;
+}
+
+const encapsulationDemoProblems: DemoProblem[] = listEncapsulationWorkbenchEntries().map((entry) => ({
+  id: entry.id,
+  label: entry.name,
+  loadProblem: () => loadEncapsulationWorkbenchProblem(entry.id),
+  practiceEligible: false
+}));
 
 export const demoProblems: DemoProblem[] = [
   {
@@ -35,5 +56,6 @@ export const demoProblems: DemoProblem[] = [
   { id: 'p007', label: 'p007', problem: p007 },
   { id: 'p008', label: 'p008', problem: p008 },
   { id: 'p009', label: 'p009', problem: p009 },
-  { id: 'p010', label: 'p010', problem: p010 }
+  { id: 'p010', label: 'p010', problem: p010 },
+  ...encapsulationDemoProblems
 ];

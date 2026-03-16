@@ -13,6 +13,7 @@ import {
   type DecisionRecord,
   type EngineEvent,
   type Play,
+  type Problem,
   type Policy,
   type Rank,
   type Seat,
@@ -35,7 +36,7 @@ import { ensureDdDatasetLoaded } from '../ai/ddPolicy';
 import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock, formatInitBlock } from '../ai/threatModelVerbose';
 import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/features';
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
-import { demoProblems } from './problems';
+import { demoProblems, resolveDemoProblem } from './problems';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -100,7 +101,7 @@ type ClaimDebugSnapshot = {
   terminal: boolean;
   solutionMode: boolean;
 };
-type ProblemWithThreats = typeof demoProblems[number]['problem'] & { threatCardIds?: CardId[] };
+type ProblemWithThreats = Problem & { threatCardIds?: CardId[] };
 const displayMode: DisplayMode = (() => {
   if (typeof window === 'undefined') return 'analysis';
   const params = new URLSearchParams(window.location.search);
@@ -127,7 +128,11 @@ function shuffleArray<T>(items: T[]): T[] {
 }
 
 const maxSuitLineLen = Math.max(
-  ...demoProblems.flatMap(({ problem }) => seatOrder.flatMap((seat) => suitOrder.map((suit) => problem.hands[seat][suit].length)))
+  ...demoProblems.flatMap((entry) => {
+    const problem = entry.problem;
+    if (!problem) return [];
+    return seatOrder.flatMap((seat) => suitOrder.map((suit) => problem.hands[seat][suit].length));
+  })
 );
 const suitColWidth = 12;
 const suitGap = 4;
@@ -166,7 +171,7 @@ const initialProblemIdFromUrl: string = (() => {
 })();
 const initialPracticeQueue: string[] =
   displayMode === 'practice'
-    ? shuffleArray(demoProblems.filter((p) => p.id !== 'p002').map((p) => p.id))
+    ? shuffleArray(demoProblems.filter((p) => p.id !== 'p002' && p.practiceEligible !== false).map((p) => p.id))
     : [];
 const initialUserHistoryFromUrl: CardId[] = (() => {
   if (typeof window === 'undefined') return [];
@@ -179,10 +184,9 @@ const initialUserHistoryFromUrl: CardId[] = (() => {
     .map((token) => `${token[0]}${token.slice(1) === '10' ? 'T' : token.slice(1)}` as CardId);
 })();
 
-let currentProblem =
-  demoProblems.find((p) => p.id === (initialPracticeQueue[0] ?? initialProblemIdFromUrl))?.problem ?? demoProblems[0].problem;
-let currentProblemId =
-  demoProblems.find((p) => p.id === (initialPracticeQueue[0] ?? initialProblemIdFromUrl))?.id ?? demoProblems[0].id;
+const initialEntry = demoProblems.find((p) => p.id === (initialPracticeQueue[0] ?? initialProblemIdFromUrl)) ?? demoProblems[0];
+let currentProblem = resolveDemoProblem(initialEntry);
+let currentProblemId = initialEntry.id;
 let currentSeed = currentProblem.rngSeed >>> 0;
 let state: State = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
 const rawSemanticReducer = new RawSemanticReducer();
@@ -1214,7 +1218,7 @@ function makeSnapshot(play: Play): GameSnapshot {
 function restoreSnapshot(snapshot: GameSnapshot): void {
   state = cloneStateForLog(snapshot.state);
   currentProblemId = snapshot.currentProblemId;
-  currentProblem = demoProblems.find((p) => p.id === currentProblemId)?.problem ?? currentProblem;
+  currentProblem = resolveDemoProblem(demoProblems.find((p) => p.id === currentProblemId) ?? demoProblems[0]);
   currentSeed = snapshot.currentSeed;
   logs = [...snapshot.logs];
   deferredLogLines = [...snapshot.deferredLogLines];
@@ -2472,7 +2476,7 @@ function selectProblem(problemId: string): void {
   pulseUntilByCardKey.clear();
   const entry = demoProblems.find((p) => p.id === problemId);
   if (!entry) return;
-  currentProblem = entry.problem;
+  currentProblem = resolveDemoProblem(entry);
   currentProblemId = entry.id;
   currentSeed = currentProblem.rngSeed >>> 0;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });

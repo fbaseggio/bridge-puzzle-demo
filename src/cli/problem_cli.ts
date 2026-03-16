@@ -1,6 +1,6 @@
 /// <reference types="node" />
 
-import { demoProblems } from '../demo/problems';
+import { demoProblems, resolveDemoProblem } from '../demo/problems';
 import type { ProblemStatus } from '../core';
 
 type GetRequest = { mode?: 'get'; id: string };
@@ -25,7 +25,7 @@ async function main(): Promise<void> {
           problemIds: demoProblems.map((p) => p.id),
           problems: demoProblems.map((p) => ({
             id: p.id,
-            status: (p.problem.status ?? 'active') as ProblemStatus
+            status: (resolveDemoProblem(p).status ?? 'active') as ProblemStatus
           }))
         })}\n`
       );
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
       process.stdout.write(`${JSON.stringify({ ok: false, error: { message: `Unknown problem id: ${id}` } })}\n`);
       return;
     }
-    process.stdout.write(`${JSON.stringify({ ok: true, problem: found.problem })}\n`);
+    process.stdout.write(`${JSON.stringify({ ok: true, problem: resolveDemoProblem(found) })}\n`);
   } catch (error) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { message: error instanceof Error ? error.message : String(error) } })}\n`
