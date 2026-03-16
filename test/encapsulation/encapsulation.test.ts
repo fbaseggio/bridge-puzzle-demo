@@ -6,10 +6,12 @@ describe('encapsulation parser', () => {
     const parsed = parseEncapsulation('Wa,   a   >   w');
     expect(parsed.lead).toBe('>');
     expect(parsed.goalOffset).toBe(0);
+    expect(parsed.explicitSuitOrder).toBe(false);
+    expect(parsed.suitOrder).toEqual(['S', 'H', 'D', 'C']);
     expect(parsed.suits).toEqual([
-      { suit: 'S', primary: 'N', pattern: 'Wa', allowIdleFill: true },
-      { suit: 'H', primary: 'N', pattern: 'a', allowIdleFill: true },
-      { suit: 'D', primary: 'S', pattern: 'w', allowIdleFill: true }
+      { suit: 'S', primary: 'N', pattern: 'Wa', allowIdleFill: true, isEmpty: false },
+      { suit: 'H', primary: 'N', pattern: 'a', allowIdleFill: true, isEmpty: false },
+      { suit: 'D', primary: 'S', pattern: 'w', allowIdleFill: true, isEmpty: false }
     ]);
   });
 
@@ -28,8 +30,25 @@ describe('encapsulation parser', () => {
   it('parses trailing goal offset and suit no-idle marker', () => {
     const parsed = parseEncapsulation("WLa, WB > b', W -1");
     expect(parsed.goalOffset).toBe(-1);
-    expect(parsed.suits[2]).toEqual({ suit: 'D', primary: 'S', pattern: 'b', allowIdleFill: false });
-    expect(parsed.suits[3]).toEqual({ suit: 'C', primary: 'S', pattern: 'W', allowIdleFill: true });
+    expect(parsed.suits[2]).toEqual({ suit: 'D', primary: 'S', pattern: 'b', allowIdleFill: false, isEmpty: false });
+    expect(parsed.suits[3]).toEqual({ suit: 'C', primary: 'S', pattern: 'W', allowIdleFill: true, isEmpty: false });
+  });
+
+  it('parses explicit suit-order headers and 0 placeholders', () => {
+    const parsed = parseEncapsulation('[schd] Wa, a > w, 0');
+    expect(parsed.explicitSuitOrder).toBe(true);
+    expect(parsed.suitOrder).toEqual(['S', 'C', 'H', 'D']);
+    expect(parsed.suits[0]?.suit).toBe('S');
+    expect(parsed.suits[1]?.suit).toBe('C');
+    expect(parsed.suits[2]?.suit).toBe('H');
+    expect(parsed.suits[3]).toEqual({ suit: 'D', primary: 'S', pattern: '', allowIdleFill: false, isEmpty: true });
+  });
+
+  it('binds using explicit suit order instead of implicit default', () => {
+    const b = bindStandard('[sd] W > w');
+    expect(b.hands.N.S).toContain('A');
+    expect(b.hands.S.D).toContain('A');
+    expect(b.hands.S.H.includes('A')).toBe(false);
   });
 });
 
@@ -59,6 +78,14 @@ describe('deterministic binding examples', () => {
     expect(b.hands.N.S).toEqual(['A', 'K', '6']);
     expect(b.hands.S.S).toContain('2');
     expect(b.hands.E.S.length + b.hands.W.S.length).toBeGreaterThan(0);
+  });
+
+  it('binds Waou with tier-2 opponent low assignment (right-to-left for o/u)', () => {
+    const b = bindStandard('Waou >');
+    expect(b.hands.N.S).toEqual(['A', 'J']);
+    expect(b.hands.S.S).toEqual(['2']);
+    expect(b.hands.W.S).toEqual(['K', 'Q', '4']);
+    expect(b.hands.E.S).toEqual(['3']);
   });
 
   it('binds WLa, WB > b, W with discussed suit structures', () => {

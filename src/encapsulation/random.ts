@@ -73,8 +73,12 @@ export function prepareRandomBindingInput(
 
   let parsed = cloneParsed(base);
   if (shouldSwap) {
-    const north = base.suits.filter((s) => s.primary === 'N').map((s) => ({ pattern: s.pattern, allowIdleFill: s.allowIdleFill }));
-    const south = base.suits.filter((s) => s.primary === 'S').map((s) => ({ pattern: s.pattern, allowIdleFill: s.allowIdleFill }));
+    const north = base.suits
+      .filter((s) => s.primary === 'N')
+      .map((s) => ({ pattern: s.pattern, allowIdleFill: s.allowIdleFill, isEmpty: s.isEmpty }));
+    const south = base.suits
+      .filter((s) => s.primary === 'S')
+      .map((s) => ({ pattern: s.pattern, allowIdleFill: s.allowIdleFill, isEmpty: s.isEmpty }));
     const reordered = [...south.map((s) => ({ primary: 'N' as const, ...s })), ...north.map((s) => ({ primary: 'S' as const, ...s }))];
     parsed = {
       ...parsed,
@@ -85,7 +89,8 @@ export function prepareRandomBindingInput(
         suit: SUITS[idx],
         primary: s.primary,
         pattern: s.pattern,
-        allowIdleFill: s.allowIdleFill
+        allowIdleFill: s.allowIdleFill,
+        isEmpty: s.isEmpty
       }))
     };
   }
@@ -157,4 +162,3 @@ export function bindRandom(input: string | ParsedEncapsulation, options?: BindRa
   const standard = bindStandard(parsed);
   return relabelRanksOrdinally(standard, rng);
 }
-

@@ -38,6 +38,7 @@ import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
 import { demoProblems, resolveDemoProblem } from './problems';
 import { buildPracticeQueue, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
+import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -224,6 +225,7 @@ let widgetNarrationEntries: WidgetNarrationEntry[] = [];
 let widgetNarrationLatest: WidgetNarrationEntry | null = null;
 let widgetNarrationBySeat: Partial<Record<Seat, WidgetNarrationEntry>> = {};
 let lastNarratedSeq = 0;
+let inversePrimaryBySuit: Partial<Record<Suit, 'N' | 'S'>> = {};
 let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
 let renderingNow = false;
@@ -895,6 +897,60 @@ function canonicalRunStatusText(status: typeof runStatus): string {
   if (status === 'success') return 'Success - Goal Achieved';
   if (status === 'failure') return 'Not enough tricks - try again';
   return 'Run in Progress';
+}
+
+function positionEncapsulationForLog(view: State): string {
+  const hands = {
+    N: { S: [...view.hands.N.S], H: [...view.hands.N.H], D: [...view.hands.N.D], C: [...view.hands.N.C] },
+    E: { S: [...view.hands.E.S], H: [...view.hands.E.H], D: [...view.hands.E.D], C: [...view.hands.E.C] },
+    S: { S: [...view.hands.S.S], H: [...view.hands.S.H], D: [...view.hands.S.D], C: [...view.hands.S.C] },
+    W: { S: [...view.hands.W.S], H: [...view.hands.W.H], D: [...view.hands.W.D], C: [...view.hands.W.C] }
+  };
+  const detailed = inferPositionEncapsulationDetailed({
+    hands,
+    turn: view.turn,
+    suitOrder: ['S', 'H', 'D', 'C'],
+    threatCardIds: view.threat?.threatCardIds ?? [],
+    preferredPrimaryBySuit: inversePrimaryBySuit
+  });
+  inversePrimaryBySuit = { ...inversePrimaryBySuit, ...detailed.primaryBySuit };
+  return detailed.text;
+}
+
+function inverseLongDebugLines(view: State): string[] {
+  if (!(verboseLog && showDebugSection)) return [];
+  const hands = {
+    N: { S: [...view.hands.N.S], H: [...view.hands.N.H], D: [...view.hands.N.D], C: [...view.hands.N.C] },
+    E: { S: [...view.hands.E.S], H: [...view.hands.E.H], D: [...view.hands.E.D], C: [...view.hands.E.C] },
+    S: { S: [...view.hands.S.S], H: [...view.hands.S.H], D: [...view.hands.S.D], C: [...view.hands.S.C] },
+    W: { S: [...view.hands.W.S], H: [...view.hands.W.H], D: [...view.hands.W.D], C: [...view.hands.W.C] }
+  };
+  const explained = explainPositionInverse({
+    hands,
+    turn: view.turn,
+    suitOrder: ['S', 'H', 'D', 'C'],
+    threatCardIds: view.threat?.threatCardIds ?? [],
+    preferredPrimaryBySuit: inversePrimaryBySuit
+  });
+  inversePrimaryBySuit = { ...inversePrimaryBySuit, ...explained.primaryBySuit };
+
+  const lines: string[] = [];
+  for (const suit of explained.suits) {
+    const cards = `N:${suit.cards.N.join('') || '-'} S:${suit.cards.S.join('') || '-'} W:${suit.cards.W.join('') || '-'} E:${suit.cards.E.join('') || '-'}`;
+    lines.push(`INV ${suit.suit} slot=${suit.slotIndex}/${suit.totalSlots} header=${suit.header} chosen=${suit.finalText}`);
+    lines.push(`      cards=${cards}`);
+    lines.push(
+      `      primary=${suit.chosenPrimary}${suit.preferredPrimary ? ` (preferred=${suit.preferredPrimary})` : ''}`
+    );
+    lines.push(`      winners=${suit.winners.join(' ') || '-'} threats=${suit.threatCandidates.join(' ') || '-'}`);
+    const stopperSummary =
+      suit.stopChecks.map((c) => `${c.seat}${c.rank}[W:${c.westStops ? 'Y' : 'N'} E:${c.eastStops ? 'Y' : 'N'} b${c.backing}]`).join(' ') || '-';
+    lines.push(`      stops=${stopperSummary}`);
+    lines.push(
+      `      count=${suit.countSummary} tieBreak=${suit.threatCardTieBreakUsed ? 'threatCardIds' : 'none'} lineageOU=${suit.lineageOuResolutionUsed ? 'used' : 'no'}`
+    );
+  }
+  return lines;
 }
 
 function rebuildPracticeSession(setId: PracticeSetId): void {
@@ -2094,6 +2150,10 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
 
     if (event.type === 'trickComplete') {
       lines.push(`----- TRICK COMPLETE ----- winner=${event.winner} trick=${event.trick.map(playText).join(' ')}`);
+      if (verboseLog) {
+        lines.push(`ENCAP ${positionEncapsulationForLog(shadow)}`);
+        lines.push(...inverseLongDebugLines(shadow));
+      }
       lines.push('');
       if (verboseLog && threatDetail && shadow.threat && shadow.threatLabels) {
         const trickIndex = shadow.tricksWon.NS + shadow.tricksWon.EW + 1;
@@ -2420,6 +2480,16 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
   threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
   if (clearLogs) clearTeachingEvents();
   if (rawThreats.length === 0) {
+    if (verboseLog) {
+      if (!skipNextThreatInitRunIncrement) startNewLogRun();
+      skipNextThreatInitRunIncrement = false;
+      logs = [
+        ...logs,
+        `[THREAT:init] problem=${problemId} raw=- validation=OK`,
+        `ENCAP ${positionEncapsulationForLog(state)}`,
+        ...inverseLongDebugLines(state)
+      ].slice(-500);
+    }
     if (teachingEvents.length === 0) addTeachingEvent({ kind: 'info', at: 'Start', label: 'No teaching events yet.' });
     return;
   }
@@ -2445,6 +2515,7 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
     } else {
       logs = [...logs, `[THREAT:init] problem=${problemId} raw=${rawThreats.join(',')} validation=OK`].slice(-500);
     }
+    logs = [...logs, `ENCAP ${positionEncapsulationForLog(state)}`, ...inverseLongDebugLines(state)].slice(-500);
     logs = [...logs, ...formatUserEqInitBlock(state)].slice(-500);
     logs = [...logs, ...formatDefenderInventoryEqBlock(state)].slice(-500);
   }
@@ -2484,6 +2555,7 @@ function resetGame(seed: number, reason: string): void {
   clearWidgetNarrationFeed();
   clearHint();
   clearTeachingEvents();
+  inversePrimaryBySuit = {};
   if (practiceSession) beginPracticeRun(practiceSession.solutionMode);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -2525,6 +2597,7 @@ function selectProblem(problemId: string): void {
   clearWidgetNarrationFeed();
   clearHint();
   clearTeachingEvents();
+  inversePrimaryBySuit = {};
   if (practiceSession) beginPracticeRun(practiceSession.solutionMode);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();

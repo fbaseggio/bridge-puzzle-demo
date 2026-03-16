@@ -95,7 +95,7 @@ function computeSpecifiedCounts(parsed: ParsedEncapsulation): { specifiedNorth: 
   let specifiedSouth = 0;
 
   for (const s of parsed.suits) {
-    const letters = s.pattern.length;
+    const letters = [...s.pattern].filter((ch) => ch !== 'o' && ch !== 'u').length;
     const capitals = [...s.pattern].filter((ch) => ch >= 'A' && ch <= 'Z').length;
     if (s.primary === 'N') {
       specifiedNorth += letters;
@@ -171,8 +171,10 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
     const primary = suitRec.primary;
     const opposite = otherPrimary(primary);
     let linksSeen = 0;
+    const pendingTier2OpponentLows: Array<{ token: 'o' | 'u'; index: number }> = [];
 
-    for (const token of suitRec.pattern) {
+    for (let tokenIndex = 0; tokenIndex < suitRec.pattern.length; tokenIndex += 1) {
+      const token = suitRec.pattern[tokenIndex] as string;
       if (token === 'w') {
         addCard(hands, suitState, primary, suit, nextHigh(suit, suitState));
         linksSeen += 1;
@@ -193,6 +195,10 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
         addCard(hands, suitState, primary, suit, nextLow(suit, suitState));
         addCard(hands, suitState, opposite, suit, nextHigh(suit, suitState));
         linksSeen += 1;
+        continue;
+      }
+      if (token === 'o' || token === 'u') {
+        pendingTier2OpponentLows.push({ token, index: tokenIndex });
         continue;
       }
 
@@ -242,6 +248,17 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
         cardId: `${suit}${threatRank}`
       });
     }
+
+    // Tier-2 lowest assignments (`o`/`u`) are resolved right-to-left after tier-1 lows.
+    pendingTier2OpponentLows
+      .sort((a, b) => b.index - a.index)
+      .forEach(({ token }) => {
+        const target: 'E' | 'W' =
+          primary === 'N'
+            ? (token === 'o' ? 'W' : 'E')
+            : (token === 'o' ? 'E' : 'W');
+        addCard(hands, suitState, target, suit, nextLow(suit, suitState));
+      });
   }
 
   const counts = computeSpecifiedCounts(parsed);

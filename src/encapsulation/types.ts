@@ -1,13 +1,14 @@
 export type LeadSymbol = '>' | '<' | '=';
 export type Side = 'N' | 'S' | 'E' | 'W';
 export type Suit = 'S' | 'H' | 'D' | 'C';
-export type EncapsulationToken = 'w' | 'W' | 'l' | 'L' | 'a' | 'A' | 'b' | 'B' | 'c' | 'C' | 'i';
+export type EncapsulationToken = 'w' | 'W' | 'l' | 'L' | 'a' | 'A' | 'b' | 'B' | 'c' | 'C' | 'i' | 'o' | 'u';
 
 export type ParsedSuit = {
   suit: Suit;
   primary: 'N' | 'S';
   pattern: string;
   allowIdleFill: boolean;
+  isEmpty: boolean;
 };
 
 export type ParsedEncapsulation = {
@@ -17,6 +18,8 @@ export type ParsedEncapsulation = {
   northPrimaryCount: number;
   southPrimaryCount: number;
   goalOffset: number;
+  suitOrder: Suit[];
+  explicitSuitOrder: boolean;
 };
 
 export type Hand = Record<Suit, string[]>;
@@ -44,3 +47,5 @@ export type BoundThreatCard = {
   rank: string;
   cardId: string;
 };
+
+export type InverseResult = string | { type: 'ambiguous'; candidates: string[] } | { type: 'no-fit' };
