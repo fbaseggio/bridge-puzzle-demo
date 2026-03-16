@@ -67,14 +67,64 @@ type DdErrorVisualState = {
   goodCards: CardId[];
   badCard: CardId;
 };
-type DisplayMode = 'analysis' | 'widget';
+type DisplayMode = 'analysis' | 'widget' | 'practice';
+type PracticeSession = {
+  queue: string[];
+  queueIndex: number;
+  attempted: number;
+  solved: number;
+  perfect: number;
+  currentUndoCount: number;
+  perPuzzleUndoCount: Record<string, number>;
+  isTerminal: boolean;
+  terminalOutcome: 'success' | 'failure' | null;
+  solutionMode: boolean;
+  scoredThisRun: boolean;
+};
+type ClaimDebugSnapshot = {
+  claimDecision: 'accepted' | 'rejected-practice' | 'rejected-bridge';
+  claimMessage: string;
+  onLead: boolean;
+  needAllRemainingTricks: boolean;
+  tricksRemaining: number;
+  tricksStillNeeded: number | null;
+  leaderSeat: Seat;
+  userSideOnLead: boolean;
+  reachableWinnerCount: number | null;
+  claimBridgeValid: boolean | null;
+  puzzleId: string;
+  strain: string;
+  nsTricks: number;
+  ewTricks: number;
+  runStatus: RunStatus;
+  terminal: boolean;
+  solutionMode: boolean;
+};
 type ProblemWithThreats = typeof demoProblems[number]['problem'] & { threatCardIds?: CardId[] };
 const displayMode: DisplayMode = (() => {
   if (typeof window === 'undefined') return 'analysis';
-  const mode = new URLSearchParams(window.location.search).get('mode');
-  return mode === 'widget' ? 'widget' : 'analysis';
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get('mode');
+  if (mode === 'practice' || mode === 'widget' || mode === 'analysis') return mode;
+  const path = window.location.pathname.toLowerCase();
+  if (path.endsWith('/practice') || path.endsWith('/practice/') || path.endsWith('/practice.html') || path.includes('/practice/')) {
+    return 'practice';
+  }
+  return 'analysis';
 })();
-const compactWidgetLayout = displayMode === 'widget';
+const compactWidgetLayout = displayMode !== 'analysis';
+const isWidgetShellMode = displayMode !== 'analysis';
+
+function shuffleArray<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = out[i];
+    out[i] = out[j];
+    out[j] = tmp;
+  }
+  return out;
+}
 
 const maxSuitLineLen = Math.max(
   ...demoProblems.flatMap(({ problem }) => seatOrder.flatMap((seat) => suitOrder.map((suit) => problem.hands[seat][suit].length)))
@@ -114,6 +164,10 @@ const initialProblemIdFromUrl: string = (() => {
   if (!requested) return demoProblems[0].id;
   return demoProblems.some((p) => p.id === requested) ? requested : demoProblems[0].id;
 })();
+const initialPracticeQueue: string[] =
+  displayMode === 'practice'
+    ? shuffleArray(demoProblems.filter((p) => p.id !== 'p002').map((p) => p.id))
+    : [];
 const initialUserHistoryFromUrl: CardId[] = (() => {
   if (typeof window === 'undefined') return [];
   const raw = new URLSearchParams(window.location.search).get('history');
@@ -125,8 +179,10 @@ const initialUserHistoryFromUrl: CardId[] = (() => {
     .map((token) => `${token[0]}${token.slice(1) === '10' ? 'T' : token.slice(1)}` as CardId);
 })();
 
-let currentProblem = demoProblems.find((p) => p.id === initialProblemIdFromUrl)?.problem ?? demoProblems[0].problem;
-let currentProblemId = demoProblems.find((p) => p.id === initialProblemIdFromUrl)?.id ?? demoProblems[0].id;
+let currentProblem =
+  demoProblems.find((p) => p.id === (initialPracticeQueue[0] ?? initialProblemIdFromUrl))?.problem ?? demoProblems[0].problem;
+let currentProblemId =
+  demoProblems.find((p) => p.id === (initialPracticeQueue[0] ?? initialProblemIdFromUrl))?.id ?? demoProblems[0].id;
 let currentSeed = currentProblem.rngSeed >>> 0;
 let state: State = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
 const rawSemanticReducer = new RawSemanticReducer();
@@ -156,7 +212,7 @@ let activeHintKey: string | null = null;
 let hintLoading = false;
 let hintRequestSeq = 0;
 let ddErrorVisual: DdErrorVisualState | null = null;
-type WidgetStatusType = 'hint' | 'narration' | 'default';
+type WidgetStatusType = 'hint' | 'narration' | 'message' | 'default';
 type WidgetStatus = { type: WidgetStatusType; text: string };
 let widgetStatus: WidgetStatus = { type: 'default', text: '' };
 type WidgetNarrationEntry = { text: string; seat: Seat | null; seq: number };
@@ -218,6 +274,23 @@ let runPlayCounter = 0;
 let replayMismatchCutoffIdx: number | null = null;
 let replaySuppressedForRun = false;
 let userPlayHistory: CardId[] = [];
+let practiceSession: PracticeSession | null =
+  displayMode === 'practice'
+    ? {
+        queue: [...initialPracticeQueue],
+        queueIndex: 0,
+        attempted: 0,
+        solved: 0,
+        perfect: 0,
+        currentUndoCount: 0,
+        perPuzzleUndoCount: {},
+        isTerminal: false,
+        terminalOutcome: null,
+        solutionMode: false,
+        scoredThisRun: false
+      }
+    : null;
+let practiceClaimDebug: ClaimDebugSnapshot | null = null;
 type TeachingEventKind = 'threatSummary' | 'recolor' | 'info';
 type TeachingEvent = { id: number; kind: TeachingEventKind; label: string; detail?: string; at?: string };
 let teachingEvents: TeachingEvent[] = [];
@@ -339,6 +412,10 @@ function clearHint(): void {
   if (widgetStatus.type === 'hint') widgetStatus = { type: 'default', text: '' };
 }
 
+function clearWidgetMessage(): void {
+  if (widgetStatus.type === 'message') widgetStatus = { type: 'default', text: '' };
+}
+
 function clearDdErrorVisual(): void {
   ddErrorVisual = null;
 }
@@ -373,7 +450,7 @@ function summarizeForNarration(summary: string): string {
 }
 
 function syncWidgetNarrationFeedFromTeaching(): void {
-  if (displayMode !== 'widget') return;
+  if (!isWidgetShellMode) return;
   const snapshot = teachingReducer.snapshot() as {
     entries: Array<{ seq: number; seat: string; summary: string }>;
   };
@@ -396,7 +473,7 @@ function syncWidgetNarrationFeedFromTeaching(): void {
 }
 
 function widgetReadingMode(): boolean {
-  if (displayMode !== 'widget') return false;
+  if (!isWidgetShellMode) return false;
   return ddsPlayHistory.length === 0 && state.trick.length === 0 && !trickFrozen;
 }
 
@@ -813,6 +890,198 @@ function canonicalRunStatusText(status: typeof runStatus): string {
   if (status === 'success') return 'Success - Goal Achieved';
   if (status === 'failure') return 'Not enough tricks - try again';
   return 'Run in Progress';
+}
+
+function applyPracticeDisplayDefaults(solutionMode: boolean): void {
+  if (!practiceSession) return;
+  if (solutionMode) {
+    alwaysHint = true;
+    narrate = true;
+    cardColoringEnabled = true;
+    autoplaySingletons = true;
+    showWidgetTeachingPane = false;
+    return;
+  }
+  alwaysHint = false;
+  narrate = false;
+  cardColoringEnabled = false;
+  autoplaySingletons = true;
+  showWidgetTeachingPane = false;
+}
+
+function beginPracticeRun(solutionMode: boolean): void {
+  if (!practiceSession) return;
+  practiceSession.solutionMode = solutionMode;
+  practiceSession.isTerminal = false;
+  practiceSession.terminalOutcome = null;
+  practiceSession.currentUndoCount = 0;
+  practiceSession.perPuzzleUndoCount[currentProblemId] = 0;
+  practiceSession.scoredThisRun = false;
+  practiceClaimDebug = null;
+  clearWidgetMessage();
+  applyPracticeDisplayDefaults(solutionMode);
+}
+
+function onPracticeTerminal(outcome: 'success' | 'failure'): void {
+  if (!practiceSession) return;
+  practiceSession.isTerminal = true;
+  practiceSession.terminalOutcome = outcome;
+  if (practiceSession.scoredThisRun) return;
+  practiceSession.scoredThisRun = true;
+  if (practiceSession.solutionMode) return;
+  practiceSession.attempted += 1;
+  if (outcome === 'success') {
+    practiceSession.solved += 1;
+    if (practiceSession.currentUndoCount === 0) practiceSession.perfect += 1;
+  }
+}
+
+function incrementPracticeUndoUsage(): void {
+  if (!practiceSession) return;
+  practiceSession.currentUndoCount += 1;
+  practiceSession.perPuzzleUndoCount[currentProblemId] = practiceSession.currentUndoCount;
+}
+
+function practiceGoalSummary(view: State): string {
+  if (view.goal.type === 'minTricks') return `take ${view.goal.n}`;
+  return formatGoal(view);
+}
+
+function goToNextPracticePuzzle(): void {
+  if (!practiceSession || practiceSession.queue.length === 0) return;
+  practiceSession.queueIndex = (practiceSession.queueIndex + 1) % practiceSession.queue.length;
+  const nextId = practiceSession.queue[practiceSession.queueIndex];
+  beginPracticeRun(false);
+  selectProblem(nextId);
+}
+
+function remainingTricksFromState(s: State): number {
+  return Math.floor(
+    (totalCards(s, 'N') + totalCards(s, 'E') + totalCards(s, 'S') + totalCards(s, 'W')) / 4
+  );
+}
+
+function tricksNeededForGoalNow(s: State): number | null {
+  if (s.goal.type !== 'minTricks') return null;
+  const won = s.goal.side === 'NS' ? s.tricksWon.NS : s.tricksWon.EW;
+  return Math.max(0, s.goal.n - won);
+}
+
+function countReachableUserWinnerCards(s: State): number {
+  const cards = new Set<CardId>();
+  for (const seat of s.userControls) {
+    for (const suit of suitOrder) {
+      for (const rank of s.hands[seat][suit]) {
+        const cardId = toCardId(suit, rank) as CardId;
+        const role = s.cardRoles[cardId];
+        if (role === 'strandedThreat') continue;
+        if (role === 'winner' || role === 'promotedWinner') cards.add(cardId);
+      }
+    }
+  }
+  return cards.size;
+}
+
+function attemptClaim(): void {
+  if (!practiceSession || practiceSession.solutionMode) return;
+  clearHint();
+  clearWidgetMessage();
+  const userSideOnLead = state.userControls.includes(state.turn);
+  const onLead = state.trick.length === 0 && userSideOnLead;
+  const remainingTricks = remainingTricksFromState(state);
+  const tricksNeeded = tricksNeededForGoalNow(state);
+  const needsAllRemaining = tricksNeeded !== null && tricksNeeded === remainingTricks;
+  const baseDebug = {
+    onLead,
+    needAllRemainingTricks: needsAllRemaining,
+    tricksRemaining: remainingTricks,
+    tricksStillNeeded: tricksNeeded,
+    leaderSeat: state.turn,
+    userSideOnLead,
+    puzzleId: currentProblemId,
+    strain: state.contract.strain,
+    nsTricks: state.tricksWon.NS,
+    ewTricks: state.tricksWon.EW,
+    runStatus,
+    terminal: runStatus === 'success' || runStatus === 'failure',
+    solutionMode: practiceSession.solutionMode
+  } as const;
+  if (!onLead || !needsAllRemaining) {
+    const message = 'Claim is only available on lead for the remaining tricks';
+    widgetStatus = { type: 'message', text: message };
+    practiceClaimDebug = {
+      ...baseDebug,
+      claimDecision: 'rejected-practice',
+      claimMessage: message,
+      reachableWinnerCount: null,
+      claimBridgeValid: null
+    };
+    render();
+    return;
+  }
+  const reachableWinners = countReachableUserWinnerCards(state);
+  if (reachableWinners >= remainingTricks) {
+    const message = 'Success - Goal Achieved';
+    state.phase = 'end';
+    runStatus = 'success';
+    onPracticeTerminal('success');
+    practiceClaimDebug = {
+      ...baseDebug,
+      claimDecision: 'accepted',
+      claimMessage: message,
+      reachableWinnerCount: reachableWinners,
+      claimBridgeValid: true
+    };
+    render();
+    return;
+  }
+  incrementPracticeUndoUsage();
+  const message = "You can't claim yet — keep playing";
+  widgetStatus = { type: 'message', text: message };
+  practiceClaimDebug = {
+    ...baseDebug,
+    claimDecision: 'rejected-bridge',
+    claimMessage: message,
+    reachableWinnerCount: reachableWinners,
+    claimBridgeValid: false
+  };
+  render();
+}
+
+function renderPracticeClaimDebugPanel(): HTMLElement {
+  const panel = document.createElement('section');
+  panel.className = 'practice-claim-debug';
+  const title = document.createElement('strong');
+  title.textContent = 'Claim Debug';
+  panel.appendChild(title);
+
+  const body = document.createElement('pre');
+  body.className = 'practice-claim-debug-body';
+  if (!practiceClaimDebug) {
+    body.textContent = 'No claim evaluation yet.';
+  } else {
+    body.textContent = [
+      `decision: ${practiceClaimDebug.claimDecision}`,
+      `message: ${practiceClaimDebug.claimMessage}`,
+      `onLead: ${practiceClaimDebug.onLead}`,
+      `needAllRemainingTricks: ${practiceClaimDebug.needAllRemainingTricks}`,
+      `tricksRemaining: ${practiceClaimDebug.tricksRemaining}`,
+      `tricksStillNeeded: ${practiceClaimDebug.tricksStillNeeded ?? 'null'}`,
+      `leaderSeat: ${practiceClaimDebug.leaderSeat}`,
+      `userSideOnLead: ${practiceClaimDebug.userSideOnLead}`,
+      `reachableWinnerCount: ${practiceClaimDebug.reachableWinnerCount ?? 'null'}`,
+      `claimBridgeValid: ${practiceClaimDebug.claimBridgeValid ?? 'null'}`,
+      `puzzleId: ${practiceClaimDebug.puzzleId}`,
+      `strain: ${practiceClaimDebug.strain}`,
+      `nsTricks: ${practiceClaimDebug.nsTricks}`,
+      `ewTricks: ${practiceClaimDebug.ewTricks}`,
+      `runStatus: ${practiceClaimDebug.runStatus}`,
+      `terminal: ${practiceClaimDebug.terminal}`,
+      `solutionMode: ${practiceClaimDebug.solutionMode}`
+    ].join('\n');
+  }
+  panel.appendChild(body);
+  return panel;
 }
 
 function withDdSource(problem: ProblemWithThreats): ProblemWithThreats {
@@ -2187,6 +2456,7 @@ function resetGame(seed: number, reason: string): void {
   clearWidgetNarrationFeed();
   clearHint();
   clearTeachingEvents();
+  if (practiceSession) beginPracticeRun(practiceSession.solutionMode);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
   undoStack.length = 0;
@@ -2227,6 +2497,7 @@ function selectProblem(problemId: string): void {
   clearWidgetNarrationFeed();
   clearHint();
   clearTeachingEvents();
+  if (practiceSession) beginPracticeRun(practiceSession.solutionMode);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
   lastSuccessfulTranscript = null;
@@ -2244,7 +2515,9 @@ function backupLastUserPlay(): void {
   clearSingletonAutoplayTimer();
   const snapshot = undoStack.pop();
   if (!snapshot) return;
+  incrementPracticeUndoUsage();
   clearHint();
+  clearWidgetMessage();
   restoreSnapshot(snapshot);
   clearPulseTimer();
   pulseUntilByCardKey.clear();
@@ -2258,6 +2531,7 @@ function runTurn(play: Play): void {
   }
   clearSingletonAutoplayTimer();
   clearHint();
+  clearWidgetMessage();
   if (state.replay.enabled && state.replay.transcript && (play.seat === 'N' || play.seat === 'S')) {
     const playId = toCardId(play.suit, play.rank) as CardId;
     const actualClass = getImmutableUserEqClass(play.seat, playId);
@@ -2409,6 +2683,7 @@ function runTurn(play: Play): void {
       ].slice(-500);
     }
     runStatus = nextStatus;
+    if (practiceSession) onPracticeTerminal(nextStatus);
   }
 
   render();
@@ -2545,6 +2820,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   clearWidgetNarrationFeed();
   clearHint();
   clearDdErrorVisual();
+  if (practiceSession) beginPracticeRun(false);
   if (!lastSuccessfulTranscript) {
     playAgainAvailable = false;
     playAgainUnavailableReason = 'exhausted-all-variations';
@@ -2764,7 +3040,7 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   header.className = 'hand-head';
   header.innerHTML = `<strong class="seat-name${active ? ' active-seat-name' : ''}">${seatName[seat]}</strong>`;
   card.appendChild(header);
-  if (displayMode === 'widget' && narrate) {
+  if (isWidgetShellMode && narrate) {
     const entry = widgetNarrationBySeat[seat];
     if (entry?.text) {
       const bubble = document.createElement('aside');
@@ -2810,7 +3086,7 @@ function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
 }
 
 function applyNarrationBubbleCollisionAvoidance(tableCanvas: HTMLElement): void {
-  if (displayMode !== 'widget' || !narrate) return;
+  if (!isWidgetShellMode || !narrate) return;
   const trick = tableCanvas.querySelector<HTMLElement>('.trick-table');
   if (!trick) return;
   const trickRect = trick.getBoundingClientRect();
@@ -2828,7 +3104,7 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
   const table = document.createElement('section');
   table.className = `trick-table${trickFrozen ? ' frozen' : ''}${visuallyHidden ? ' reading-hidden' : ''}`;
   if (trickFrozen) {
-    if (displayMode !== 'widget') {
+    if (!isWidgetShellMode) {
       table.title = 'Click to dismiss trick';
     }
     table.onclick = () => {
@@ -2958,9 +3234,15 @@ function renderControlsBanner(): HTMLElement {
   row.appendChild(puzzleLabel);
 
   const currentEntry = demoProblems.find((p) => p.id === currentProblemId);
+  const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
+  const practiceLink = document.createElement('a');
+  practiceLink.href = `${base}practice/`;
+  practiceLink.className = 'controls-link';
+  practiceLink.textContent = 'Practice mode';
+  row.appendChild(practiceLink);
+
   if (currentEntry?.articlePath) {
     const articleLink = document.createElement('a');
-    const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
     articleLink.href = `${base}${currentEntry.articlePath.replace(/^\/+/, '')}`;
     articleLink.target = '_blank';
     articleLink.rel = 'noopener noreferrer';
@@ -2996,16 +3278,45 @@ function renderControlsBanner(): HTMLElement {
   return bar;
 }
 
+function renderPracticeHeader(view: State): HTMLElement {
+  const header = document.createElement('section');
+  header.className = 'practice-header';
+  if (!practiceSession) {
+    header.textContent = `Practice Mode · Goal: ${practiceGoalSummary(view)}`;
+    return header;
+  }
+  const queueSize = practiceSession.queue.length;
+  const indexLabel = queueSize > 0 ? `${practiceSession.queueIndex + 1}/${queueSize}` : '-/-';
+  const undoCount = practiceSession.perPuzzleUndoCount[currentProblemId] ?? practiceSession.currentUndoCount;
+  header.textContent = `Practice Mode · Puzzle ${indexLabel} · Solved ${practiceSession.solved}/${practiceSession.attempted} · Perfect ${practiceSession.perfect} · Undo ${undoCount}`;
+  return header;
+}
+
+function renderPracticePuzzleStateBar(view: State): HTMLElement {
+  const bar = document.createElement('section');
+  bar.className = 'practice-puzzle-state-bar';
+  const strain = view.contract.strain;
+  if (view.goal.type === 'minTricks') {
+    const initialGoal = currentProblem.goal.type === 'minTricks' ? currentProblem.goal.n : view.goal.n;
+    const currentGoal = view.goal.n;
+    bar.textContent = `${strain} · Goal ${currentGoal}/${initialGoal} · NS ${view.tricksWon.NS} · EW ${view.tricksWon.EW}`;
+  } else {
+    bar.textContent = `${strain} · Goal ${formatGoal(view)} · NS ${view.tricksWon.NS} · EW ${view.tricksWon.EW}`;
+  }
+  return bar;
+}
+
 function renderBoardNavigationArea(view: State): HTMLElement {
   const section = document.createElement('section');
   section.className = `board-navigation-area mode-${displayMode}`;
+  const practicePuzzleMode = displayMode === 'practice' && !!practiceSession && !practiceSession.solutionMode;
 
   const outcome = document.createElement('div');
   outcome.className = `outcome-module ${runStatus === 'success' ? 'ok' : runStatus === 'failure' ? 'fail' : 'neutral'}`;
   const noPlayYet = ddsPlayHistory.length === 0 && view.tricksWon.NS === 0 && view.tricksWon.EW === 0 && view.trick.length === 0;
   const canonicalStatus = canonicalRunStatusText(runStatus);
   const terminalCanonical = runStatus === 'success' || runStatus === 'failure';
-  if (displayMode === 'widget' && terminalCanonical) {
+  if (isWidgetShellMode && terminalCanonical) {
     outcome.textContent = canonicalStatus;
   } else if (activeHint) {
     outcome.classList.add('hint-active');
@@ -3029,7 +3340,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
       outcome.appendChild(fallback);
     }
     hintDiag(`message area using activeHint lines=${activeHint.textLine}`);
-  } else if (displayMode === 'widget') {
+  } else if (isWidgetShellMode) {
     if (hintLoading) {
       outcome.textContent = 'Calculating hint…';
       section.appendChild(outcome);
@@ -3045,10 +3356,16 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     }
     if (widgetStatus.type === 'narration' && widgetStatus.text) {
       outcome.textContent = widgetStatus.text;
+    } else if (widgetStatus.type === 'message' && widgetStatus.text) {
+      outcome.textContent = widgetStatus.text;
     } else if (noPlayYet) {
-      const strain = view.contract.strain;
-      const takeN = view.goal.type === 'minTricks' ? view.goal.n : '-';
-      outcome.textContent = alwaysHint ? `${strain} take ${takeN} · Press 💡` : `${strain} take ${takeN}`;
+      if (displayMode === 'practice') {
+        outcome.textContent = `Practice Mode · Goal: ${practiceGoalSummary(view)}`;
+      } else {
+        const strain = view.contract.strain;
+        const takeN = view.goal.type === 'minTricks' ? view.goal.n : '-';
+        outcome.textContent = alwaysHint ? `${strain} take ${takeN} · Press 💡` : `${strain} take ${takeN}`;
+      }
     } else {
       outcome.textContent = canonicalStatus;
     }
@@ -3062,20 +3379,20 @@ function renderBoardNavigationArea(view: State): HTMLElement {
 
   const restartBtn = document.createElement('button');
   restartBtn.type = 'button';
-  restartBtn.textContent = displayMode === 'widget' ? '⏮' : 'Restart';
+  restartBtn.textContent = isWidgetShellMode ? '⏮' : 'Restart';
   restartBtn.title = 'Restart';
   restartBtn.setAttribute('aria-label', 'Restart');
-  if (displayMode === 'widget') restartBtn.classList.add('icon-btn');
+  if (isWidgetShellMode) restartBtn.classList.add('icon-btn');
   restartBtn.onclick = () => resetGame(currentSeed, 'reset');
   transport.appendChild(restartBtn);
 
   const undoBtn = document.createElement('button');
   undoBtn.type = 'button';
-  undoBtn.textContent = displayMode === 'widget' ? '↩' : 'Undo';
+  undoBtn.textContent = isWidgetShellMode ? '↩' : 'Undo';
   undoBtn.title = 'Undo';
   undoBtn.setAttribute('aria-label', 'Undo');
-  if (displayMode === 'widget') undoBtn.classList.add('icon-btn', 'undo-btn');
-  if (displayMode !== 'widget') undoBtn.disabled = undoStack.length === 0;
+  if (isWidgetShellMode) undoBtn.classList.add('icon-btn', 'undo-btn');
+  if (!isWidgetShellMode) undoBtn.disabled = undoStack.length === 0;
   undoBtn.onclick = () => {
     if (undoStack.length === 0) return;
     backupLastUserPlay();
@@ -3091,35 +3408,48 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     transport.appendChild(nextVariationBtn);
   }
 
-  const hintBtn = document.createElement('button');
-  hintBtn.type = 'button';
-  hintBtn.textContent = displayMode === 'widget' ? '💡' : 'Hint';
-  hintBtn.title = 'Hint';
-  hintBtn.setAttribute('aria-label', 'Hint');
-  if (displayMode === 'widget') hintBtn.classList.add('icon-btn');
-  hintBtn.onclick = (event) => {
-    hintDiag('button click');
-    event.preventDefault();
-    event.stopPropagation();
-    requestHint();
-  };
-  transport.appendChild(hintBtn);
+  if (practicePuzzleMode) {
+    const claimBtn = document.createElement('button');
+    claimBtn.type = 'button';
+    claimBtn.textContent = 'Claim';
+    claimBtn.title = 'Claim remaining tricks';
+    claimBtn.setAttribute('aria-label', 'Claim remaining tricks');
+    claimBtn.classList.add('claim-btn');
+    claimBtn.onclick = () => attemptClaim();
+    transport.appendChild(claimBtn);
+  } else {
+    const hintBtn = document.createElement('button');
+    hintBtn.type = 'button';
+    hintBtn.textContent = isWidgetShellMode ? '💡' : 'Hint';
+    hintBtn.title = 'Hint';
+    hintBtn.setAttribute('aria-label', 'Hint');
+    if (isWidgetShellMode) hintBtn.classList.add('icon-btn');
+    hintBtn.onclick = (event) => {
+      hintDiag('button click');
+      event.preventDefault();
+      event.stopPropagation();
+      requestHint();
+    };
+    transport.appendChild(hintBtn);
+  }
 
-  if (displayMode === 'widget' && typeof window !== 'undefined') {
-    const pop = document.createElement('a');
-    const u = new URL(window.location.href);
-    u.searchParams.set('mode', 'analysis');
-    u.searchParams.set('problem', currentProblemId);
-    if (userPlayHistory.length > 0) u.searchParams.set('history', encodeUserHistoryForUrl(userPlayHistory));
-    else u.searchParams.delete('history');
-    pop.href = u.toString();
-    pop.target = '_blank';
-    pop.rel = 'noopener noreferrer';
-    pop.className = 'transport-popout icon-btn';
-    pop.textContent = '↗';
-    pop.title = 'Pop Out (open full analysis)';
-    pop.setAttribute('aria-label', 'Pop Out (open full analysis)');
-    transport.appendChild(pop);
+  if (isWidgetShellMode && typeof window !== 'undefined') {
+    if (!practicePuzzleMode) {
+      const pop = document.createElement('a');
+      const u = new URL(window.location.href);
+      u.searchParams.set('mode', 'analysis');
+      u.searchParams.set('problem', currentProblemId);
+      if (userPlayHistory.length > 0) u.searchParams.set('history', encodeUserHistoryForUrl(userPlayHistory));
+      else u.searchParams.delete('history');
+      pop.href = u.toString();
+      pop.target = '_blank';
+      pop.rel = 'noopener noreferrer';
+      pop.className = 'transport-popout icon-btn';
+      pop.textContent = '↗';
+      pop.title = 'Pop Out (open full analysis)';
+      pop.setAttribute('aria-label', 'Pop Out (open full analysis)');
+      transport.appendChild(pop);
+    }
 
     const moreBtn = document.createElement('button');
     moreBtn.type = 'button';
@@ -3196,6 +3526,58 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   }
 
   section.appendChild(transport);
+  if (displayMode === 'practice' && practiceSession?.solutionMode) {
+    const actions = document.createElement('div');
+    actions.className = 'practice-actions';
+
+    const replayBtn = document.createElement('button');
+    replayBtn.type = 'button';
+    replayBtn.textContent = 'Replay';
+    replayBtn.onclick = () => {
+      beginPracticeRun(false);
+      resetGame(currentSeed, 'practiceReplay');
+    };
+    actions.appendChild(replayBtn);
+
+    const nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.textContent = 'Next Puzzle';
+    nextBtn.onclick = () => goToNextPracticePuzzle();
+    actions.appendChild(nextBtn);
+
+    section.appendChild(actions);
+  }
+
+  if (displayMode === 'practice' && practiceSession?.isTerminal && !practiceSession.solutionMode) {
+    const actions = document.createElement('div');
+    actions.className = 'practice-actions';
+
+    const replayBtn = document.createElement('button');
+    replayBtn.type = 'button';
+    replayBtn.textContent = 'Replay';
+    replayBtn.onclick = () => {
+      beginPracticeRun(false);
+      resetGame(currentSeed, 'practiceReplay');
+    };
+    actions.appendChild(replayBtn);
+
+    const solutionBtn = document.createElement('button');
+    solutionBtn.type = 'button';
+    solutionBtn.textContent = 'Show Solution';
+    solutionBtn.onclick = () => {
+      beginPracticeRun(true);
+      resetGame(currentSeed, 'practiceSolution');
+    };
+    actions.appendChild(solutionBtn);
+
+    const nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.textContent = 'Next Puzzle';
+    nextBtn.onclick = () => goToNextPracticePuzzle();
+    actions.appendChild(nextBtn);
+
+    section.appendChild(actions);
+  }
   return section;
 }
 
@@ -3311,21 +3693,28 @@ function render(): void {
   const isWidgetReadingMode = widgetReadingMode();
 
   root.innerHTML = '';
-  root.classList.toggle('mode-widget', displayMode === 'widget');
+  root.classList.toggle('mode-widget', isWidgetShellMode);
   root.classList.toggle('mode-analysis', displayMode === 'analysis');
+  root.classList.toggle('mode-practice', displayMode === 'practice');
   if (typeof document !== 'undefined') {
-    document.documentElement.classList.toggle('mode-widget', displayMode === 'widget');
+    document.documentElement.classList.toggle('mode-widget', isWidgetShellMode);
     document.documentElement.classList.toggle('mode-analysis', displayMode === 'analysis');
-    document.body.classList.toggle('mode-widget', displayMode === 'widget');
+    document.documentElement.classList.toggle('mode-practice', displayMode === 'practice');
+    document.body.classList.toggle('mode-widget', isWidgetShellMode);
     document.body.classList.toggle('mode-analysis', displayMode === 'analysis');
+    document.body.classList.toggle('mode-practice', displayMode === 'practice');
   }
 
   if (displayMode === 'analysis') {
     root.appendChild(renderControlsBanner());
   }
+  if (displayMode === 'practice') {
+    root.appendChild(renderPracticeHeader(view));
+    root.appendChild(renderPracticePuzzleStateBar(view));
+  }
 
   const mainRow = document.createElement('section');
-  mainRow.className = `main-row mode-${displayMode}${displayMode === 'widget' && showWidgetTeachingPane ? ' with-widget-pane' : ''}`;
+  mainRow.className = `main-row mode-${displayMode}${isWidgetShellMode && showWidgetTeachingPane ? ' with-widget-pane' : ''}`;
 
   const tableHost = document.createElement('div');
   tableHost.className = 'table-host';
@@ -3343,7 +3732,7 @@ function render(): void {
     mainRow.appendChild(renderTeachingEventsPane('analysis'));
   }
   mainRow.appendChild(tableHost);
-  if (displayMode === 'widget' && showWidgetTeachingPane) {
+  if (isWidgetShellMode && showWidgetTeachingPane) {
     mainRow.appendChild(renderTeachingEventsPane('widget'));
   }
   if (displayMode === 'analysis') {
@@ -3351,6 +3740,9 @@ function render(): void {
   }
   root.appendChild(mainRow);
   root.appendChild(renderBoardNavigationArea(view));
+  if (displayMode === 'practice') {
+    root.appendChild(renderPracticeClaimDebugPanel());
+  }
   applyNarrationBubbleCollisionAvoidance(tableCanvas);
   if (displayMode === 'analysis' && (showLog || showDebugSection)) {
     root.appendChild(renderDebugSection());
@@ -3394,6 +3786,7 @@ function replayInitialUserHistoryIfPresent(): void {
   refreshThreatModel(currentProblemId, false);
 }
 
+if (practiceSession) beginPracticeRun(false);
 refreshThreatModel(currentProblemId, false);
 replayInitialUserHistoryIfPresent();
 warmDdsRuntime();

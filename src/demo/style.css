@@ -49,6 +49,26 @@ html.mode-widget {
   align-items: center;
 }
 
+.practice-header {
+  border: 1px solid #d6dee9;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.practice-puzzle-state-bar {
+  border: 1px solid #d6dee9;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
 .main-row {
   --play-area-height: calc(var(--hand-box-h) * 2 + var(--trick-box-h) + var(--table-gap-y, 8px) * 2);
   display: grid;
@@ -896,6 +916,12 @@ html.mode-widget {
   position: relative;
 }
 
+.mode-practice .board-navigation-area.mode-practice {
+  gap: 4px;
+  width: var(--trick-box-w);
+  justify-items: center;
+}
+
 .outcome-module {
   border-radius: 8px;
   padding: 6px 10px;
@@ -963,6 +989,49 @@ html.mode-widget {
   flex-wrap: wrap;
 }
 
+.practice-actions {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.practice-actions button {
+  border: 1px solid #cfd8e5;
+  background: #fff;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 11px;
+  color: #334155;
+  cursor: pointer;
+}
+
+.practice-actions button:hover {
+  background: #f3f6fa;
+}
+
+.practice-claim-debug {
+  border: 1px solid #d6dee9;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #334155;
+}
+
+.practice-claim-debug strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: #475569;
+}
+
+.practice-claim-debug-body {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.35;
+}
+
 .transport-bar button {
   border: 1px solid #9aa5b5;
   background: #fff;
@@ -1024,6 +1093,11 @@ html.mode-widget {
   padding: 0 5px;
   font-size: 11px;
   color: #1f2937;
+}
+
+.mode-practice .claim-btn {
+  font-size: 11px;
+  padding: 0 6px;
 }
 
 .mode-widget .transport-bar button:not(:disabled):hover,
