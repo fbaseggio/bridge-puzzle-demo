@@ -87,6 +87,32 @@ function bindingLabel(binding?: CardBinding): string {
   return base;
 }
 
+function formatHandsCompact(hands: BoundEncapsulation['hands'], suitOrder: Suit[]): string {
+  const seatOrder: Side[] = ['N', 'E', 'S', 'W'];
+  const lines: string[] = [];
+  for (const seat of seatOrder) {
+    const parts = suitOrder.map((suit) => `${suit}${hands[seat][suit].join('') || '-'}`);
+    lines.push(`${seat}: ${parts.join(' ')}`);
+  }
+  return lines.join('\n');
+}
+
+function formatPreCompletionBlock(bound: BoundEncapsulation): string {
+  const md = bound.metadata;
+  const lines: string[] = [];
+  lines.push(
+    `counts specifiedN=${md.specifiedNorth} specifiedS=${md.specifiedSouth} defaultHandSize=${md.defaultHandSize} finalTarget=${md.finalHandSize}`
+  );
+  lines.push(
+    `preTotals N=${md.preCompletionTotals.N} E=${md.preCompletionTotals.E} S=${md.preCompletionTotals.S} W=${md.preCompletionTotals.W}`
+  );
+  lines.push(
+    `idleNeeded N=${md.idleCardsNeededByHand.N} E=${md.idleCardsNeededByHand.E} S=${md.idleCardsNeededByHand.S} W=${md.idleCardsNeededByHand.W}`
+  );
+  lines.push(formatHandsCompact(md.preCompletionHands, bound.parsed.suitOrder));
+  return lines.join('\n');
+}
+
 function formatBindTrace(bound: BoundEncapsulation): string {
   const explained = explainPositionInverse({
     hands: bound.hands,
@@ -166,6 +192,12 @@ function formatInverseTrace(bound: BoundEncapsulation, sourceEncapText: string):
       lines.push(
         `  selectedByScorer=${s.selectedByScorer.text ?? '<none>'} [primary=${s.selectedByScorer.primary ?? 'unknown'}]`
       );
+      if (s.selectedByScorer.assignmentSteps && s.selectedByScorer.assignmentSteps.length > 0) {
+        lines.push('  assignments=');
+        for (const step of s.selectedByScorer.assignmentSteps) {
+          lines.push(`    - ${step}`);
+        }
+      }
     }
   }
   return lines.join('\n');
@@ -182,6 +214,7 @@ function formatRoundTripTrace(payload: {
   normalizedInput: string;
   parsedInput: ReturnType<typeof parseEncapsulation>;
   diagram1: string;
+  preCompletionBlock: string;
   bind1Trace: string;
   explicitEncap1: string;
   inverseTrace1: string;
@@ -207,6 +240,8 @@ function formatRoundTripTrace(payload: {
   lines.push('STEP 2  BIND DIAGRAM');
   lines.push('DIAGRAM');
   lines.push(payload.diagram1);
+  lines.push('PRE-COMPLETION');
+  lines.push(payload.preCompletionBlock);
   lines.push('BIND TRACE');
   lines.push(payload.bind1Trace);
   lines.push('');
@@ -242,6 +277,10 @@ export function normalizeEncapsulationRoundTrip(encap: string, options: RoundTri
   const normalizedInput = normalizeInput(encap);
   const parsed = parseEncapsulation(normalizedInput);
   const bind1 = bindStandard(parsed);
+  const diagram1 = renderDiagram(bind1);
+  const bind1Trace = traceEnabled ? formatBindTrace(bind1) : undefined;
+  const inverseTrace1 = traceEnabled ? formatInverseTrace(bind1, normalizedInput) : undefined;
+  const preCompletionBlock = traceEnabled ? formatPreCompletionBlock(bind1) : undefined;
   const explicitEncap1 = inferPositionEncapsulation({
     hands: bind1.hands,
     turn: leadToTurn(bind1.lead),
@@ -278,22 +317,23 @@ export function normalizeEncapsulationRoundTrip(encap: string, options: RoundTri
     explicitEncap1,
     explicitEncap2,
     stable: explicitEncap1 === explicitEncap2,
-    diagram1: renderDiagram(bind1),
+    diagram1,
     diagram2: bind2Diagram,
     secondPassError,
-    bind1Trace: traceEnabled ? formatBindTrace(bind1) : undefined,
+    bind1Trace,
     bind2Trace,
-    inverseTrace1: traceEnabled ? formatInverseTrace(bind1, normalizedInput) : undefined,
+    inverseTrace1,
     inverseTrace2,
     traceReport: traceEnabled
       ? formatRoundTripTrace({
           input: encap,
           normalizedInput,
           parsedInput: parsed,
-          diagram1: renderDiagram(bind1),
-          bind1Trace: formatBindTrace(bind1),
+          diagram1,
+          preCompletionBlock: preCompletionBlock ?? '',
+          bind1Trace: bind1Trace ?? '',
           explicitEncap1,
-          inverseTrace1: formatInverseTrace(bind1, normalizedInput),
+          inverseTrace1: inverseTrace1 ?? '',
           diagram2: bind2Diagram,
           bind2Trace,
           explicitEncap2,

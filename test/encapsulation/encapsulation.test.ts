@@ -55,7 +55,7 @@ describe('encapsulation parser', () => {
 describe('specified counts and default hand size', () => {
   it('computes specified counts and default hand size from parsed letters', () => {
     const counts = computeSpecifiedCardCounts('Wa, a > w');
-    expect(counts).toEqual({ specifiedNorth: 3, specifiedSouth: 0 });
+    expect(counts).toEqual({ specifiedNorth: 3, specifiedSouth: 2 });
 
     const bound = bindStandard('Wa, a > w');
     expect(bound.metadata.defaultHandSize).toBe(3);
@@ -124,11 +124,12 @@ describe('deterministic binding examples', () => {
     expect(b.hands.S.S).toContain('K');
   });
 
-  it('binds WA = with flexible lead and expected one-suit NS holding', () => {
+  it('binds WA = with flexible lead and owner-relative uppercase stopper assignment', () => {
     const b = bindStandard('WA =');
     expect(b.lead).toBe('=');
     expect(b.hands.N.S).toEqual(['A', '3']);
-    expect(b.hands.S.S).toEqual(['8', '2']);
+    expect(b.hands.S.S).toEqual(['J', '2']);
+    expect(b.hands.E.S).toEqual(['K', 'Q']);
   });
 
   it('exports bound threat cards for lowercase and uppercase threat symbols', () => {

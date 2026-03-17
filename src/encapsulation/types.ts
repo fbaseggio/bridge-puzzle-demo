@@ -30,6 +30,9 @@ export type BindMetadata = {
   specifiedSouth: number;
   defaultHandSize: number;
   finalHandSize: number;
+  preCompletionHands: FourHands;
+  preCompletionTotals: Record<Side, number>;
+  idleCardsNeededByHand: Record<Side, number>;
 };
 
 export type BoundEncapsulation = {

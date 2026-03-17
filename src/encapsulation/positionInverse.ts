@@ -57,7 +57,7 @@ export type SuitInverseExplanation = {
   raw: InverseResult;
   candidateScores: Array<{ text: string; primary: 'N' | 'S'; score: number; residualOpposite: number }>;
   contenderScores: Array<{ text: string; primary: 'N' | 'S'; score: number; residualOpposite: number }>;
-  selectedByScorer?: { text?: string; primary?: 'N' | 'S' | 'unknown' };
+  selectedByScorer?: { text?: string; primary?: 'N' | 'S' | 'unknown'; assignmentSteps?: string[] };
 };
 
 export type PositionInverseExplanation = {
@@ -141,17 +141,23 @@ function inferSuit(
   if (isEmptySuit(ranks)) {
     return { text: '0', primary: 'unknown', raw: { type: 'no-fit' } };
   }
+  const nsCount = ranks.N.length + ranks.S.length;
+  const ewCount = ranks.E.length + ranks.W.length;
+  const effectivePreferredPrimary: 'N' | 'S' | undefined =
+    preferredPrimary ?? (nsCount === 0 && ewCount > 0 ? 'S' : undefined);
   const detailed = inferSuitAbstractionDetailed(
     { N: ranks.N, E: ranks.E, S: ranks.S, W: ranks.W },
     { suit, threatCardIds }
   );
   const result = detailed.result;
-  const resolvedOu = resolveOuAmbiguity(result, ranks, preferredPrimary);
+  const resolvedOu = resolveOuAmbiguity(result, ranks, effectivePreferredPrimary);
   const singletonPrimary: 'N' | 'S' | null =
     ranks.N.length + ranks.S.length === 1 ? (ranks.N.length === 1 ? 'N' : 'S') : null;
   const resolvedPrimary =
     singletonPrimary ??
-    (detailed.primary === 'unknown' && resolvedOu && preferredPrimary ? preferredPrimary : detailed.primary);
+    (detailed.primary === 'unknown' && resolvedOu && effectivePreferredPrimary
+      ? effectivePreferredPrimary
+      : detailed.primary);
   return {
     text: resolvedOu ?? prettyResult(result),
     primary: resolvedPrimary,
@@ -418,7 +424,11 @@ function explainSuit(
     contenderScores: inferred.debug?.contenders ?? [],
     selectedByScorer:
       inferred.debug?.selectedText || inferred.debug?.selectedPrimary
-        ? { text: inferred.debug?.selectedText, primary: inferred.debug?.selectedPrimary }
+        ? {
+            text: inferred.debug?.selectedText,
+            primary: inferred.debug?.selectedPrimary,
+            assignmentSteps: inferred.debug?.selectedAssignmentSteps ?? []
+          }
         : undefined
   };
 }

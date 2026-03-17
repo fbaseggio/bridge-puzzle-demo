@@ -13,6 +13,15 @@ function emptyHands(): FourHands {
   return { N: emptyHand(), E: emptyHand(), S: emptyHand(), W: emptyHand() };
 }
 
+function cloneHands(hands: FourHands): FourHands {
+  return {
+    N: { S: [...hands.N.S], H: [...hands.N.H], D: [...hands.N.D], C: [...hands.N.C] },
+    E: { S: [...hands.E.S], H: [...hands.E.H], D: [...hands.E.D], C: [...hands.E.C] },
+    S: { S: [...hands.S.S], H: [...hands.S.H], D: [...hands.S.D], C: [...hands.S.C] },
+    W: { S: [...hands.W.S], H: [...hands.W.H], D: [...hands.W.D], C: [...hands.W.C] }
+  };
+}
+
 type SuitState = {
   used: Set<string>;
   highIdx: number;
@@ -102,20 +111,12 @@ function nextLow(suit: Suit, suitState: Map<Suit, SuitState>): string {
 function stopperHands(
   code: 'a' | 'b' | 'c',
   owner: 'N' | 'S',
-  primary: 'N' | 'S',
-  isUpper: boolean
+  _primary: 'N' | 'S',
+  _isUpper: boolean
 ): Array<'E' | 'W'> {
   if (code === 'c') return ['W', 'E'];
-
-  // Lowercase: map from actual threat owner side.
-  if (!isUpper) {
-    if (owner === 'N') return code === 'a' ? ['W'] : ['E'];
-    return code === 'a' ? ['E'] : ['W'];
-  }
-
-  // Uppercase ambiguity: use primary-side perspective to stay deterministic
-  // and match discussed examples such as WB -> East stoppers when primary is North.
-  if (primary === 'N') return code === 'a' ? ['W'] : ['E'];
+  // Stopper side is determined from the actual threat owner side.
+  if (owner === 'N') return code === 'a' ? ['W'] : ['E'];
   return code === 'a' ? ['E'] : ['W'];
 }
 
@@ -134,8 +135,8 @@ function computeSpecifiedCounts(parsed: ParsedEncapsulation): { specifiedNorth: 
       if (s.primary === 'N') specifiedNorth += 1;
       else specifiedSouth += 1;
       if (ch >= 'A' && ch <= 'Z') {
-        if (s.primary === 'N') specifiedSouth -= 1;
-        else specifiedNorth -= 1;
+        if (s.primary === 'N') specifiedSouth += 1;
+        else specifiedNorth += 1;
       }
     }
   }
@@ -410,36 +411,6 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
   const counts = computeSpecifiedCounts(parsed);
   const defaultHandSize = Math.max(counts.specifiedNorth, counts.specifiedSouth);
 
-  // Special degenerate case discussed in requirements/examples.
-  if (parsed.suits.length === 1 && parsed.lead === '=' && parsed.suits[0]?.pattern === 'WA') {
-    hands.N.S = ['A', '3'];
-    hands.S.S = ['8', '2'];
-    hands.E.S = [];
-    hands.W.S = [];
-    cardBindings.length = 0;
-    bindingIndex.clear();
-    const forcedBindings: CardBinding[] = [
-      { suit: 'S', hand: 'N', rank: 'A', symbol: 'W', index: 1, role: 'structural' },
-      { suit: 'S', hand: 'S', rank: '2', symbol: 'W', index: 1, role: 'structural', note: 'low' },
-      { suit: 'S', hand: 'N', rank: '3', symbol: 'A', index: 1, role: 'structural', note: 'low' },
-      { suit: 'S', hand: 'S', rank: '8', symbol: 'A', index: 1, role: 'structural' }
-    ];
-    for (const binding of forcedBindings) {
-      const key = `${binding.hand}:${binding.suit}:${binding.rank}`;
-      bindingIndex.set(key, cardBindings.length);
-      cardBindings.push(binding);
-    }
-    const st = suitState.get('S');
-    st?.used.clear();
-    for (const rank of [...hands.N.S, ...hands.S.S]) st?.used.add(rank);
-    if (st) {
-      st.highIdx = 0;
-      while (st.highIdx < RANKS_HIGH_TO_LOW.length && st.used.has(RANKS_HIGH_TO_LOW[st.highIdx])) st.highIdx += 1;
-      st.lowIdx = 0;
-      while (st.lowIdx < RANKS_LOW_TO_HIGH.length && st.used.has(RANKS_LOW_TO_HIGH[st.lowIdx])) st.lowIdx += 1;
-    }
-  }
-
   const target = Math.max(
     defaultHandSize,
     totalCards(hands, 'N'),
@@ -448,13 +419,30 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
     totalCards(hands, 'W')
   );
 
+  const preCompletionHands = cloneHands(hands);
+  const preCompletionTotals: Record<Side, number> = {
+    N: totalCards(preCompletionHands, 'N'),
+    E: totalCards(preCompletionHands, 'E'),
+    S: totalCards(preCompletionHands, 'S'),
+    W: totalCards(preCompletionHands, 'W')
+  };
+  const idleCardsNeededByHand: Record<Side, number> = {
+    N: Math.max(0, target - preCompletionTotals.N),
+    E: Math.max(0, target - preCompletionTotals.E),
+    S: Math.max(0, target - preCompletionTotals.S),
+    W: Math.max(0, target - preCompletionTotals.W)
+  };
+
   fillIdleCards(hands, parsed, suitState, target, cardBindings, bindingIndex);
   sortHand(hands);
 
   const metadata: BindMetadata = {
     ...counts,
     defaultHandSize,
-    finalHandSize: target
+    finalHandSize: target,
+    preCompletionHands,
+    preCompletionTotals,
+    idleCardsNeededByHand
   };
 
   return {

@@ -9,6 +9,7 @@ import { p007 } from '../puzzles/p007';
 import { p008 } from '../puzzles/p008';
 import { p009 } from '../puzzles/p009';
 import { p010 } from '../puzzles/p010';
+import { p011 } from '../puzzles/p011';
 import { squeezeSelf01 } from '../puzzles/squeeze_self_01';
 import { listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } from '../encapsulation/workbenchProblems';
 
@@ -57,5 +58,6 @@ export const demoProblems: DemoProblem[] = [
   { id: 'p008', label: 'p008', problem: p008 },
   { id: 'p009', label: 'p009', problem: p009 },
   { id: 'p010', label: 'p010', problem: p010 },
+  { id: 'p011', label: 'p011', problem: p011 },
   ...encapsulationDemoProblems
 ];

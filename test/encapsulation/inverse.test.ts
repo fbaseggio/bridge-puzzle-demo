@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inferSuitAbstraction } from '../../src/encapsulation';
+import { inferSuitAbstraction, inferSuitAbstractionDetailed, type SuitInverseOptions } from '../../src/encapsulation';
 
 describe('single-suit inverse analyzer', () => {
   it('infers Waou for a matching bound single-suit layout', () => {
@@ -92,24 +92,24 @@ describe('single-suit inverse analyzer', () => {
     expect(result).toBe('WLau');
   });
 
-  it('prefers compact Wcuu over expanded W/o/u in initial p007 hearts', () => {
+  it('keeps uppercase threat form WCuu in initial p007 hearts', () => {
     const result = inferSuitAbstraction({
       N: 'A2',
       E: 'QJT9',
       S: '54',
       W: '76'
     });
-    expect(result).toBe('Wcuu');
+    expect(result).toBe('WCuu');
   });
 
-  it('does not let partner low card force c when primary card is only over-stopped', () => {
+  it('keeps structural base form when primary card is over-stopped', () => {
     const result = inferSuitAbstraction({
       N: 'K',
       E: 'Q',
       S: '2',
       W: 'A'
     });
-    expect(result).toBe('a');
+    expect(result).toBe('amu');
   });
 
   it('excludes W/L structural lows from threat inflation and prefers WLc', () => {
@@ -130,5 +130,71 @@ describe('single-suit inverse analyzer', () => {
       W: 'T8'
     });
     expect(result).toBe('WLauu');
+  });
+
+  describe('targeted refinement exceptional branches', () => {
+    type RefinementCase = {
+      name: string;
+      input: { N: string; E: string; S: string; W: string };
+      options?: SuitInverseOptions;
+      expected: string;
+    };
+
+    const cases: RefinementCase[] = [
+      {
+        name: 'single NS card with known-true threat becomes a/b branch',
+        input: { N: '8', E: '', S: '', W: 'A' },
+        options: { suit: 'H', threatCardIds: ['H8'] },
+        expected: 'a'
+      },
+      {
+        name: 'single NS card with known-false keeps superficial threat interpretation',
+        input: { N: '8', E: 'K', S: '', W: 'AQ' },
+        options: { suit: 'H', threatCardIds: [] },
+        expected: 'co'
+      },
+      {
+        name: 'primary pivot arbitration keeps structural base form',
+        input: { N: 'K', E: 'Q', S: '2', W: 'A' },
+        expected: 'amu'
+      },
+      {
+        name: 'post-trick p001 shape',
+        input: { N: 'A8', E: '', S: '5', W: 'J' },
+        expected: 'Wwo'
+      },
+      {
+        name: 'post-trick p003 shape',
+        input: { N: 'A8', E: 'T', S: '5', W: 'KJ' },
+        expected: 'Wau'
+      },
+      {
+        name: 'p007 spades shape',
+        input: { N: 'A84', E: '6', S: 'K5', W: 'QT7' },
+        expected: 'WLau'
+      },
+      {
+        name: 'p007 hearts compact shape',
+        input: { N: 'A2', E: 'QJT9', S: '54', W: '76' },
+        expected: 'WCuu'
+      },
+      {
+        name: 'WLc structural-low regression shape',
+        input: { N: 'K2', E: 'J97', S: 'A63', W: 'QT8' },
+        expected: 'WLc'
+      },
+      {
+        name: 'WLauu winner-first regression shape',
+        input: { N: 'K2', E: 'J97', S: 'A63', W: 'T8' },
+        expected: 'WLauu'
+      }
+    ];
+
+    it('matches expected outputs for all explicit refinement branches', () => {
+      for (const c of cases) {
+        const detailed = inferSuitAbstractionDetailed(c.input, c.options);
+        expect(detailed.result, c.name).toBe(c.expected);
+      }
+    });
   });
 });

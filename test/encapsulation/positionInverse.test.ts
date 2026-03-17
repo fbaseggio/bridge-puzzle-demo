@@ -24,7 +24,7 @@ describe('position-level inverse encapsulation rendering', () => {
     expect(out.includes('0')).toBe(true);
   });
 
-  it('surfaces ambiguity markers rather than silently choosing', () => {
+  it('uses South-default primary to resolve opponent-only o/u suits', () => {
     const out = inferPositionEncapsulation({
       hands: {
         N: { S: [], H: [], D: [], C: [] },
@@ -35,7 +35,8 @@ describe('position-level inverse encapsulation rendering', () => {
       turn: 'N',
       suitOrder: ['S', 'H', 'D', 'C']
     });
-    expect(out.includes('{ambiguous:')).toBe(true);
+    expect(out.includes('{ambiguous:')).toBe(false);
+    expect(/\bu\b/.test(out)).toBe(true);
   });
 
   it('matches p003 suit-level inverse shape with threat metadata', () => {
@@ -82,7 +83,7 @@ describe('position-level inverse encapsulation rendering', () => {
       suitOrder: ['S', 'H', 'D', 'C'],
       threatCardIds: ['D8']
     });
-    expect(out).toBe('[schd] Wwou, 0 > {ambiguous:o|u}, a');
+    expect(out).toBe('[schd] Wwou, 0 > u, a');
   });
 
   it('matches initial p007 whole-position inverse', () => {

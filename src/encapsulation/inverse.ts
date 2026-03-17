@@ -25,7 +25,10 @@ export type SuitInverseDetailed = {
     matched: Array<{ text: string; primary: 'N' | 'S'; score: number; residualOpposite: number }>;
     contenders: Array<{ text: string; primary: 'N' | 'S'; score: number; residualOpposite: number }>;
     selectedText?: string;
+    selectedBaseText?: string;
     selectedPrimary?: 'N' | 'S' | 'unknown';
+    selectedAssignmentSteps?: string[];
+    wasRefined?: boolean;
   };
 };
 
@@ -36,6 +39,7 @@ type Candidate = {
   primary: 'N' | 'S';
   score: number;
   residualOpposite: number;
+  assignmentSteps?: string[];
 };
 
 type PrimarySemantics = {
@@ -204,14 +208,11 @@ function stopperSeats(owner: 'N' | 'S', token: 'a' | 'b' | 'c'): Array<'E' | 'W'
 
 function stopperSeatsForToken(
   owner: 'N' | 'S',
-  primary: 'N' | 'S',
+  _primary: 'N' | 'S',
   token: 'a' | 'b' | 'c',
-  isUpper: boolean
+  _isUpper: boolean
 ): Array<'E' | 'W'> {
-  if (token === 'c') return ['W', 'E'];
-  if (!isUpper) return stopperSeats(owner, token);
-  if (primary === 'N') return token === 'a' ? ['W'] : ['E'];
-  return token === 'a' ? ['E'] : ['W'];
+  return stopperSeats(owner, token);
 }
 
 function simulatePattern(pattern: string, primary: 'N' | 'S', residualOpposite = 0): SeatRanks {
@@ -448,6 +449,15 @@ function applyTargetedRefinement(
   primary: 'N' | 'S',
   threatKnowledge: ThreatKnowledge
 ): string {
+  // Refinements are an exceptional fallback layer only.
+  //
+  // Policy:
+  // 1) Prefer first-pass procedural inversion as the source of truth.
+  // 2) Add a refinement only for a narrowly scoped, explicitly reviewed case.
+  // 3) Remove refinements when first-pass rules are corrected to cover the case.
+  //
+  // This function should stay small and rarely used; avoid growing it into a
+  // second inference algorithm.
   const primaryCount = primary === 'N' ? ranks.N.length : ranks.S.length;
   const oppositeCount = primary === 'N' ? ranks.S.length : ranks.N.length;
   const overCount = primary === 'N' ? ranks.W.length : ranks.E.length;
@@ -466,21 +476,7 @@ function applyTargetedRefinement(
     if (threatKnowledge === 'known-true') {
       return singletonOver > 0 ? 'a' : 'b';
     }
-    if (threatKnowledge === 'known-false') {
-      return `i${'o'.repeat(singletonOver)}${'u'.repeat(singletonUnder)}`;
-    }
     return text;
-  }
-
-  // When opposite partner low cards exist, do not let them drive threat
-  // stopper class; classify by the primary structural card first.
-  if (primaryCount === 1 && oppositeCount >= 1 && primaryRanks.length > 0) {
-    const pivotIdx = rankIdx(primaryRanks.sort((a, b) => rankIdx(a) - rankIdx(b))[0]);
-    const overStopsPivot = overRanks.some((r) => rankIdx(r) < pivotIdx);
-    const underStopsPivot = underRanks.some((r) => rankIdx(r) < pivotIdx);
-    if (overStopsPivot && !underStopsPivot) return 'a';
-    if (!overStopsPivot && underStopsPivot) return 'b';
-    if (overStopsPivot && underStopsPivot) return 'c';
   }
 
   // Post-trick p001 shape: promoted second winner plus one over-opponent residual.
@@ -488,19 +484,9 @@ function applyTargetedRefinement(
     return 'Wwo';
   }
 
-  // Post-trick p003-style shape.
-  if (threatKnowledge !== 'known-true' && primaryCount === 2 && oppositeCount === 1 && overCount === 2 && underCount === 1) {
-    return 'Wwou';
-  }
-
   // p007 spades shape.
   if (ranks.N.length === 3 && ranks.S.length === 2 && ranks.W.length === 3 && ranks.E.length === 1) {
     return 'WLau';
-  }
-
-  // p007 hearts compact form.
-  if (primaryCount === 2 && oppositeCount === 2 && overCount === 2 && underCount >= 2) {
-    return `Wc${'u'.repeat(underCount - 2)}`;
   }
 
   // Exclude W/L structural lows from threat candidacy: compact WLc shape.
@@ -549,6 +535,7 @@ type ProceduralCandidate = {
   primary: 'N' | 'S';
   residualOpposite: number;
   linkCount: number;
+  assignmentSteps: string[];
 };
 
 function cardKey(seat: Side, rank: string): string {
@@ -644,30 +631,41 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
   let oCount = 0;
   let uCount = 0;
   let linksSeen = 0;
+  const assignmentSteps: string[] = [];
+
+  const bindCard = (seat: Side, rank: string, label: string): boolean => {
+    const key = cardKey(seat, rank);
+    if (bound.has(key)) return false;
+    bound.add(key);
+    assignmentSteps.push(`${seat}${rank}->${label}`);
+    return true;
+  };
 
   const cards = sortedCards(ranks);
   for (let i = 0; i < Math.min(n, cards.length); i += 1) {
     const card = cards[i];
     if (card.seat === 'E' || card.seat === 'W') break;
-    const key = cardKey(card.seat, card.rank);
-    bound.add(key);
     if (card.seat === primary) {
       linksSeen += 1;
       const lowOpp = lowestUnboundFromSeat(opposite, ranks, bound);
       if (lowOpp) {
-        bound.add(cardKey(opposite, lowOpp));
         WCount += 1;
+        bindCard(card.seat, card.rank, `W${WCount}`);
+        bindCard(opposite, lowOpp, `W${WCount}-low`);
       } else {
         wCount += 1;
+        bindCard(card.seat, card.rank, `w${wCount}`);
       }
     } else {
       linksSeen += 1;
       const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
       if (lowPrimary) {
-        bound.add(cardKey(primary, lowPrimary));
         LCount += 1;
+        bindCard(card.seat, card.rank, `L${LCount}`);
+        bindCard(primary, lowPrimary, `L${LCount}-low`);
       } else {
         lCount += 1;
+        bindCard(card.seat, card.rank, `l${lCount}`);
       }
     }
   }
@@ -676,41 +674,131 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
   if (nextNs) {
     const threatSeat = nextNs.seat;
     const threatRank = nextNs.rank;
-    bound.add(cardKey(threatSeat, threatRank));
     const stopperSize = linksSeen + 1;
     const overStops = defenderStops(overSeat, threatRank, stopperSize, ranks, bound);
     const underStops = defenderStops(underSeat, threatRank, stopperSize, ranks, bound);
+    let ownerOverSeat: 'E' | 'W' | null = null;
+    let ownerUnderSeat: 'E' | 'W' | null = null;
+    let ownerOverStops = false;
+    let ownerUnderStops = false;
 
     if (threatSeat === primary) {
-      if (overStops && underStops) cCount += 1;
-      else if (overStops) aCount += 1;
-      else if (underStops) bCount += 1;
-      else iCount += 1;
+      if (overStops && underStops) {
+        cCount += 1;
+        bindCard(threatSeat, threatRank, `c${cCount}`);
+      } else if (overStops) {
+        aCount += 1;
+        bindCard(threatSeat, threatRank, `a${aCount}`);
+      } else if (underStops) {
+        bCount += 1;
+        bindCard(threatSeat, threatRank, `b${bCount}`);
+      } else {
+        // Unstoppable threat candidate is effectively an additional winner.
+        const lowOpp = lowestUnboundFromSeat(opposite, ranks, bound);
+        if (lowOpp) {
+          WCount += 1;
+          bindCard(threatSeat, threatRank, `W${WCount}`);
+          bindCard(opposite, lowOpp, `W${WCount}-low`);
+        } else {
+          wCount += 1;
+          bindCard(threatSeat, threatRank, `w${wCount}`);
+        }
+        linksSeen += 1;
+      }
     } else {
-      if (overStops && underStops) CCount += 1;
-      else if (overStops) ACount += 1;
-      else if (underStops) BCount += 1;
-      else return null;
-      const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
-      if (!lowPrimary) return null;
-      bound.add(cardKey(primary, lowPrimary));
+      const stopsBySeat: Record<'E' | 'W', boolean> = {
+        [overSeat]: overStops,
+        [underSeat]: underStops
+      };
+      ownerOverSeat = threatSeat === 'N' ? 'W' : 'E';
+      ownerUnderSeat = threatSeat === 'N' ? 'E' : 'W';
+      ownerOverStops = stopsBySeat[ownerOverSeat];
+      ownerUnderStops = stopsBySeat[ownerUnderSeat];
+
+      let upperLabel = '';
+      if (ownerOverStops && ownerUnderStops) {
+        CCount += 1;
+        upperLabel = `C${CCount}`;
+      } else if (ownerOverStops) {
+        ACount += 1;
+        upperLabel = `A${ACount}`;
+      } else if (ownerUnderStops) {
+        BCount += 1;
+        upperLabel = `B${BCount}`;
+      } else {
+        // Unstoppable opposite-side candidate is effectively an additional link.
+        const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
+        if (lowPrimary) {
+          LCount += 1;
+          bindCard(threatSeat, threatRank, `L${LCount}`);
+          bindCard(primary, lowPrimary, `L${LCount}-low`);
+        } else {
+          lCount += 1;
+          bindCard(threatSeat, threatRank, `l${lCount}`);
+        }
+        linksSeen += 1;
+      }
+      if (upperLabel) {
+        bindCard(threatSeat, threatRank, upperLabel);
+        const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
+        if (!lowPrimary) return null;
+        bindCard(primary, lowPrimary, `${upperLabel}-low`);
+      }
     }
 
-    if (overStops) bindHighestFromSeat(overSeat, stopperSize, ranks, bound);
-    if (underStops) bindHighestFromSeat(underSeat, stopperSize, ranks, bound);
+    const addStopperLabels = (seat: 'E' | 'W', count: number, base: string): void => {
+      const sorted = [...ranks[seat]].sort((a, b) => rankIdx(a) - rankIdx(b));
+      let added = 0;
+      for (const rank of sorted) {
+        if (added >= count) break;
+        const ok = bindCard(seat, rank, `${base}-stop${added + 1}`);
+        if (ok) added += 1;
+      }
+    };
+    if (threatSeat === primary) {
+      if (overStops && underStops) {
+        addStopperLabels(overSeat, stopperSize, `c${cCount}`);
+        addStopperLabels(underSeat, stopperSize, `c${cCount}`);
+      } else if (overStops) {
+        addStopperLabels(overSeat, stopperSize, `a${aCount}`);
+      } else if (underStops) {
+        addStopperLabels(underSeat, stopperSize, `b${bCount}`);
+      }
+    } else {
+      if (ownerOverStops && ownerUnderStops) {
+        if (ownerOverSeat) addStopperLabels(ownerOverSeat, stopperSize, `C${CCount}`);
+        if (ownerUnderSeat) addStopperLabels(ownerUnderSeat, stopperSize, `C${CCount}`);
+      } else if (ownerOverStops) {
+        if (ownerOverSeat) addStopperLabels(ownerOverSeat, stopperSize, `A${ACount}`);
+      } else if (ownerUnderStops) {
+        if (ownerUnderSeat) addStopperLabels(ownerUnderSeat, stopperSize, `B${BCount}`);
+      }
+    }
   }
 
   for (const rank of ranks[primary]) {
-    if (!bound.has(cardKey(primary, rank))) iCount += 1;
+    if (!bound.has(cardKey(primary, rank))) {
+      iCount += 1;
+      bindCard(primary, rank, `i${iCount}`);
+    }
   }
   for (const rank of ranks[opposite]) {
-    if (!bound.has(cardKey(opposite, rank))) mCount += 1;
+    if (!bound.has(cardKey(opposite, rank))) {
+      mCount += 1;
+      bindCard(opposite, rank, `m${mCount}`);
+    }
   }
   for (const rank of ranks[overSeat]) {
-    if (!bound.has(cardKey(overSeat, rank))) oCount += 1;
+    if (!bound.has(cardKey(overSeat, rank))) {
+      oCount += 1;
+      bindCard(overSeat, rank, `o${oCount}`);
+    }
   }
   for (const rank of ranks[underSeat]) {
-    if (!bound.has(cardKey(underSeat, rank))) uCount += 1;
+    if (!bound.has(cardKey(underSeat, rank))) {
+      uCount += 1;
+      bindCard(underSeat, rank, `u${uCount}`);
+    }
   }
 
   const text = `${'W'.repeat(WCount)}${'w'.repeat(wCount)}${'L'.repeat(LCount)}${'l'.repeat(lCount)}${'A'.repeat(
@@ -723,7 +811,8 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
     text,
     primary,
     residualOpposite: 0,
-    linkCount: linkLettersIn(text)
+    linkCount: linkLettersIn(text),
+    assignmentSteps
   };
 }
 
@@ -761,7 +850,8 @@ function computeDetailed(input: SeatRanksInput, options: SuitInverseOptions = {}
       text: procedural.text,
       primary,
       score,
-      residualOpposite: procedural.residualOpposite
+      residualOpposite: procedural.residualOpposite,
+      assignmentSteps: procedural.assignmentSteps
     });
   }
 
@@ -814,7 +904,9 @@ function computeDetailed(input: SeatRanksInput, options: SuitInverseOptions = {}
   }));
 
   if (best.length === 1) {
-    const refined = applyTargetedRefinement(best[0].text, ranks, best[0].primary, threatKnowledge);
+    const base = best[0].text;
+    // Exceptional post-pass rewrite. In normal operation this should be a no-op.
+    const refined = applyTargetedRefinement(base, ranks, best[0].primary, threatKnowledge);
     return {
       result: refined,
       primary: best[0].primary,
@@ -822,8 +914,11 @@ function computeDetailed(input: SeatRanksInput, options: SuitInverseOptions = {}
         forcedPrimary,
         matched: matchedDebug,
         contenders: contenderDebug,
+        selectedBaseText: base,
         selectedText: refined,
-        selectedPrimary: best[0].primary
+        selectedPrimary: best[0].primary,
+        selectedAssignmentSteps: best[0].assignmentSteps ?? [],
+        wasRefined: refined !== base
       }
     };
   }
