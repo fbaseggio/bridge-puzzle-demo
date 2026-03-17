@@ -22,7 +22,7 @@ const ENCAPSULATION_WORKBENCH_ENTRIES: EncapsulationWorkbenchEntry[] = [
   { id: 'encap_wa_ww_gt_wlc_wc', name: 'Encap: wa, WW > WLc, Wc', encapsulation: 'wa, WW > WLc, Wc' },
   { id: 'encap_wa_wb_gt_wc_ww', name: 'Encap: Wa, Wb > Wc, Ww', encapsulation: 'Wa, Wb > Wc, Ww' },
   { id: 'encap_wlau_waouou_gt_b_wo', name: 'Encap: WLau, WAouou > b, Wo', encapsulation: 'WLau, WAouou > b, Wo' },
-  { id: 'encap_wg_a_gt_wc_ww', name: 'Encap: Wg, a > wc, WW', encapsulation: 'Wg, a > wc, WW' }
+  { id: 'encap_wg_a_gt_wc_ww', name: "Encap: Wg', c > wc, WW", encapsulation: "Wg', c > wc, WW" }
 ];
 
 const ENC_WORKBENCH_BY_ID = new Map(ENCAPSULATION_WORKBENCH_ENTRIES.map((entry) => [entry.id, entry] as const));
