@@ -15,6 +15,8 @@ export type SuitInverseOptions = {
   threatCardIds?: string[];
 };
 
+type ThreatKnowledge = 'known-true' | 'known-false' | 'unknown';
+
 export type SuitInverseDetailed = {
   result: InverseResult;
   primary: 'N' | 'S' | 'unknown';
@@ -93,13 +95,14 @@ function seatCountsKey(ranks: SeatRanks): string {
   return `N${ranks.N.length}E${ranks.E.length}S${ranks.S.length}W${ranks.W.length}`;
 }
 
-function threatFlagForSuit(ranks: SeatRanks, options: SuitInverseOptions): boolean {
+function threatFlagForSuit(ranks: SeatRanks, options: SuitInverseOptions): ThreatKnowledge {
+  if (options.threatCardIds === undefined) return 'unknown';
   const suit = options.suit ?? SUIT_FALLBACK;
   const ids = new Set(options.threatCardIds ?? []);
   for (const rank of [...ranks.N, ...ranks.S]) {
-    if (ids.has(`${suit}${rank}`)) return true;
+    if (ids.has(`${suit}${rank}`)) return 'known-true';
   }
-  return false;
+  return 'known-false';
 }
 
 function cacheKey(ranks: SeatRanks, options: SuitInverseOptions): string {
@@ -392,7 +395,12 @@ function canonicalForm(candidate: string): string {
   return `${'W'.repeat(count(/W/g))}${'w'.repeat(count(/w/g))}${'L'.repeat(count(/L/g))}${'l'.repeat(count(/l/g))}${'a'.repeat(count(/a/g))}${'b'.repeat(count(/b/g))}${'c'.repeat(count(/c/g))}${'i'.repeat(count(/i/g))}${'o'.repeat(count(/o/g))}${'u'.repeat(count(/u/g))}`;
 }
 
-function candidateScore(candidate: string, semantics: PrimarySemantics, threatFlag: boolean, residualOpposite: number): number {
+function candidateScore(
+  candidate: string,
+  semantics: PrimarySemantics,
+  threatKnowledge: ThreatKnowledge,
+  residualOpposite: number
+): number {
   const hasThreat = /[abc]/.test(candidate);
   const threatCount = (candidate.match(/[abc]/g) ?? []).length;
   const links = (candidate.match(/[wWlL]/g) ?? []).length;
@@ -411,8 +419,8 @@ function candidateScore(candidate: string, semantics: PrimarySemantics, threatFl
   score += highLinks * 10;
   score += threatCount * 18;
   if (hasThreat) score += 8;
-  if (threatFlag && hasThreat) score += 40;
-  if (!threatFlag && semantics.effectiveWinners === 0 && hasThreat) score -= 90;
+  if (threatKnowledge === 'known-true' && hasThreat) score += 40;
+  if (threatKnowledge === 'known-false' && semantics.effectiveWinners === 0 && hasThreat) score -= 90;
   score += upperLinks * (semantics.oppositeHighCount > 0 ? 52 : -180);
   score -= idles * 35;
   score -= lowerLinks * 80;
@@ -434,7 +442,12 @@ function dedupeCandidates(candidates: Candidate[]): Candidate[] {
   return [...byText.values()];
 }
 
-function applyTargetedRefinement(text: string, ranks: SeatRanks, primary: 'N' | 'S', threatFlag: boolean): string {
+function applyTargetedRefinement(
+  text: string,
+  ranks: SeatRanks,
+  primary: 'N' | 'S',
+  threatKnowledge: ThreatKnowledge
+): string {
   const primaryCount = primary === 'N' ? ranks.N.length : ranks.S.length;
   const oppositeCount = primary === 'N' ? ranks.S.length : ranks.N.length;
   const overCount = primary === 'N' ? ranks.W.length : ranks.E.length;
@@ -450,10 +463,13 @@ function applyTargetedRefinement(text: string, ranks: SeatRanks, primary: 'N' | 
     const singletonPrimary: 'N' | 'S' = ranks.N.length === 1 ? 'N' : 'S';
     const singletonOver = singletonPrimary === 'N' ? ranks.W.length : ranks.E.length;
     const singletonUnder = singletonPrimary === 'N' ? ranks.E.length : ranks.W.length;
-    if (threatFlag) {
+    if (threatKnowledge === 'known-true') {
       return singletonOver > 0 ? 'a' : 'b';
     }
-    return `i${'o'.repeat(singletonOver)}${'u'.repeat(singletonUnder)}`;
+    if (threatKnowledge === 'known-false') {
+      return `i${'o'.repeat(singletonOver)}${'u'.repeat(singletonUnder)}`;
+    }
+    return text;
   }
 
   // When opposite partner low cards exist, do not let them drive threat
@@ -468,12 +484,12 @@ function applyTargetedRefinement(text: string, ranks: SeatRanks, primary: 'N' | 
   }
 
   // Post-trick p001 shape: promoted second winner plus one over-opponent residual.
-  if (!threatFlag && primaryCount === 2 && oppositeCount === 1 && overCount === 1 && underCount === 0) {
+  if (threatKnowledge !== 'known-true' && primaryCount === 2 && oppositeCount === 1 && overCount === 1 && underCount === 0) {
     return 'Wwo';
   }
 
   // Post-trick p003-style shape.
-  if (!threatFlag && primaryCount === 2 && oppositeCount === 1 && overCount === 2 && underCount === 1) {
+  if (threatKnowledge !== 'known-true' && primaryCount === 2 && oppositeCount === 1 && overCount === 2 && underCount === 1) {
     return 'Wwou';
   }
 
@@ -718,7 +734,7 @@ function computeDetailed(input: SeatRanksInput, options: SuitInverseOptions = {}
   }
 
   const observedCounts = seatCountsKey(ranks);
-  const threatFlag = threatFlagForSuit(ranks, options);
+  const threatKnowledge = threatFlagForSuit(ranks, options);
   const matches: Candidate[] = [];
   let forcedPrimary: 'N' | 'S' | null =
     ranks.N.length > ranks.S.length ? 'N' : ranks.S.length > ranks.N.length ? 'S' : null;
@@ -738,7 +754,9 @@ function computeDetailed(input: SeatRanksInput, options: SuitInverseOptions = {}
     const boundRanks = simulatePattern(procedural.text, primary, procedural.residualOpposite);
     if (seatCountsKey(boundRanks) !== observedCounts) continue;
     const semantics = analyzePrimarySemantics(ranks, primary);
-    const score = candidateScore(procedural.text, semantics, threatFlag, procedural.residualOpposite) + procedural.linkCount * 1000;
+    const score =
+      candidateScore(procedural.text, semantics, threatKnowledge, procedural.residualOpposite) +
+      procedural.linkCount * 1000;
     matches.push({
       text: procedural.text,
       primary,
@@ -766,9 +784,11 @@ function computeDetailed(input: SeatRanksInput, options: SuitInverseOptions = {}
   const hasThreat = best.some((candidate) => /[abc]/.test(candidate.text));
   const hasNonThreat = best.some((candidate) => !/[abc]/.test(candidate.text));
   if (hasThreat && hasNonThreat) {
-    best = best.filter((candidate) => (threatFlag ? /[abc]/.test(candidate.text) : !/[abc]/.test(candidate.text)));
+    best = best.filter((candidate) =>
+      threatKnowledge === 'known-true' ? /[abc]/.test(candidate.text) : !/[abc]/.test(candidate.text)
+    );
   }
-  if (!threatFlag) {
+  if (threatKnowledge === 'known-false') {
     const hasIdleCandidate = best.some((candidate) => candidate.text.includes('i'));
     if (hasIdleCandidate) best = best.filter((candidate) => candidate.text.includes('i'));
   }
@@ -794,7 +814,7 @@ function computeDetailed(input: SeatRanksInput, options: SuitInverseOptions = {}
   }));
 
   if (best.length === 1) {
-    const refined = applyTargetedRefinement(best[0].text, ranks, best[0].primary, threatFlag);
+    const refined = applyTargetedRefinement(best[0].text, ranks, best[0].primary, threatKnowledge);
     return {
       result: refined,
       primary: best[0].primary,

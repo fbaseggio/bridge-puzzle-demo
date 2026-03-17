@@ -25,14 +25,14 @@ describe('single-suit inverse analyzer', () => {
     expect(result.candidates.length).toBeGreaterThan(1);
   });
 
-  it('prefers idle vs threat for p001-style diamonds unless threatCardIds flags it', () => {
+  it('treats unflagged p001-style diamonds as unknown-threat (not forced idle), and uses threatCardIds when provided', () => {
     const result = inferSuitAbstraction({
       N: '',
       E: 'AKQ',
       S: '2',
       W: ''
     });
-    expect(result).toBe('iooo');
+    expect(result).toBe('aoo');
 
     const flagged = inferSuitAbstraction(
       { N: '', E: 'AKQ', S: '2', W: '' },

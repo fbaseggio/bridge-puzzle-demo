@@ -119,18 +119,15 @@ function resolveOuAmbiguity(
 ): string | null {
   if (!preferredPrimary) return null;
   if (typeof raw === 'string' || raw.type !== 'ambiguous') return null;
-  const set = new Set(raw.candidates);
-  if (!(set.has('o') && set.has('u')) || set.size !== 2) return null;
+  const candidates = raw.candidates;
+  if (candidates.length === 0) return null;
+  if (!candidates.every((candidate) => /^[ou]+$/.test(candidate))) return null;
 
-  const westCount = ranks.W.length;
-  const eastCount = ranks.E.length;
-  if (preferredPrimary === 'N') {
-    if (westCount > 0 && eastCount === 0) return 'o';
-    if (eastCount > 0 && westCount === 0) return 'u';
-  } else {
-    if (eastCount > 0 && westCount === 0) return 'o';
-    if (westCount > 0 && eastCount === 0) return 'u';
-  }
+  const overCount = preferredPrimary === 'N' ? ranks.W.length : ranks.E.length;
+  const underCount = preferredPrimary === 'N' ? ranks.E.length : ranks.W.length;
+  const expected = `${'o'.repeat(overCount)}${'u'.repeat(underCount)}`;
+  if (expected.length > 0 && candidates.includes(expected)) return expected;
+
   return null;
 }
 
@@ -446,7 +443,10 @@ export function inferPositionEncapsulationDetailed(input: PositionInverseInput):
   const southSuits: Suit[] = [];
   for (const suit of order) {
     const effectivePrimary = inferredBySuit.get(suit)?.effectivePrimary ?? 'unknown';
-    if (effectivePrimary === 'S') southSuits.push(suit);
+    const nsCount = input.hands.N[suit].length + input.hands.S[suit].length;
+    const ewCount = input.hands.E[suit].length + input.hands.W[suit].length;
+    const defaultSouthForDefenderOnly = effectivePrimary === 'unknown' && nsCount === 0 && ewCount > 0;
+    if (effectivePrimary === 'S' || defaultSouthForDefenderOnly) southSuits.push(suit);
     else northSuits.push(suit);
   }
 

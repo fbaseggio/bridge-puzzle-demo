@@ -65,13 +65,12 @@ describe('position-level inverse encapsulation rendering', () => {
         W: { S: ['J'], H: [], D: [], C: [] }
       },
       turn: 'S',
-      suitOrder: ['S', 'H', 'D', 'C'],
-      preferredPrimaryBySuit: { S: 'N', H: 'N', D: 'S', C: 'S' }
+      suitOrder: ['S', 'H', 'D', 'C']
     });
-    expect(out).toBe('[shdc] Wwo, 0 > ioo, 0');
+    expect(out).toBe('[shcd] Wwo, 0, 0 > ao');
   });
 
-  it('uses inherited primary side to resolve pure o/u ambiguity in lineage logging (p003-style)', () => {
+  it('matches p003-style post-trick layout under pure hand-based primary inference', () => {
     const out = inferPositionEncapsulation({
       hands: {
         N: { S: ['A', '8'], H: [], D: [], C: [] },
@@ -81,10 +80,9 @@ describe('position-level inverse encapsulation rendering', () => {
       },
       turn: 'S',
       suitOrder: ['S', 'H', 'D', 'C'],
-      preferredPrimaryBySuit: { S: 'N', H: 'N', D: 'S', C: 'S' },
       threatCardIds: ['D8']
     });
-    expect(out).toBe('[shdc] Wwou, o > a, 0');
+    expect(out).toBe('[schd] Wwou, 0 > {ambiguous:o|u}, a');
   });
 
   it('matches initial p007 whole-position inverse', () => {
@@ -97,8 +95,7 @@ describe('position-level inverse encapsulation rendering', () => {
       },
       turn: 'S',
       suitOrder: ['S', 'H', 'D', 'C'],
-      threatCardIds: ['S8', 'D8'],
-      preferredPrimaryBySuit: { S: 'N', H: 'N', D: 'S', C: 'S' }
+      threatCardIds: ['S8', 'D8']
     });
     expect(out).toBe('[shdc] WLau, Wcuu > b, Wo');
   });
@@ -130,8 +127,7 @@ describe('position-level inverse encapsulation rendering', () => {
       },
       turn: 'S',
       suitOrder: ['S', 'H', 'D', 'C'],
-      threatCardIds: ['S8', 'D8'],
-      preferredPrimaryBySuit: { S: 'N', H: 'N', D: 'S', C: 'S' }
+      threatCardIds: ['S8', 'D8']
     });
     expect(explained.shortText).toBe('[shdc] WLau, Wcuu > b, Wo');
     expect(explained.header).toBe('[shdc]');
@@ -184,8 +180,7 @@ describe('position-level inverse encapsulation rendering', () => {
     const out = inferPositionEncapsulation({
       hands: bound.hands,
       turn: bound.lead === '>' ? 'S' : bound.lead === '<' ? 'N' : 'S',
-      suitOrder: ['S', 'H', 'D', 'C'],
-      preferredPrimaryBySuit: { S: 'N', H: 'N', D: 'S', C: 'S' }
+      suitOrder: ['S', 'H', 'D', 'C']
     });
     expect(out).toBe('[shdc] wau, WWu > WLc, Wc');
   });
