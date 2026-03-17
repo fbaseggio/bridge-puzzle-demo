@@ -120,6 +120,14 @@ function stopperHands(
   return code === 'a' ? ['E'] : ['W'];
 }
 
+function returnStopper(owner: 'N' | 'S'): 'E' | 'W' {
+  return owner === 'N' ? 'W' : 'E';
+}
+
+function outgoingStopper(owner: 'N' | 'S'): 'E' | 'W' {
+  return owner === 'N' ? 'E' : 'W';
+}
+
 function computeSpecifiedCounts(parsed: ParsedEncapsulation): { specifiedNorth: number; specifiedSouth: number } {
   let specifiedNorth = 0;
   let specifiedSouth = 0;
@@ -155,7 +163,7 @@ function fillIdleCards(
   cardBindings: CardBinding[],
   bindingIndex: Map<string, number>
 ): void {
-  const threatSuits = new Set(parsed.suits.filter((s) => /[abcABCi]/.test(s.pattern)).map((s) => s.suit));
+  const threatSuits = new Set(parsed.suits.filter((s) => /[abcfgABCFGi]/.test(s.pattern)).map((s) => s.suit));
   const disallowedIdleSuits = new Set(parsed.suits.filter((s) => !s.allowIdleFill).map((s) => s.suit));
   const isIdleAllowed = (suit: Suit): boolean => !disallowedIdleSuits.has(suit);
 
@@ -250,6 +258,7 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
       return next;
     };
     const pendingTier2OpponentLows: Array<{ token: 'o' | 'u'; index: number; symbolIndex: number }> = [];
+    const winnerBackings: Record<'N' | 'S', number> = { N: 0, S: 0 };
 
     for (let tokenIndex = 0; tokenIndex < suitRec.pattern.length; tokenIndex += 1) {
       const token = suitRec.pattern[tokenIndex] as string;
@@ -260,6 +269,7 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
           index: idx,
           role: 'structural'
         });
+        winnerBackings[primary] += 1;
         linksSeen += 1;
         continue;
       }
@@ -270,6 +280,7 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
           index: idx,
           role: 'structural'
         });
+        winnerBackings[primary] += 1;
         addCard(hands, suitState, cardBindings, bindingIndex, opposite, suit, nextLow(suit, suitState), {
           symbol: 'W',
           index: idx,
@@ -302,6 +313,7 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
           index: idx,
           role: 'structural'
         });
+        winnerBackings[opposite] += 1;
         linksSeen += 1;
         continue;
       }
@@ -312,7 +324,7 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
       }
 
       const lower = token.toLowerCase();
-      if (!['a', 'b', 'c', 'i', 'm'].includes(lower)) continue;
+      if (!['a', 'b', 'c', 'f', 'g', 'i', 'm'].includes(lower)) continue;
       const st = suitState.get(suit);
       if (st) st.hasThreat = true;
 
@@ -338,6 +350,9 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
 
       const isUpper = token === token.toUpperCase();
       const owner = isUpper ? opposite : primary;
+      if ((lower === 'f' || lower === 'g') && winnerBackings[owner] < 1) {
+        throw new Error(`Token '${token}' in suit ${suit} requires winner backing in ${owner} hand`);
+      }
       const threatLen = linksSeen + 1;
       const threatIndex = nextSymbolIndex(token);
 
@@ -350,41 +365,83 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
         });
       }
 
-      const stoppers = stopperHands(lower as 'a' | 'b' | 'c', owner, primary, isUpper);
-      if (stoppers.length === 1) {
-        const stopper = stoppers[0];
-        suitState.get(suit)?.threatSuitsByStopper[stopper].add(suit);
-        for (let i = 0; i < threatLen; i += 1) {
-          addCard(hands, suitState, cardBindings, bindingIndex, stopper, suit, nextHigh(suit, suitState), {
+      let threatRank = '';
+      if (lower === 'f' || lower === 'g') {
+        const ret = returnStopper(owner);
+        const out = outgoingStopper(owner);
+        suitState.get(suit)?.threatSuitsByStopper[ret].add(suit);
+        addCard(hands, suitState, cardBindings, bindingIndex, ret, suit, nextHigh(suit, suitState), {
+          symbol: token,
+          index: threatIndex,
+          role: 'stopper',
+          note: 'stop1'
+        });
+
+        const outNeed = lower === 'g' ? Math.max(0, threatLen - 1) : 0;
+        if (outNeed > 0) {
+          suitState.get(suit)?.threatSuitsByStopper[out].add(suit);
+          addCard(hands, suitState, cardBindings, bindingIndex, out, suit, nextHigh(suit, suitState), {
             symbol: token,
             index: threatIndex,
             role: 'stopper',
-            note: `stop${i + 1}`
+            note: 'stop1'
           });
         }
-      } else if (stoppers.length === 2) {
-        // alternating until each stopper has full complement
-        for (let i = 0; i < threatLen * 2; i += 1) {
-          const stopper = stoppers[i % 2];
+
+        threatRank = nextHigh(suit, suitState);
+
+        for (let i = 0; i < threatLen - 1; i += 1) {
+          addCard(hands, suitState, cardBindings, bindingIndex, ret, suit, nextLow(suit, suitState), {
+            symbol: token,
+            index: threatIndex,
+            role: 'stopper',
+            note: `stop${i + 2}`
+          });
+        }
+        for (let i = 0; i < Math.max(0, outNeed - 1); i += 1) {
+          addCard(hands, suitState, cardBindings, bindingIndex, out, suit, nextLow(suit, suitState), {
+            symbol: token,
+            index: threatIndex,
+            role: 'stopper',
+            note: `stop${i + 2}`
+          });
+        }
+      } else {
+        const stoppers = stopperHands(lower as 'a' | 'b' | 'c', owner, primary, isUpper);
+        if (stoppers.length === 1) {
+          const stopper = stoppers[0];
           suitState.get(suit)?.threatSuitsByStopper[stopper].add(suit);
-          addCard(hands, suitState, cardBindings, bindingIndex, stopper, suit, nextHigh(suit, suitState), {
-            symbol: token,
-            index: threatIndex,
-            role: 'stopper',
-            note: `stop${i + 1}`
-          });
+          for (let i = 0; i < threatLen; i += 1) {
+            addCard(hands, suitState, cardBindings, bindingIndex, stopper, suit, nextHigh(suit, suitState), {
+              symbol: token,
+              index: threatIndex,
+              role: 'stopper',
+              note: `stop${i + 1}`
+            });
+          }
+        } else if (stoppers.length === 2) {
+          // alternating until each stopper has full complement
+          for (let i = 0; i < threatLen * 2; i += 1) {
+            const stopper = stoppers[i % 2];
+            suitState.get(suit)?.threatSuitsByStopper[stopper].add(suit);
+            addCard(hands, suitState, cardBindings, bindingIndex, stopper, suit, nextHigh(suit, suitState), {
+              symbol: token,
+              index: threatIndex,
+              role: 'stopper',
+              note: `stop${i + 1}`
+            });
+          }
         }
+        threatRank = nextHigh(suit, suitState);
       }
 
-      // Threat card itself.
-      const threatRank = nextHigh(suit, suitState);
       addCard(hands, suitState, cardBindings, bindingIndex, owner, suit, threatRank, {
         symbol: token,
         index: threatIndex,
         role: 'structural'
       });
       threatCards.push({
-        symbol: token as 'a' | 'b' | 'c' | 'A' | 'B' | 'C',
+        symbol: token as 'a' | 'b' | 'c' | 'f' | 'g' | 'A' | 'B' | 'C' | 'F' | 'G',
         suit,
         seat: owner,
         rank: threatRank,

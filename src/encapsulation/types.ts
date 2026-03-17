@@ -1,7 +1,25 @@
 export type LeadSymbol = '>' | '<' | '=';
 export type Side = 'N' | 'S' | 'E' | 'W';
 export type Suit = 'S' | 'H' | 'D' | 'C';
-export type EncapsulationToken = 'w' | 'W' | 'l' | 'L' | 'a' | 'A' | 'b' | 'B' | 'c' | 'C' | 'i' | 'm' | 'o' | 'u';
+export type EncapsulationToken =
+  | 'w'
+  | 'W'
+  | 'l'
+  | 'L'
+  | 'a'
+  | 'A'
+  | 'b'
+  | 'B'
+  | 'c'
+  | 'C'
+  | 'f'
+  | 'F'
+  | 'g'
+  | 'G'
+  | 'i'
+  | 'm'
+  | 'o'
+  | 'u';
 
 export type ParsedSuit = {
   suit: Suit;
@@ -45,7 +63,7 @@ export type BoundEncapsulation = {
 };
 
 export type BoundThreatCard = {
-  symbol: 'a' | 'b' | 'c' | 'A' | 'B' | 'C';
+  symbol: 'a' | 'b' | 'c' | 'f' | 'g' | 'A' | 'B' | 'C' | 'F' | 'G';
   suit: Suit;
   seat: 'N' | 'S';
   rank: string;

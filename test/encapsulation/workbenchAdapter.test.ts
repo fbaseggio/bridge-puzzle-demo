@@ -29,7 +29,8 @@ describe('encapsulation workbench adapter', () => {
       'encap_a_wc_gt_a_w',
       'encap_wa_ww_gt_wlc_wc',
       'encap_wa_wb_gt_wc_ww',
-      'encap_wlau_waouou_gt_b_wo'
+      'encap_wlau_waouou_gt_b_wo',
+      'encap_wg_a_gt_wc_ww'
     ];
     const entries = listEncapsulationWorkbenchEntries();
     for (const id of expectedNewIds) {

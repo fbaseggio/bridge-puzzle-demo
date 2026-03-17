@@ -139,4 +139,13 @@ describe('deterministic binding examples', () => {
     const upper = bindStandard('WB =');
     expect(upper.threatCards.some((t) => t.symbol === 'B' && t.cardId === 'SJ' && t.seat === 'S')).toBe(true);
   });
+
+  it('binds f/g threat symbols with return/outgoing stopper semantics', () => {
+    const b = bindStandard('Wg, a > wc, WW');
+    // Spades should include a G-style threat card in the North hand.
+    expect(b.threatCards.some((t) => t.symbol === 'g' && t.suit === 'S' && t.seat === 'N')).toBe(true);
+    // g requires both return and outgoing stopper participation.
+    expect(b.hands.W.S.length).toBeGreaterThan(0);
+    expect(b.hands.E.S.length).toBeGreaterThan(0);
+  });
 });
