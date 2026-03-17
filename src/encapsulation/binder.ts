@@ -1,4 +1,4 @@
-import type { BindMetadata, BoundEncapsulation, BoundThreatCard, FourHands, Hand, ParsedEncapsulation, Side, Suit } from './types';
+import type { BindMetadata, BoundEncapsulation, BoundThreatCard, CardBinding, CardBindingRole, FourHands, Hand, ParsedEncapsulation, Side, Suit } from './types';
 import { parseEncapsulation } from './parser';
 
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
@@ -42,10 +42,39 @@ function otherPrimary(primary: 'N' | 'S'): 'N' | 'S' {
   return primary === 'N' ? 'S' : 'N';
 }
 
-function addCard(hands: FourHands, suitState: Map<Suit, SuitState>, side: Side, suit: Suit, rank: string): void {
+type BindingTag = {
+  symbol: string;
+  index?: number;
+  role: CardBindingRole;
+  note?: string;
+};
+
+function addCard(
+  hands: FourHands,
+  suitState: Map<Suit, SuitState>,
+  cardBindings: CardBinding[],
+  bindingIndex: Map<string, number>,
+  side: Side,
+  suit: Suit,
+  rank: string,
+  tag?: BindingTag
+): void {
   if (hands[side][suit].includes(rank)) return;
   hands[side][suit].push(rank);
   suitState.get(suit)?.used.add(rank);
+  if (!tag) return;
+  const key = `${side}:${suit}:${rank}`;
+  if (bindingIndex.has(key)) return;
+  bindingIndex.set(key, cardBindings.length);
+  cardBindings.push({
+    suit,
+    hand: side,
+    rank,
+    symbol: tag.symbol,
+    index: tag.index,
+    role: tag.role,
+    note: tag.note
+  });
 }
 
 function nextHigh(suit: Suit, suitState: Map<Suit, SuitState>): string {
@@ -95,14 +124,19 @@ function computeSpecifiedCounts(parsed: ParsedEncapsulation): { specifiedNorth: 
   let specifiedSouth = 0;
 
   for (const s of parsed.suits) {
-    const letters = [...s.pattern].filter((ch) => ch !== 'o' && ch !== 'u').length;
-    const capitals = [...s.pattern].filter((ch) => ch >= 'A' && ch <= 'Z').length;
-    if (s.primary === 'N') {
-      specifiedNorth += letters;
-      specifiedSouth -= capitals;
-    } else {
-      specifiedSouth += letters;
-      specifiedNorth -= capitals;
+    for (const ch of s.pattern) {
+      if (ch === 'o' || ch === 'u') continue;
+      if (ch === 'm') {
+        if (s.primary === 'N') specifiedSouth += 1;
+        else specifiedNorth += 1;
+        continue;
+      }
+      if (s.primary === 'N') specifiedNorth += 1;
+      else specifiedSouth += 1;
+      if (ch >= 'A' && ch <= 'Z') {
+        if (s.primary === 'N') specifiedSouth -= 1;
+        else specifiedNorth -= 1;
+      }
     }
   }
 
@@ -112,7 +146,14 @@ function computeSpecifiedCounts(parsed: ParsedEncapsulation): { specifiedNorth: 
   };
 }
 
-function fillIdleCards(hands: FourHands, parsed: ParsedEncapsulation, suitState: Map<Suit, SuitState>, target: number): void {
+function fillIdleCards(
+  hands: FourHands,
+  parsed: ParsedEncapsulation,
+  suitState: Map<Suit, SuitState>,
+  target: number,
+  cardBindings: CardBinding[],
+  bindingIndex: Map<string, number>
+): void {
   const threatSuits = new Set(parsed.suits.filter((s) => /[abcABCi]/.test(s.pattern)).map((s) => s.suit));
   const disallowedIdleSuits = new Set(parsed.suits.filter((s) => !s.allowIdleFill).map((s) => s.suit));
   const isIdleAllowed = (suit: Suit): boolean => !disallowedIdleSuits.has(suit);
@@ -122,7 +163,16 @@ function fillIdleCards(hands: FourHands, parsed: ParsedEncapsulation, suitState:
       const emptySuits = SUITS.filter((s) => isIdleAllowed(s) && hands[side][s].length === 0);
       if (emptySuits.length > 0) {
         const suit = emptySuits[0];
-        addCard(hands, suitState, side, suit, nextHigh(suit, suitState));
+        addCard(
+          hands,
+          suitState,
+          cardBindings,
+          bindingIndex,
+          side,
+          suit,
+          nextHigh(suit, suitState),
+          { symbol: 'idle', role: 'idleFill' }
+        );
         continue;
       }
 
@@ -132,7 +182,16 @@ function fillIdleCards(hands: FourHands, parsed: ParsedEncapsulation, suitState:
       if (fallback.length === 0) break;
       const pool = nonThreat.length > 0 ? nonThreat : stopperPref.length > 0 ? stopperPref : fallback;
       const suit = pool[0];
-      addCard(hands, suitState, side, suit, nextLow(suit, suitState));
+      addCard(
+        hands,
+        suitState,
+        cardBindings,
+        bindingIndex,
+        side,
+        suit,
+        nextLow(suit, suitState),
+        { symbol: 'idle', role: 'idleFill' }
+      );
     }
   }
 
@@ -144,7 +203,16 @@ function fillIdleCards(hands: FourHands, parsed: ParsedEncapsulation, suitState:
       const pool = emptySuits.length > 0 ? emptySuits : SUITS.filter((s) => isIdleAllowed(s));
       if (pool.length === 0) break;
       const suit = pool[0];
-      addCard(hands, suitState, side, suit, nextLow(suit, suitState));
+      addCard(
+        hands,
+        suitState,
+        cardBindings,
+        bindingIndex,
+        side,
+        suit,
+        nextLow(suit, suitState),
+        { symbol: 'idle', role: 'idleFill' }
+      );
     }
   }
 
@@ -155,6 +223,8 @@ function fillIdleCards(hands: FourHands, parsed: ParsedEncapsulation, suitState:
 function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
   const hands = emptyHands();
   const threatCards: BoundThreatCard[] = [];
+  const cardBindings: CardBinding[] = [];
+  const bindingIndex = new Map<string, number>();
   const suitState = new Map<Suit, SuitState>();
   for (const suit of SUITS) {
     suitState.set(suit, {
@@ -171,54 +241,112 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
     const primary = suitRec.primary;
     const opposite = otherPrimary(primary);
     let linksSeen = 0;
-    const pendingTier2OpponentLows: Array<{ token: 'o' | 'u'; index: number }> = [];
+    const symbolCounts = new Map<string, number>();
+    const nextSymbolIndex = (symbol: string): number => {
+      const current = symbolCounts.get(symbol) ?? 0;
+      const next = current + 1;
+      symbolCounts.set(symbol, next);
+      return next;
+    };
+    const pendingTier2OpponentLows: Array<{ token: 'o' | 'u'; index: number; symbolIndex: number }> = [];
 
     for (let tokenIndex = 0; tokenIndex < suitRec.pattern.length; tokenIndex += 1) {
       const token = suitRec.pattern[tokenIndex] as string;
       if (token === 'w') {
-        addCard(hands, suitState, primary, suit, nextHigh(suit, suitState));
+        const idx = nextSymbolIndex('w');
+        addCard(hands, suitState, cardBindings, bindingIndex, primary, suit, nextHigh(suit, suitState), {
+          symbol: 'w',
+          index: idx,
+          role: 'structural'
+        });
         linksSeen += 1;
         continue;
       }
       if (token === 'W') {
-        addCard(hands, suitState, primary, suit, nextHigh(suit, suitState));
-        addCard(hands, suitState, opposite, suit, nextLow(suit, suitState));
+        const idx = nextSymbolIndex('W');
+        addCard(hands, suitState, cardBindings, bindingIndex, primary, suit, nextHigh(suit, suitState), {
+          symbol: 'W',
+          index: idx,
+          role: 'structural'
+        });
+        addCard(hands, suitState, cardBindings, bindingIndex, opposite, suit, nextLow(suit, suitState), {
+          symbol: 'W',
+          index: idx,
+          role: 'structural',
+          note: 'low'
+        });
         linksSeen += 1;
         continue;
       }
       if (token === 'l') {
-        addCard(hands, suitState, primary, suit, nextLow(suit, suitState));
+        const idx = nextSymbolIndex('l');
+        addCard(hands, suitState, cardBindings, bindingIndex, primary, suit, nextLow(suit, suitState), {
+          symbol: 'l',
+          index: idx,
+          role: 'structural'
+        });
         linksSeen += 1;
         continue;
       }
       if (token === 'L') {
-        addCard(hands, suitState, primary, suit, nextLow(suit, suitState));
-        addCard(hands, suitState, opposite, suit, nextHigh(suit, suitState));
+        const idx = nextSymbolIndex('L');
+        addCard(hands, suitState, cardBindings, bindingIndex, primary, suit, nextLow(suit, suitState), {
+          symbol: 'L',
+          index: idx,
+          role: 'structural',
+          note: 'low'
+        });
+        addCard(hands, suitState, cardBindings, bindingIndex, opposite, suit, nextHigh(suit, suitState), {
+          symbol: 'L',
+          index: idx,
+          role: 'structural'
+        });
         linksSeen += 1;
         continue;
       }
       if (token === 'o' || token === 'u') {
-        pendingTier2OpponentLows.push({ token, index: tokenIndex });
+        const idx = nextSymbolIndex(token);
+        pendingTier2OpponentLows.push({ token, index: tokenIndex, symbolIndex: idx });
         continue;
       }
 
       const lower = token.toLowerCase();
-      if (!['a', 'b', 'c', 'i'].includes(lower)) continue;
+      if (!['a', 'b', 'c', 'i', 'm'].includes(lower)) continue;
       const st = suitState.get(suit);
       if (st) st.hasThreat = true;
 
       if (lower === 'i') {
+        const idx = nextSymbolIndex('i');
         const owner = token === 'i' ? primary : opposite;
-        addCard(hands, suitState, owner, suit, nextLow(suit, suitState));
+        addCard(hands, suitState, cardBindings, bindingIndex, owner, suit, nextLow(suit, suitState), {
+          symbol: 'i',
+          index: idx,
+          role: 'structural'
+        });
+        continue;
+      }
+      if (lower === 'm') {
+        const idx = nextSymbolIndex('m');
+        addCard(hands, suitState, cardBindings, bindingIndex, opposite, suit, nextLow(suit, suitState), {
+          symbol: 'm',
+          index: idx,
+          role: 'structural'
+        });
         continue;
       }
 
       const isUpper = token === token.toUpperCase();
       const owner = isUpper ? opposite : primary;
       const threatLen = linksSeen + 1;
+      const threatIndex = nextSymbolIndex(token);
 
       if (isUpper) {
-        addCard(hands, suitState, primary, suit, nextLow(suit, suitState));
+        addCard(hands, suitState, cardBindings, bindingIndex, primary, suit, nextLow(suit, suitState), {
+          symbol: token,
+          index: threatIndex,
+          role: 'structural',
+          note: 'low'
+        });
       }
 
       const stoppers = stopperHands(lower as 'a' | 'b' | 'c', owner, primary, isUpper);
@@ -226,20 +354,34 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
         const stopper = stoppers[0];
         suitState.get(suit)?.threatSuitsByStopper[stopper].add(suit);
         for (let i = 0; i < threatLen; i += 1) {
-          addCard(hands, suitState, stopper, suit, nextHigh(suit, suitState));
+          addCard(hands, suitState, cardBindings, bindingIndex, stopper, suit, nextHigh(suit, suitState), {
+            symbol: token,
+            index: threatIndex,
+            role: 'stopper',
+            note: `stop${i + 1}`
+          });
         }
       } else if (stoppers.length === 2) {
         // alternating until each stopper has full complement
         for (let i = 0; i < threatLen * 2; i += 1) {
           const stopper = stoppers[i % 2];
           suitState.get(suit)?.threatSuitsByStopper[stopper].add(suit);
-          addCard(hands, suitState, stopper, suit, nextHigh(suit, suitState));
+          addCard(hands, suitState, cardBindings, bindingIndex, stopper, suit, nextHigh(suit, suitState), {
+            symbol: token,
+            index: threatIndex,
+            role: 'stopper',
+            note: `stop${i + 1}`
+          });
         }
       }
 
       // Threat card itself.
       const threatRank = nextHigh(suit, suitState);
-      addCard(hands, suitState, owner, suit, threatRank);
+      addCard(hands, suitState, cardBindings, bindingIndex, owner, suit, threatRank, {
+        symbol: token,
+        index: threatIndex,
+        role: 'structural'
+      });
       threatCards.push({
         symbol: token as 'a' | 'b' | 'c' | 'A' | 'B' | 'C',
         suit,
@@ -252,12 +394,16 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
     // Tier-2 lowest assignments (`o`/`u`) are resolved right-to-left after tier-1 lows.
     pendingTier2OpponentLows
       .sort((a, b) => b.index - a.index)
-      .forEach(({ token }) => {
+      .forEach(({ token, symbolIndex }) => {
         const target: 'E' | 'W' =
           primary === 'N'
             ? (token === 'o' ? 'W' : 'E')
             : (token === 'o' ? 'E' : 'W');
-        addCard(hands, suitState, target, suit, nextLow(suit, suitState));
+        addCard(hands, suitState, cardBindings, bindingIndex, target, suit, nextLow(suit, suitState), {
+          symbol: token,
+          index: symbolIndex,
+          role: 'opponentDirective'
+        });
       });
   }
 
@@ -270,6 +416,19 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
     hands.S.S = ['8', '2'];
     hands.E.S = [];
     hands.W.S = [];
+    cardBindings.length = 0;
+    bindingIndex.clear();
+    const forcedBindings: CardBinding[] = [
+      { suit: 'S', hand: 'N', rank: 'A', symbol: 'W', index: 1, role: 'structural' },
+      { suit: 'S', hand: 'S', rank: '2', symbol: 'W', index: 1, role: 'structural', note: 'low' },
+      { suit: 'S', hand: 'N', rank: '3', symbol: 'A', index: 1, role: 'structural', note: 'low' },
+      { suit: 'S', hand: 'S', rank: '8', symbol: 'A', index: 1, role: 'structural' }
+    ];
+    for (const binding of forcedBindings) {
+      const key = `${binding.hand}:${binding.suit}:${binding.rank}`;
+      bindingIndex.set(key, cardBindings.length);
+      cardBindings.push(binding);
+    }
     const st = suitState.get('S');
     st?.used.clear();
     for (const rank of [...hands.N.S, ...hands.S.S]) st?.used.add(rank);
@@ -289,7 +448,7 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
     totalCards(hands, 'W')
   );
 
-  fillIdleCards(hands, parsed, suitState, target);
+  fillIdleCards(hands, parsed, suitState, target, cardBindings, bindingIndex);
   sortHand(hands);
 
   const metadata: BindMetadata = {
@@ -303,7 +462,8 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
     hands,
     lead: parsed.lead,
     metadata,
-    threatCards
+    threatCards,
+    cardBindings
   };
 }
 

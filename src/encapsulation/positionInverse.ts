@@ -15,6 +15,13 @@ type SuitInference = {
   text: string;
   primary: 'N' | 'S' | 'unknown';
   raw: InverseResult;
+  debug?: {
+    forcedPrimary: 'N' | 'S' | null;
+    matched: Array<{ text: string; primary: 'N' | 'S'; score: number; residualOpposite: number }>;
+    contenders: Array<{ text: string; primary: 'N' | 'S'; score: number; residualOpposite: number }>;
+    selectedText?: string;
+    selectedPrimary?: 'N' | 'S' | 'unknown';
+  };
 };
 
 export type PositionInverseDetailed = {
@@ -39,13 +46,18 @@ export type SuitInverseExplanation = {
   preferredPrimary: 'N' | 'S' | null;
   chosenPrimary: 'N' | 'S' | 'unknown';
   winners: string[];
+  structuralLows: string[];
   threatCandidates: string[];
+  bindingLabels: string[];
   stopChecks: SuitStopExplanation[];
   threatCardTieBreakUsed: boolean;
   lineageOuResolutionUsed: boolean;
   countSummary: string;
   finalText: string;
   raw: InverseResult;
+  candidateScores: Array<{ text: string; primary: 'N' | 'S'; score: number; residualOpposite: number }>;
+  contenderScores: Array<{ text: string; primary: 'N' | 'S'; score: number; residualOpposite: number }>;
+  selectedByScorer?: { text?: string; primary?: 'N' | 'S' | 'unknown' };
 };
 
 export type PositionInverseExplanation = {
@@ -62,9 +74,14 @@ function headerFromOrder(order: Suit[]): string {
 export function renderPositionEncapsulationSlots(
   order: Suit[],
   slotTexts: string[],
-  turn: Side
+  turn: Side,
+  splitIndex?: number
 ): string {
-  const leftTarget = Math.ceil(order.length / 2);
+  const normalizedSplit =
+    typeof splitIndex === 'number'
+      ? Math.max(0, Math.min(order.length, Math.floor(splitIndex)))
+      : Math.ceil(order.length / 2);
+  const leftTarget = normalizedSplit;
   const left = slotTexts.slice(0, leftTarget);
   const right = slotTexts.slice(leftTarget);
   return `${headerFromOrder(order)} ${left.join(', ')} ${leadSymbolFromTurn(turn)} ${right.join(', ')}`.replace(/\s+/g, ' ').trim();
@@ -141,7 +158,8 @@ function inferSuit(
   return {
     text: resolvedOu ?? prettyResult(result),
     primary: resolvedPrimary,
-    raw: result
+    raw: result,
+    debug: detailed.debug
   };
 }
 
@@ -159,6 +177,142 @@ function obviousWinners(cards: Record<Side, string[]>): string[] {
     }
   }
   return winners;
+}
+
+function structuralLowsFor(text: string, chosenPrimary: 'N' | 'S' | 'unknown', cards: Record<Side, string[]>): string[] {
+  if (chosenPrimary === 'unknown' || text.startsWith('{')) return [];
+  const wCount = (text.match(/W/g) ?? []).length;
+  const lCount = (text.match(/L/g) ?? []).length;
+  if (wCount === 0 && lCount === 0) return [];
+
+  const primarySeat: 'N' | 'S' = chosenPrimary;
+  const oppositeSeat: 'N' | 'S' = primarySeat === 'N' ? 'S' : 'N';
+  const lows: string[] = [];
+  const sortLow = (ranks: string[]): string[] => [...ranks].sort((a, b) => rankIndex(b) - rankIndex(a));
+
+  if (wCount > 0) {
+    const oppositeLows = sortLow(cards[oppositeSeat]).slice(0, wCount);
+    oppositeLows.forEach((rank) => lows.push(`${oppositeSeat}${rank}`));
+  }
+  if (lCount > 0) {
+    const primaryLows = sortLow(cards[primarySeat]).slice(0, lCount);
+    primaryLows.forEach((rank) => lows.push(`${primarySeat}${rank}`));
+  }
+  return [...new Set(lows)];
+}
+
+function bindingLabelsFor(
+  text: string,
+  chosenPrimary: 'N' | 'S' | 'unknown',
+  cards: Record<Side, string[]>,
+  structuralLows: string[],
+  threats: string[]
+): string[] {
+  if (chosenPrimary === 'unknown' || text.startsWith('{') || text === '0') return [];
+  const labels: string[] = [];
+  const used = new Set<string>();
+  const primary: 'N' | 'S' = chosenPrimary;
+  const opposite: 'N' | 'S' = primary === 'N' ? 'S' : 'N';
+  const oppRanks = [...cards.E, ...cards.W];
+  const primaryRanks = [...cards[primary]].sort((a, b) => rankIndex(a) - rankIndex(b));
+  const oppositeRanks = [...cards[opposite]].sort((a, b) => rankIndex(a) - rankIndex(b));
+  const obviousPrimary = primaryRanks.filter((rank) => !oppRanks.some((r) => rankIndex(r) < rankIndex(rank)));
+  const obviousOpposite = oppositeRanks.filter((rank) => !oppRanks.some((r) => rankIndex(r) < rankIndex(rank)));
+  const wCount = (text.match(/W/g) ?? []).length + (text.match(/w/g) ?? []).length;
+  const WCount = (text.match(/W/g) ?? []).length;
+  const lCount = (text.match(/L/g) ?? []).length + (text.match(/l/g) ?? []).length;
+  const LCount = (text.match(/L/g) ?? []).length;
+
+  const oppositeLowRanks = [...cards[opposite]].sort((a, b) => rankIndex(b) - rankIndex(a));
+  const primaryLowRanks = [...cards[primary]].sort((a, b) => rankIndex(b) - rankIndex(a));
+
+  for (let i = 0; i < wCount; i += 1) {
+    const rank = obviousPrimary[i];
+    if (!rank) continue;
+    const card = `${primary}${rank}`;
+    labels.push(`${card}->w${i + 1}`);
+    used.add(card);
+    if (i < WCount) {
+      const low = oppositeLowRanks.find((r) => !used.has(`${opposite}${r}`));
+      if (low) {
+        const lowCard = `${opposite}${low}`;
+        labels.push(`${lowCard}->W${i + 1}-low`);
+        used.add(lowCard);
+      }
+    }
+  }
+
+  for (let i = 0; i < lCount; i += 1) {
+    const rank = obviousOpposite[i];
+    if (!rank) continue;
+    const card = `${opposite}${rank}`;
+    labels.push(`${card}->l${i + 1}`);
+    used.add(card);
+    if (i < LCount) {
+      const low = primaryLowRanks.find((r) => !used.has(`${primary}${r}`));
+      if (low) {
+        const lowCard = `${primary}${low}`;
+        labels.push(`${lowCard}->L${i + 1}-low`);
+        used.add(lowCard);
+      }
+    }
+  }
+
+  const letters = [...text].filter((ch) => ['a', 'b', 'c', 'i', 'm', 'o', 'u'].includes(ch));
+  const counters: Record<string, number> = { a: 0, b: 0, c: 0, i: 0, m: 0, o: 0, u: 0 };
+  const structuralSet = new Set(structuralLows);
+  const threatSet = new Set(threats);
+  const remainingPrimary = [...cards[primary]]
+    .map((rank) => `${primary}${rank}`)
+    .filter((card) => !used.has(card) && !structuralSet.has(card))
+    .sort((a, b) => rankIndex(a.slice(1)) - rankIndex(b.slice(1)));
+  const remainingWest = [...cards.W]
+    .map((rank) => `W${rank}`)
+    .filter((card) => !used.has(card))
+    .sort((a, b) => rankIndex(a.slice(1)) - rankIndex(b.slice(1)));
+  const remainingEast = [...cards.E]
+    .map((rank) => `E${rank}`)
+    .filter((card) => !used.has(card))
+    .sort((a, b) => rankIndex(a.slice(1)) - rankIndex(b.slice(1)));
+  const remainingOpposite = [...cards[opposite]]
+    .map((rank) => `${opposite}${rank}`)
+    .filter((card) => !used.has(card))
+    .sort((a, b) => rankIndex(a.slice(1)) - rankIndex(b.slice(1)));
+
+  for (const token of letters) {
+    counters[token] += 1;
+    if (token === 'a' || token === 'b' || token === 'c' || token === 'i') {
+      const card =
+        remainingPrimary.find((c) => (token === 'i' ? !threatSet.has(c) : threatSet.has(c))) ??
+        remainingPrimary.shift();
+      if (card) {
+        labels.push(`${card}->${token}${counters[token]}`);
+        used.add(card);
+      }
+      continue;
+    }
+    if (token === 'm') {
+      const card = remainingOpposite.shift();
+      if (card) {
+        labels.push(`${card}->m${counters[token]}`);
+        used.add(card);
+      }
+      continue;
+    }
+    if (token === 'o' || token === 'u') {
+      const pool =
+        token === 'o'
+          ? (chosenPrimary === 'N' ? remainingWest : remainingEast)
+          : (chosenPrimary === 'N' ? remainingEast : remainingWest);
+      const fallback = token === 'o' ? remainingEast : remainingWest;
+      const card = pool.shift() ?? fallback.shift();
+      if (card) {
+        labels.push(`${card}->${token}${counters[token]}`);
+        used.add(card);
+      }
+    }
+  }
+  return labels;
 }
 
 function stopChecks(cards: Record<Side, string[]>): SuitStopExplanation[] {
@@ -191,13 +345,14 @@ function countSummaryFor(text: string, chosenPrimary: 'N' | 'S' | 'unknown', car
     b: (text.match(/b/g) ?? []).length,
     c: (text.match(/c/g) ?? []).length,
     i: (text.match(/i/g) ?? []).length,
+    m: (text.match(/m/g) ?? []).length,
     o: (text.match(/o/g) ?? []).length,
     u: (text.match(/u/g) ?? []).length
   };
   const links = counts.W + counts.L + counts.w + counts.l;
   const stopperSize = links + 1;
   const encPrimary = counts.W + counts.L + counts.w + counts.l + counts.a + counts.b + counts.c + counts.i;
-  const encOpposite = counts.W + counts.L;
+  const encOpposite = counts.W + counts.L + counts.m;
   const encOver = (counts.a + counts.c) * stopperSize + counts.o;
   const encUnder = (counts.b + counts.c) * stopperSize + counts.u;
   const obsPrimary = chosenPrimary === 'N' ? cards.N.length : cards.S.length;
@@ -220,10 +375,13 @@ function explainSuit(
   const inferred = inferSuit(input, suit, threatCardIds, preferredPrimary);
   const chosenPrimary: 'N' | 'S' | 'unknown' = preferredPrimary ?? inferred.primary;
   const winners = obviousWinners(cards);
+  const structuralLows = structuralLowsFor(inferred.text, chosenPrimary, cards);
+  const structuralSet = new Set(structuralLows);
   const stops = stopChecks(cards);
   const threats = stops
-    .filter((c) => !winners.includes(`${c.seat}${c.rank}`))
+    .filter((c) => !winners.includes(`${c.seat}${c.rank}`) && !structuralSet.has(`${c.seat}${c.rank}`))
     .map((c) => `${c.seat}${c.rank}`);
+  const bindingLabels = bindingLabelsFor(inferred.text, chosenPrimary, cards, structuralLows, threats);
   const rawWithThreats = inferSuitAbstractionDetailed(
     { N: cards.N, E: cards.E, S: cards.S, W: cards.W },
     { suit, threatCardIds }
@@ -250,19 +408,27 @@ function explainSuit(
     preferredPrimary: preferredPrimary ?? null,
     chosenPrimary,
     winners,
+    structuralLows,
     threatCandidates: threats,
+    bindingLabels,
     stopChecks: stops,
     threatCardTieBreakUsed,
     lineageOuResolutionUsed,
     countSummary: countSummaryFor(inferred.text, chosenPrimary, cards),
     finalText: inferred.text,
-    raw: inferred.raw
+    raw: inferred.raw,
+    candidateScores: inferred.debug?.matched ?? [],
+    contenderScores: inferred.debug?.contenders ?? [],
+    selectedByScorer:
+      inferred.debug?.selectedText || inferred.debug?.selectedPrimary
+        ? { text: inferred.debug?.selectedText, primary: inferred.debug?.selectedPrimary }
+        : undefined
   };
 }
 
 export function inferPositionEncapsulationDetailed(input: PositionInverseInput): PositionInverseDetailed {
   const order = input.suitOrder && input.suitOrder.length > 0 ? input.suitOrder : DEFAULT_ORDER;
-  const slotTexts: string[] = [];
+  const inferredBySuit = new Map<Suit, SuitInference & { effectivePrimary: 'N' | 'S' | 'unknown' }>();
   const primaryBySuit: Partial<Record<Suit, 'N' | 'S'>> = {};
 
   for (const suit of order) {
@@ -270,12 +436,25 @@ export function inferPositionEncapsulationDetailed(input: PositionInverseInput):
     const inferred = inferSuit(input.hands, suit, input.threatCardIds, preferredPrimary);
     let effectivePrimary = inferred.primary;
     if (preferredPrimary) effectivePrimary = preferredPrimary;
-    if (effectivePrimary === 'N' || effectivePrimary === 'S') primaryBySuit[suit] = effectivePrimary;
-    slotTexts.push(inferred.text);
+    inferredBySuit.set(suit, { ...inferred, effectivePrimary });
+    if (effectivePrimary === 'N' || effectivePrimary === 'S') {
+      primaryBySuit[suit] = effectivePrimary;
+    }
   }
 
+  const northSuits: Suit[] = [];
+  const southSuits: Suit[] = [];
+  for (const suit of order) {
+    const effectivePrimary = inferredBySuit.get(suit)?.effectivePrimary ?? 'unknown';
+    if (effectivePrimary === 'S') southSuits.push(suit);
+    else northSuits.push(suit);
+  }
+
+  const groupedOrder = [...northSuits, ...southSuits];
+  const slotTexts = groupedOrder.map((suit) => inferredBySuit.get(suit)?.text ?? '{no-fit}');
+
   return {
-    text: renderPositionEncapsulationSlots(order, slotTexts, input.turn),
+    text: renderPositionEncapsulationSlots(groupedOrder, slotTexts, input.turn, northSuits.length),
     primaryBySuit
   };
 }

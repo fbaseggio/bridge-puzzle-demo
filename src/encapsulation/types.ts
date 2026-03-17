@@ -1,7 +1,7 @@
 export type LeadSymbol = '>' | '<' | '=';
 export type Side = 'N' | 'S' | 'E' | 'W';
 export type Suit = 'S' | 'H' | 'D' | 'C';
-export type EncapsulationToken = 'w' | 'W' | 'l' | 'L' | 'a' | 'A' | 'b' | 'B' | 'c' | 'C' | 'i' | 'o' | 'u';
+export type EncapsulationToken = 'w' | 'W' | 'l' | 'L' | 'a' | 'A' | 'b' | 'B' | 'c' | 'C' | 'i' | 'm' | 'o' | 'u';
 
 export type ParsedSuit = {
   suit: Suit;
@@ -38,6 +38,7 @@ export type BoundEncapsulation = {
   lead: LeadSymbol;
   metadata: BindMetadata;
   threatCards: BoundThreatCard[];
+  cardBindings: CardBinding[];
 };
 
 export type BoundThreatCard = {
@@ -46,6 +47,18 @@ export type BoundThreatCard = {
   seat: 'N' | 'S';
   rank: string;
   cardId: string;
+};
+
+export type CardBindingRole = 'structural' | 'stopper' | 'opponentDirective' | 'idleFill';
+
+export type CardBinding = {
+  suit: Suit;
+  hand: Side;
+  rank: string;
+  symbol: string;
+  index?: number;
+  role: CardBindingRole;
+  note?: string;
 };
 
 export type InverseResult = string | { type: 'ambiguous'; candidates: string[] } | { type: 'no-fit' };

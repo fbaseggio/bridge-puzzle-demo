@@ -15,3 +15,4 @@ export {
   type PositionInverseExplanation
 } from './positionInverse';
 export { renderDiagram } from './render';
+export { normalizeEncapsulationRoundTrip, type RoundTripNormalization, type RoundTripOptions } from './roundtrip';

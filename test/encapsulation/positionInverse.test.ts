@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { explainPositionInverse, explainSuitInverse, inferPositionEncapsulation, renderPositionEncapsulationSlots } from '../../src/encapsulation';
+import {
+  bindStandard,
+  explainPositionInverse,
+  explainSuitInverse,
+  inferPositionEncapsulation,
+  renderPositionEncapsulationSlots
+} from '../../src/encapsulation';
 
 describe('position-level inverse encapsulation rendering', () => {
   it('renders explicit header and 0 placeholders for empty suits', () => {
@@ -109,6 +115,7 @@ describe('position-level inverse encapsulation rendering', () => {
     expect(explained.totalSlots).toBe(1);
     expect(explained.header).toBe('[s]');
     expect(Array.isArray(explained.winners)).toBe(true);
+    expect(Array.isArray(explained.structuralLows)).toBe(true);
     expect(Array.isArray(explained.stopChecks)).toBe(true);
     expect(typeof explained.countSummary).toBe('string');
   });
@@ -143,5 +150,43 @@ describe('position-level inverse encapsulation rendering', () => {
       'S'
     );
     expect(out).toBe('[shdc] Wwc, {ambiguous:o|u} > 0, W');
+  });
+
+  it('reports structural lows separately and excludes them from threat list for WLc shape', () => {
+    const explained = explainSuitInverse(
+      { N: ['K', '2'], E: ['J', '9', '7'], S: ['A', '6', '3'], W: ['Q', 'T', '8'] },
+      'D',
+      { preferredPrimary: 'S' }
+    );
+    expect(explained.finalText).toBe('WLc');
+    expect(explained.structuralLows).toEqual(['N2', 'S3']);
+    expect(explained.threatCandidates).toEqual(['S6']);
+  });
+
+  it('shows winner-first binding labels and structural-low exclusion for WLauu regression suit', () => {
+    const explained = explainSuitInverse(
+      { N: ['K', '2'], E: ['J', '9', '7'], S: ['A', '6', '3'], W: ['T', '8'] },
+      'D',
+      { preferredPrimary: 'S' }
+    );
+    expect(explained.finalText).toBe('WLauu');
+    expect(explained.structuralLows).toEqual(['N2', 'S3']);
+    expect(explained.threatCandidates).toEqual(['S6']);
+    expect(explained.bindingLabels).toEqual(
+      expect.arrayContaining(['SA->w1', 'N2->W1-low', 'NK->l1', 'S3->L1-low', 'S6->a1'])
+    );
+    expect(explained.bindingLabels.some((label) => label.includes('->u1'))).toBe(true);
+    expect(explained.bindingLabels.some((label) => label.includes('->u2'))).toBe(true);
+  });
+
+  it('matches whole-position reviewed deal target [shdc] wau, WWu > WLc, Wc', () => {
+    const bound = bindStandard('wa, WW > WLc, Wc');
+    const out = inferPositionEncapsulation({
+      hands: bound.hands,
+      turn: bound.lead === '>' ? 'S' : bound.lead === '<' ? 'N' : 'S',
+      suitOrder: ['S', 'H', 'D', 'C'],
+      preferredPrimaryBySuit: { S: 'N', H: 'N', D: 'S', C: 'S' }
+    });
+    expect(out).toBe('[shdc] wau, WWu > WLc, Wc');
   });
 });

@@ -942,7 +942,10 @@ function inverseLongDebugLines(view: State): string[] {
     lines.push(
       `      primary=${suit.chosenPrimary}${suit.preferredPrimary ? ` (preferred=${suit.preferredPrimary})` : ''}`
     );
-    lines.push(`      winners=${suit.winners.join(' ') || '-'} threats=${suit.threatCandidates.join(' ') || '-'}`);
+    lines.push(
+      `      winners=${suit.winners.join(' ') || '-'} structuralLows=${suit.structuralLows.join(' ') || '-'} threats=${suit.threatCandidates.join(' ') || '-'}`
+    );
+    lines.push(`      bindings=${suit.bindingLabels.join(' ') || '-'}`);
     const stopperSummary =
       suit.stopChecks.map((c) => `${c.seat}${c.rank}[W:${c.westStops ? 'Y' : 'N'} E:${c.eastStops ? 'Y' : 'N'} b${c.backing}]`).join(' ') || '-';
     lines.push(`      stops=${stopperSummary}`);

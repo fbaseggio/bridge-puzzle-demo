@@ -1,6 +1,6 @@
 import type { EncapsulationToken, LeadSymbol, ParsedEncapsulation, ParsedSuit, Suit } from './types';
 
-const VALID_TOKENS = new Set<EncapsulationToken>(['w', 'W', 'l', 'L', 'a', 'A', 'b', 'B', 'c', 'C', 'i', 'o', 'u']);
+const VALID_TOKENS = new Set<EncapsulationToken>(['w', 'W', 'l', 'L', 'a', 'A', 'b', 'B', 'c', 'C', 'i', 'm', 'o', 'u']);
 const SUIT_ORDER: Suit[] = ['S', 'H', 'D', 'C'];
 
 function splitSuitStrings(part: string): string[] {

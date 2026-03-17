@@ -111,4 +111,24 @@ describe('single-suit inverse analyzer', () => {
     });
     expect(result).toBe('a');
   });
+
+  it('excludes W/L structural lows from threat inflation and prefers WLc', () => {
+    const result = inferSuitAbstraction({
+      N: 'K2',
+      E: 'J97',
+      S: 'A63',
+      W: 'QT8'
+    });
+    expect(result).toBe('WLc');
+  });
+
+  it('uses winner-first structural lows and preserves residual opponent cards as WLauu', () => {
+    const result = inferSuitAbstraction({
+      N: 'K2',
+      E: 'J97',
+      S: 'A63',
+      W: 'T8'
+    });
+    expect(result).toBe('WLauu');
+  });
 });
