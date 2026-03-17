@@ -445,9 +445,9 @@ function dedupeCandidates(candidates: Candidate[]): Candidate[] {
 
 function applyTargetedRefinement(
   text: string,
-  ranks: SeatRanks,
-  primary: 'N' | 'S',
-  threatKnowledge: ThreatKnowledge
+  _ranks: SeatRanks,
+  _primary: 'N' | 'S',
+  _threatKnowledge: ThreatKnowledge
 ): string {
   // Refinements are an exceptional fallback layer only.
   //
@@ -458,75 +458,6 @@ function applyTargetedRefinement(
   //
   // This function should stay small and rarely used; avoid growing it into a
   // second inference algorithm.
-  const primaryCount = primary === 'N' ? ranks.N.length : ranks.S.length;
-  const oppositeCount = primary === 'N' ? ranks.S.length : ranks.N.length;
-  const overCount = primary === 'N' ? ranks.W.length : ranks.E.length;
-  const underCount = primary === 'N' ? ranks.E.length : ranks.W.length;
-  const nsTotal = ranks.N.length + ranks.S.length;
-  const primaryRanks = primary === 'N' ? [...ranks.N] : [...ranks.S];
-  const overRanks = primary === 'N' ? [...ranks.W] : [...ranks.E];
-  const underRanks = primary === 'N' ? [...ranks.E] : [...ranks.W];
-  const rankIdx = (r: string): number => RANK_ORDER.indexOf(r);
-
-  // Residual opponent-only suit with one NS card should preserve idle/threat structure.
-  if (nsTotal === 1 && (overCount > 0 || underCount > 0)) {
-    const singletonPrimary: 'N' | 'S' = ranks.N.length === 1 ? 'N' : 'S';
-    const singletonOver = singletonPrimary === 'N' ? ranks.W.length : ranks.E.length;
-    const singletonUnder = singletonPrimary === 'N' ? ranks.E.length : ranks.W.length;
-    if (threatKnowledge === 'known-true') {
-      return singletonOver > 0 ? 'a' : 'b';
-    }
-    return text;
-  }
-
-  // Post-trick p001 shape: promoted second winner plus one over-opponent residual.
-  if (threatKnowledge !== 'known-true' && primaryCount === 2 && oppositeCount === 1 && overCount === 1 && underCount === 0) {
-    return 'Wwo';
-  }
-
-  // p007 spades shape.
-  if (ranks.N.length === 3 && ranks.S.length === 2 && ranks.W.length === 3 && ranks.E.length === 1) {
-    return 'WLau';
-  }
-
-  // Exclude W/L structural lows from threat candidacy: compact WLc shape.
-  // Example: N:K2 S:A63 W:QT8 E:J97 (primary S) => WLc.
-  if (
-    primary === 'S' &&
-    primaryCount === 3 &&
-    oppositeCount === 2 &&
-    overCount === 3 &&
-    underCount === 3 &&
-    ranks.S.includes('A') &&
-    ranks.S.includes('3') &&
-    ranks.N.includes('K') &&
-    ranks.N.includes('2')
-  ) {
-    return 'WLc';
-  }
-
-  // Winner-first / structural-low-first regression:
-  // N:K2 S:A63 W:T8 E:J97 (primary S) => WLauu.
-  if (
-    primary === 'S' &&
-    primaryCount === 3 &&
-    oppositeCount === 2 &&
-    overCount === 3 &&
-    underCount === 2 &&
-    ranks.S.includes('A') &&
-    ranks.S.includes('6') &&
-    ranks.S.includes('3') &&
-    ranks.N.includes('K') &&
-    ranks.N.includes('2') &&
-    ranks.W.includes('T') &&
-    ranks.W.includes('8') &&
-    ranks.E.includes('J') &&
-    ranks.E.includes('9') &&
-    ranks.E.includes('7')
-  ) {
-    return 'WLauu';
-  }
-
   return text;
 }
 
@@ -631,6 +562,7 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
   let oCount = 0;
   let uCount = 0;
   let linksSeen = 0;
+  const linkTokenSequence: string[] = [];
   const assignmentSteps: string[] = [];
 
   const bindCard = (seat: Side, rank: string, label: string): boolean => {
@@ -644,16 +576,19 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
   const cards = sortedCards(ranks);
   for (let i = 0; i < Math.min(n, cards.length); i += 1) {
     const card = cards[i];
+    if (bound.has(cardKey(card.seat, card.rank))) continue;
     if (card.seat === 'E' || card.seat === 'W') break;
     if (card.seat === primary) {
       linksSeen += 1;
       const lowOpp = lowestUnboundFromSeat(opposite, ranks, bound);
       if (lowOpp) {
         WCount += 1;
+        linkTokenSequence.push('W');
         bindCard(card.seat, card.rank, `W${WCount}`);
         bindCard(opposite, lowOpp, `W${WCount}-low`);
       } else {
         wCount += 1;
+        linkTokenSequence.push('w');
         bindCard(card.seat, card.rank, `w${wCount}`);
       }
     } else {
@@ -661,10 +596,12 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
       const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
       if (lowPrimary) {
         LCount += 1;
+        linkTokenSequence.push('L');
         bindCard(card.seat, card.rank, `L${LCount}`);
         bindCard(primary, lowPrimary, `L${LCount}-low`);
       } else {
         lCount += 1;
+        linkTokenSequence.push('l');
         bindCard(card.seat, card.rank, `l${lCount}`);
       }
     }
@@ -697,10 +634,12 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
         const lowOpp = lowestUnboundFromSeat(opposite, ranks, bound);
         if (lowOpp) {
           WCount += 1;
+          linkTokenSequence.push('W');
           bindCard(threatSeat, threatRank, `W${WCount}`);
           bindCard(opposite, lowOpp, `W${WCount}-low`);
         } else {
           wCount += 1;
+          linkTokenSequence.push('w');
           bindCard(threatSeat, threatRank, `w${wCount}`);
         }
         linksSeen += 1;
@@ -730,10 +669,12 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
         const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
         if (lowPrimary) {
           LCount += 1;
+          linkTokenSequence.push('L');
           bindCard(threatSeat, threatRank, `L${LCount}`);
           bindCard(primary, lowPrimary, `L${LCount}-low`);
         } else {
           lCount += 1;
+          linkTokenSequence.push('l');
           bindCard(threatSeat, threatRank, `l${lCount}`);
         }
         linksSeen += 1;
@@ -801,7 +742,7 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
     }
   }
 
-  const text = `${'W'.repeat(WCount)}${'w'.repeat(wCount)}${'L'.repeat(LCount)}${'l'.repeat(lCount)}${'A'.repeat(
+  const text = `${linkTokenSequence.join('')}${'A'.repeat(
     ACount
   )}${'B'.repeat(BCount)}${'C'.repeat(CCount)}${'a'.repeat(aCount)}${'b'.repeat(bCount)}${'c'.repeat(cCount)}${'i'.repeat(
     iCount
