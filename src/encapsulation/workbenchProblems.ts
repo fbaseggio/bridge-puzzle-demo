@@ -22,7 +22,17 @@ const ENCAPSULATION_WORKBENCH_ENTRIES: EncapsulationWorkbenchEntry[] = [
   { id: 'encap_wa_ww_gt_wlc_wc', name: 'Encap: wa, WW > WLc, Wc', encapsulation: 'wa, WW > WLc, Wc' },
   { id: 'encap_wa_wb_gt_wc_ww', name: 'Encap: Wa, Wb > Wc, Ww', encapsulation: 'Wa, Wb > Wc, Ww' },
   { id: 'encap_wlau_waouou_gt_b_wo', name: 'Encap: WLau, WAouou > b, Wo', encapsulation: 'WLau, WAouou > b, Wo' },
-  { id: 'encap_wg_a_gt_wc_ww', name: "Encap: Wg', c > wc, WW", encapsulation: "Wg', c > wc, WW" }
+  { id: 'encap_wg_a_gt_wc_ww', name: "Encap: Wg', c > wc, WW", encapsulation: "Wg', c > wc, WW" },
+  { id: 'encap_wwa_ww_gt_wc_wc', name: 'Encap: Wwa, WW > Wc, Wc', encapsulation: 'Wwa, WW > Wc, Wc' },
+  { id: 'encap_wa_ww_gt_wlc_wc_b', name: 'Encap: wa, WW > WLc, Wc', encapsulation: 'wa, WW > WLc, Wc' },
+  { id: 'encap_wa_ww_alt_gt_wc_wc', name: 'Encap: Wa, Ww > Wc, Wc', encapsulation: 'Wa, Ww > Wc, Wc' },
+  { id: 'encap_a_ww_gt_wlc_wc', name: 'Encap: a, Ww > WLc, Wc', encapsulation: 'a, Ww > WLc, Wc' },
+  { id: 'encap_wa_ww_gt_wc_wc_b', name: 'Encap: wa, WW > Wc, Wc', encapsulation: 'wa, WW > Wc, Wc' },
+  { id: 'encap_wla_wc_gt_wc_ww', name: 'Encap: WLa, Wc > Wc, Ww', encapsulation: 'WLa, Wc > Wc, Ww' },
+  { id: 'encap_wa_wlc_gt_wc_ww', name: 'Encap: Wa, WLc > Wc, Ww', encapsulation: 'Wa, WLc > Wc, Ww' },
+  { id: 'encap_la_wc_gt_wlc_ww', name: 'Encap: La, Wc > WLc, Ww', encapsulation: 'La, Wc > WLc, Ww' },
+  { id: 'encap_a_wlc_gt_wlc_ww', name: 'Encap: a, WLc > WLc, Ww', encapsulation: 'a, WLc > WLc, Ww' },
+  { id: 'encap_wwa_wc_gt_wc_ww', name: 'Encap: Wwa, WC > Wc, Ww', encapsulation: 'Wwa, WC > Wc, Ww' }
 ];
 
 const ENC_WORKBENCH_BY_ID = new Map(ENCAPSULATION_WORKBENCH_ENTRIES.map((entry) => [entry.id, entry] as const));

@@ -3425,9 +3425,12 @@ function renderPracticePuzzleStateBar(view: State): HTMLElement {
   bar.className = 'practice-puzzle-state-bar';
   const strain = view.contract.strain;
   if (view.goal.type === 'minTricks') {
-    const initialGoal = currentProblem.goal.type === 'minTricks' ? currentProblem.goal.n : view.goal.n;
+    const initialTricksInDeal = seatOrder
+      .filter((seat) => seat === 'N' || seat === 'S')
+      .map((seat) => suitOrder.reduce((sum, suit) => sum + currentProblem.hands[seat][suit].length, 0))
+      .reduce((max, count) => Math.max(max, count), 0);
     const currentGoal = view.goal.n;
-    bar.textContent = `${strain} · Goal ${currentGoal}/${initialGoal} · NS ${view.tricksWon.NS} · EW ${view.tricksWon.EW}`;
+    bar.textContent = `${strain} · Goal ${currentGoal}/${initialTricksInDeal} · NS ${view.tricksWon.NS} · EW ${view.tricksWon.EW}`;
   } else {
     bar.textContent = `${strain} · Goal ${formatGoal(view)} · NS ${view.tricksWon.NS} · EW ${view.tricksWon.EW}`;
   }

@@ -42,4 +42,21 @@ describe('practice set queue builder', () => {
     expect(ids.has('encap_a_wc_gt_a_w__standard')).toBe(true);
     expect(ids.has('encap_wa_wb_gt_wc_ww__standard')).toBe(true);
   });
+
+  it('builds set4 with all compound-squeeze encapsulations', () => {
+    const queue = buildPracticeQueue('set4', { seed: 11 });
+    expect(queue.length).toBe(11);
+    const ids = new Set(queue.map((q) => q.id));
+    expect(ids.has('encap_a_wc_gt_wwc_ww__standard')).toBe(true);
+    expect(ids.has('encap_wwa_ww_gt_wc_wc__standard')).toBe(true);
+    expect(ids.has('encap_wa_ww_gt_wlc_wc_b__standard')).toBe(true);
+    expect(ids.has('encap_wa_ww_alt_gt_wc_wc__standard')).toBe(true);
+    expect(ids.has('encap_a_ww_gt_wlc_wc__standard')).toBe(true);
+    expect(ids.has('encap_wa_ww_gt_wc_wc_b__standard')).toBe(true);
+    expect(ids.has('encap_wla_wc_gt_wc_ww__standard')).toBe(true);
+    expect(ids.has('encap_wa_wlc_gt_wc_ww__standard')).toBe(true);
+    expect(ids.has('encap_la_wc_gt_wlc_ww__standard')).toBe(true);
+    expect(ids.has('encap_a_wlc_gt_wlc_ww__standard')).toBe(true);
+    expect(ids.has('encap_wwa_wc_gt_wc_ww__standard')).toBe(true);
+  });
 });

@@ -30,7 +30,17 @@ describe('encapsulation workbench adapter', () => {
       'encap_wa_ww_gt_wlc_wc',
       'encap_wa_wb_gt_wc_ww',
       'encap_wlau_waouou_gt_b_wo',
-      'encap_wg_a_gt_wc_ww'
+      'encap_wg_a_gt_wc_ww',
+      'encap_wwa_ww_gt_wc_wc',
+      'encap_wa_ww_gt_wlc_wc_b',
+      'encap_wa_ww_alt_gt_wc_wc',
+      'encap_a_ww_gt_wlc_wc',
+      'encap_wa_ww_gt_wc_wc_b',
+      'encap_wla_wc_gt_wc_ww',
+      'encap_wa_wlc_gt_wc_ww',
+      'encap_la_wc_gt_wlc_ww',
+      'encap_a_wlc_gt_wlc_ww',
+      'encap_wwa_wc_gt_wc_ww'
     ];
     const entries = listEncapsulationWorkbenchEntries();
     for (const id of expectedNewIds) {

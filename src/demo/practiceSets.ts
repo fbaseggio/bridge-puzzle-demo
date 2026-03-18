@@ -2,7 +2,7 @@ import type { Problem } from '../core';
 import { buildEncapsulationWorkbenchProblem, listEncapsulationWorkbenchEntries } from '../encapsulation/workbenchProblems';
 import { demoProblems, resolveDemoProblem } from './problems';
 
-export type PracticeSetId = 'set1' | 'set2' | 'set3';
+export type PracticeSetId = 'set1' | 'set2' | 'set3' | 'set4';
 
 export type PracticeQueueEntry = {
   id: string;
@@ -14,7 +14,8 @@ export type PracticeQueueEntry = {
 export const PRACTICE_SET_OPTIONS: Array<{ id: PracticeSetId; label: string }> = [
   { id: 'set1', label: 'Set 1 — Current Puzzles' },
   { id: 'set2', label: 'Set 2 — Encapsulation Bindings' },
-  { id: 'set3', label: 'Set 3 — Double Squeezes' }
+  { id: 'set3', label: 'Set 3 — Double Squeezes' },
+  { id: 'set4', label: 'Set 4 — Compound Squeezes' }
 ];
 
 function createSeededRng(seed: number): () => number {
@@ -79,6 +80,19 @@ const DOUBLE_SQUEEZE_ENCAP_IDS = new Set([
   'encap_a_wc_gt_a_w',
   'encap_wa_wb_gt_wc_ww'
 ]);
+const COMPOUND_SQUEEZE_ENCAP_IDS = new Set([
+  'encap_a_wc_gt_wwc_ww',
+  'encap_wwa_ww_gt_wc_wc',
+  'encap_wa_ww_gt_wlc_wc_b',
+  'encap_wa_ww_alt_gt_wc_wc',
+  'encap_a_ww_gt_wlc_wc',
+  'encap_wa_ww_gt_wc_wc_b',
+  'encap_wla_wc_gt_wc_ww',
+  'encap_wa_wlc_gt_wc_ww',
+  'encap_la_wc_gt_wlc_ww',
+  'encap_a_wlc_gt_wlc_ww',
+  'encap_wwa_wc_gt_wc_ww'
+]);
 
 function buildSet3Entries(): PracticeQueueEntry[] {
   const entries: PracticeQueueEntry[] = [];
@@ -107,9 +121,31 @@ function buildSet3Entries(): PracticeQueueEntry[] {
   return entries;
 }
 
+function buildSet4Entries(): PracticeQueueEntry[] {
+  const entries: PracticeQueueEntry[] = [];
+  for (const entry of listEncapsulationWorkbenchEntries()) {
+    if (!COMPOUND_SQUEEZE_ENCAP_IDS.has(entry.id)) continue;
+    const standardId = `${entry.id}__standard`;
+    entries.push({
+      id: standardId,
+      label: `${entry.encapsulation} [standard]`,
+      problem: buildEncapsulationWorkbenchProblem(entry, { bindingMode: 'standard', problemId: standardId }),
+      source: 'encapsulation-standard'
+    });
+  }
+  return entries;
+}
+
 export function buildPracticeQueue(setId: PracticeSetId, options?: { seed?: number }): PracticeQueueEntry[] {
   const seed = options?.seed ?? ((Date.now() ^ 0x9e3779b9) >>> 0);
   const rng = createSeededRng(seed);
-  const base = setId === 'set2' ? buildSet2Entries(seed) : setId === 'set3' ? buildSet3Entries() : buildSet1Entries();
+  const base =
+    setId === 'set2'
+      ? buildSet2Entries(seed)
+      : setId === 'set3'
+        ? buildSet3Entries()
+        : setId === 'set4'
+          ? buildSet4Entries()
+          : buildSet1Entries();
   return shuffle(base, rng);
 }
