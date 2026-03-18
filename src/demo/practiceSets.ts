@@ -2,7 +2,7 @@ import type { Problem } from '../core';
 import { buildEncapsulationWorkbenchProblem, listEncapsulationWorkbenchEntries } from '../encapsulation/workbenchProblems';
 import { demoProblems, resolveDemoProblem } from './problems';
 
-export type PracticeSetId = 'set1' | 'set2';
+export type PracticeSetId = 'set1' | 'set2' | 'set3';
 
 export type PracticeQueueEntry = {
   id: string;
@@ -13,7 +13,8 @@ export type PracticeQueueEntry = {
 
 export const PRACTICE_SET_OPTIONS: Array<{ id: PracticeSetId; label: string }> = [
   { id: 'set1', label: 'Set 1 — Current Puzzles' },
-  { id: 'set2', label: 'Set 2 — Encapsulation Bindings' }
+  { id: 'set2', label: 'Set 2 — Encapsulation Bindings' },
+  { id: 'set3', label: 'Set 3 — Double Squeezes' }
 ];
 
 function createSeededRng(seed: number): () => number {
@@ -72,10 +73,43 @@ function buildSet2Entries(seed: number): PracticeQueueEntry[] {
   return entries;
 }
 
+const DOUBLE_SQUEEZE_AUTHORED_IDS = new Set(['p003', 'p007', 'p008']);
+const DOUBLE_SQUEEZE_ENCAP_IDS = new Set([
+  'encap_wwc_gt_a_b_w',
+  'encap_a_wc_gt_a_w',
+  'encap_wa_wb_gt_wc_ww'
+]);
+
+function buildSet3Entries(): PracticeQueueEntry[] {
+  const entries: PracticeQueueEntry[] = [];
+
+  for (const entry of demoProblems) {
+    if (!DOUBLE_SQUEEZE_AUTHORED_IDS.has(entry.id)) continue;
+    entries.push({
+      id: entry.id,
+      label: entry.label,
+      problem: resolveDemoProblem(entry),
+      source: 'authored'
+    });
+  }
+
+  for (const entry of listEncapsulationWorkbenchEntries()) {
+    if (!DOUBLE_SQUEEZE_ENCAP_IDS.has(entry.id)) continue;
+    const standardId = `${entry.id}__standard`;
+    entries.push({
+      id: standardId,
+      label: `${entry.encapsulation} [standard]`,
+      problem: buildEncapsulationWorkbenchProblem(entry, { bindingMode: 'standard', problemId: standardId }),
+      source: 'encapsulation-standard'
+    });
+  }
+
+  return entries;
+}
+
 export function buildPracticeQueue(setId: PracticeSetId, options?: { seed?: number }): PracticeQueueEntry[] {
   const seed = options?.seed ?? ((Date.now() ^ 0x9e3779b9) >>> 0);
   const rng = createSeededRng(seed);
-  const base = setId === 'set2' ? buildSet2Entries(seed) : buildSet1Entries();
+  const base = setId === 'set2' ? buildSet2Entries(seed) : setId === 'set3' ? buildSet3Entries() : buildSet1Entries();
   return shuffle(base, rng);
 }
-

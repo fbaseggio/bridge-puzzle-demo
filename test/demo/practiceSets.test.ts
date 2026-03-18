@@ -30,5 +30,16 @@ describe('practice set queue builder', () => {
     expect(first.problem.hands.S).toBeDefined();
     expect(first.problem.hands.W).toBeDefined();
   });
-});
 
+  it('builds set3 with all double-squeeze targets', () => {
+    const queue = buildPracticeQueue('set3', { seed: 7 });
+    expect(queue.length).toBe(6);
+    const ids = new Set(queue.map((q) => q.id));
+    expect(ids.has('p003')).toBe(true);
+    expect(ids.has('p007')).toBe(true);
+    expect(ids.has('p008')).toBe(true);
+    expect(ids.has('encap_wwc_gt_a_b_w__standard')).toBe(true);
+    expect(ids.has('encap_a_wc_gt_a_w__standard')).toBe(true);
+    expect(ids.has('encap_wa_wb_gt_wc_ww__standard')).toBe(true);
+  });
+});
