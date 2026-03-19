@@ -2,7 +2,7 @@ export type Suit = 'S' | 'H' | 'D' | 'C';
 export type Rank = 'A' | 'K' | 'Q' | 'J' | 'T' | '9' | '8' | '7' | '6' | '5' | '4' | '3' | '2';
 export type Seat = 'N' | 'E' | 'S' | 'W';
 export type CardId = `${Suit}${Rank}`;
-export type CardRole = 'promotedWinner' | 'threat' | 'strandedThreat' | 'busy' | 'idle' | 'winner' | 'default';
+export type CardRole = 'promotedWinner' | 'threat' | 'strandedThreat' | 'resource' | 'busy' | 'idle' | 'winner' | 'default';
 export type DecisionRecord = {
   index: number;
   seat: 'E' | 'W';
@@ -67,6 +67,8 @@ export type Problem = {
   hands: Record<Seat, Hand>;
   policies: Partial<Record<Seat, Policy>>;
   threatCardIds?: CardId[];
+  resourceCardIds?: CardId[];
+  threatSymbolByCardId?: Partial<Record<CardId, string>>;
   preferredDiscards?: Partial<Record<Seat, CardId | CardId[]>>;
   rngSeed: number;
 };
@@ -93,6 +95,22 @@ export type State = {
           active: boolean;
           threatLength: number;
           stopStatus?: 'none' | 'single' | 'double';
+        }
+      >
+    >;
+  } | null;
+  resource: {
+    resourceCardIds: CardId[];
+    resourcesBySuit: Partial<
+      Record<
+        Suit,
+        {
+          suit: Suit;
+          resourceCardId: CardId;
+          resourceRank: Rank;
+          establishedOwner: Seat;
+          active: boolean;
+          resourceLength: number;
         }
       >
     >;
@@ -133,7 +151,7 @@ export type EngineEvent =
       chosenBucket?: string;
       bucketCards?: CardId[];
       policyClassByCard?: Record<string, string>;
-      tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
+      tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier3c' | 'tier4a' | 'tier4b' | 'tier4c', CardId[]>>;
       ddPolicy?: {
         mode: 'strict';
         source: 'runtime';

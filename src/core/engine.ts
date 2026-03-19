@@ -45,6 +45,9 @@ function cloneState(state: State): State {
     ...state,
     contract: { ...state.contract },
     threat: state.threat ? { threatCardIds: [...state.threat.threatCardIds], threatsBySuit: { ...state.threat.threatsBySuit } } : null,
+    resource: state.resource
+      ? { resourceCardIds: [...state.resource.resourceCardIds], resourcesBySuit: { ...state.resource.resourcesBySuit } }
+      : null,
     threatLabels: state.threatLabels
       ? {
           E: { busy: new Set(state.threatLabels.E.busy), idle: new Set(state.threatLabels.E.idle) },
@@ -144,6 +147,26 @@ function assertValidExplicitThreats(problem: Problem): CardId[] {
   return [...rawThreats];
 }
 
+function assertValidExplicitResources(problem: Problem): CardId[] {
+  const rawResources = problem.resourceCardIds ?? [];
+  const invalidResources: string[] = [];
+  for (const raw of rawResources) {
+    try {
+      const { suit, rank } = parseCardId(raw);
+      const canonical = toCardId(suit, rank) as CardId;
+      if (threatCardOccurrenceCount(problem.hands, canonical) !== 1) {
+        invalidResources.push(raw);
+      }
+    } catch {
+      invalidResources.push(raw);
+    }
+  }
+  if (invalidResources.length > 0) {
+    throw new Error(`Invalid resourceCardIds: ${invalidResources.join(', ')}`);
+  }
+  return [...rawResources];
+}
+
 function evaluateGoal(goal: Goal, tricksWon: { NS: number; EW: number }): boolean {
   if (goal.type === 'minTricks') {
     return tricksWon[goal.side] >= goal.n;
@@ -217,7 +240,7 @@ type AutoChoice = {
   chosenBucket?: string;
   bucketCards?: CardId[];
   policyClassByCard?: Record<string, string>;
-  tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
+  tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier3c' | 'tier4a' | 'tier4b' | 'tier4c', CardId[]>>;
   ddPolicy?: {
     mode: 'strict';
     source: 'runtime';
@@ -273,7 +296,7 @@ function emitSemantic(collector: SemanticEventCollector | undefined, event: Sema
 function semanticTagsForBucket(bucket: string | undefined): SemanticTag[] {
   if (!bucket) return [];
   if (bucket.startsWith('tier1') || bucket === 'follow:idle-cheap-win') return ['tier1', 'idle'];
-  if (bucket === 'tier2') return ['tier2'];
+  if (bucket === 'tier2a' || bucket === 'tier2b') return ['tier2'];
   if (bucket.startsWith('tier3')) return ['tier3', 'busy'];
   if (bucket.startsWith('tier4')) return ['tier4', 'busy'];
   if (bucket.startsWith('tier5')) return ['tier5'];
@@ -353,7 +376,7 @@ function buildPolicyClassByCard(
       out[card] = defaultClass;
     } else if (chosenBucket.startsWith('tier1')) {
       out[card] = 'idle:tier1';
-    } else if (chosenBucket === 'tier2') {
+    } else if (chosenBucket === 'tier2a' || chosenBucket === 'tier2b') {
       out[card] = `semiIdle:${card[0]}`;
     } else if (chosenBucket.startsWith('tier3') || chosenBucket.startsWith('tier4')) {
       out[card] = `busy:${card[0]}`;
@@ -486,6 +509,7 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
       hands: state.hands,
       trick: state.trick,
       threat: state.threat as any,
+      resource: state.resource as any,
       threatLabels: state.threatLabels as any,
       rng: state.rng
     });
@@ -515,6 +539,7 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
     hands: state.hands,
     trick: state.trick,
     threat: state.threat as any,
+    resource: state.resource as any,
     threatLabels: state.threatLabels as any,
     rng: state.rng
   });
@@ -546,7 +571,7 @@ function applyOnePlay(
   chosenBucket?: string,
   bucketCards?: CardId[],
   policyClassByCard?: Record<string, string>,
-  tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>,
+  tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier3c' | 'tier4a' | 'tier4b' | 'tier4c', CardId[]>>,
   ddPolicy?: {
     mode: 'strict';
     source: 'runtime';
@@ -637,6 +662,7 @@ function applyOnePlay(
         stagePhase
       );
       state.threat = updated.threat as State['threat'];
+      state.resource = updated.resource as State['resource'];
       state.threatLabels = updated.labels as State['threatLabels'];
       state.cardRoles = { ...updated.perCardRole };
       emitSemantic(collector, {
@@ -700,6 +726,7 @@ function applyOnePlay(
       'deferred'
     );
     state.threat = updated.threat as State['threat'];
+    state.resource = updated.resource as State['resource'];
     state.threatLabels = updated.labels as State['threatLabels'];
     state.cardRoles = { ...updated.perCardRole };
     emitSemantic(collector, {
@@ -758,18 +785,35 @@ export function init(problem: Problem): State {
   const trumpSuit: Suit | null = problem.contract.strain === 'NT' ? null : problem.contract.strain;
   const usesThreatAware = Object.values(problem.policies).some((p) => p?.kind === 'threatAware');
   let threat: State['threat'] = null;
+  let resource: State['resource'] = null;
   let threatLabels: State['threatLabels'] = null;
   let cardRoles: State['cardRoles'] = {};
   if (usesThreatAware) {
     const explicitThreats = assertValidExplicitThreats(problem);
-    const classification = initClassification({ hands: problem.hands }, explicitThreats);
+    const explicitResources = assertValidExplicitResources(problem);
+    const classification = initClassification(
+      { hands: problem.hands },
+      explicitThreats,
+      explicitResources,
+      undefined,
+      problem.threatSymbolByCardId
+    );
     threat = classification.threat as State['threat'];
+    resource = classification.resource as State['resource'];
     threatLabels = classification.labels as State['threatLabels'];
     cardRoles = { ...classification.perCardRole };
   } else if (problem.threatCardIds && problem.threatCardIds.length > 0) {
     const explicitThreats = assertValidExplicitThreats(problem);
-    const classification = initClassification({ hands: problem.hands }, explicitThreats);
+    const explicitResources = assertValidExplicitResources(problem);
+    const classification = initClassification(
+      { hands: problem.hands },
+      explicitThreats,
+      explicitResources,
+      undefined,
+      problem.threatSymbolByCardId
+    );
     threat = classification.threat as State['threat'];
+    resource = classification.resource as State['resource'];
     threatLabels = classification.labels as State['threatLabels'];
     cardRoles = { ...classification.perCardRole };
   }
@@ -778,6 +822,7 @@ export function init(problem: Problem): State {
     contract: { ...problem.contract },
     trumpSuit,
     threat,
+    resource,
     threatLabels,
     cardRoles,
     hands: {

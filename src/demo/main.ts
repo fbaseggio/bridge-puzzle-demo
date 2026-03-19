@@ -847,6 +847,8 @@ function rankColorClass(cardId: CardId, featureSource: Pick<State, 'cardRoles' |
       ? 'rank--green'
       : color === 'blue'
         ? 'rank--blue'
+        : color === 'amber'
+          ? 'rank--amber'
         : color === 'grey'
           ? 'rank--grey'
           : 'rank--black';
@@ -1438,8 +1440,8 @@ function computeEqcForAutoplayEvent(shadow: State, event: Extract<EngineEvent, {
     const level = chosenBucket.startsWith('tier3') ? '3' : '4';
     const orderedKeys =
       busyBranching === 'sameLevel'
-        ? ([`tier${level}a`, `tier${level}b`] as const)
-        : (['tier3a', 'tier3b', 'tier4a', 'tier4b'] as const);
+        ? ([`tier${level}a`, `tier${level}b`, `tier${level}c`] as const)
+        : (['tier3a', 'tier3b', 'tier3c', 'tier4a', 'tier4b', 'tier4c'] as const);
     const merged: CardId[] = [];
     for (const key of orderedKeys) {
       for (const card of tierBuckets[key] ?? []) {
@@ -1450,7 +1452,7 @@ function computeEqcForAutoplayEvent(shadow: State, event: Extract<EngineEvent, {
   }
   const toAltClassId = (card: CardId): string => {
     if (chosenBucket.startsWith('tier1')) return 'idle:tier1';
-    if (chosenBucket === 'tier2') return `semiIdle:${card[0]}`;
+    if (chosenBucket === 'tier2a' || chosenBucket === 'tier2b') return `semiIdle:${card[0]}`;
     if (chosenBucket.startsWith('tier3') || chosenBucket.startsWith('tier4')) return `busy:${card[0]}`;
     if (chosenBucket === 'tier5') return `other:${card[0]}`;
     const labels = shadow.threatLabels as DefenderLabels | null;

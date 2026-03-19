@@ -7,6 +7,7 @@ import {
   type DefenderLabels,
   type DefenderSeat,
   type Position,
+  type ResourceContext,
   type ThreatContext
 } from './threatModel';
 
@@ -15,11 +16,16 @@ export type DiscardTiers = {
   legal: CardId[];
   tier1a: CardId[];
   tier1b: CardId[];
+  tier1c: CardId[];
   tier2: CardId[];
+  tier2a: CardId[];
+  tier2b: CardId[];
   tier3a: CardId[];
   tier3b: CardId[];
+  tier3c: CardId[];
   tier4a: CardId[];
   tier4b: CardId[];
+  tier4c: CardId[];
   tier5: CardId[];
 };
 export type Tier1ExplainCard = {
@@ -113,12 +119,29 @@ function threatRankForSuit(suit: Suit, ctx: ThreatContext): Rank | null {
   return threat.threatRank;
 }
 
-export function getIdleThreatThresholdRank(suit: Suit, ctx: ThreatContext, labels: DefenderLabels): Rank | null {
-  const threatRank = threatRankForSuit(suit, ctx);
-  if (!threatRank) return null;
-  const promotedWinnerRank = getPromotedWinnerRankForSuit(ctx, labels, suit);
-  if (!promotedWinnerRank) return threatRank;
-  return RANK_VALUE[promotedWinnerRank] > RANK_VALUE[threatRank] ? promotedWinnerRank : threatRank;
+function resourceThresholdRankForSuit(suit: Suit, resource?: ResourceContext): Rank | null {
+  const entry = resource?.resourcesBySuit[suit];
+  if (!entry || !entry.active) return null;
+  return entry.resourceRank;
+}
+
+export function getIdleThreatThresholdRank(
+  suit: Suit,
+  ctx: ThreatContext,
+  labels: DefenderLabels,
+  resource?: ResourceContext
+): Rank | null {
+  const threatThreshold = (() => {
+    const threatRank = threatRankForSuit(suit, ctx);
+    if (!threatRank) return null;
+    const promotedWinnerRank = getPromotedWinnerRankForSuit(ctx, labels, suit);
+    if (!promotedWinnerRank) return threatRank;
+    return RANK_VALUE[promotedWinnerRank] > RANK_VALUE[threatRank] ? promotedWinnerRank : threatRank;
+  })();
+  const resourceThreshold = resourceThresholdRankForSuit(suit, resource);
+  if (!threatThreshold) return resourceThreshold;
+  if (!resourceThreshold) return threatThreshold;
+  return RANK_VALUE[resourceThreshold] > RANK_VALUE[threatThreshold] ? resourceThreshold : threatThreshold;
 }
 
 function tier1aPredicate(defender: DefenderSeat, cardId: CardId, labels: DefenderLabels, ctx: ThreatContext): boolean {
@@ -126,17 +149,29 @@ function tier1aPredicate(defender: DefenderSeat, cardId: CardId, labels: Defende
   return !suitHasActiveThreat(cardSuit(cardId), ctx);
 }
 
-function tier1bPredicate(defender: DefenderSeat, cardId: CardId, labels: DefenderLabels, ctx: ThreatContext): boolean {
+function tier1bPredicate(
+  defender: DefenderSeat,
+  cardId: CardId,
+  labels: DefenderLabels,
+  ctx: ThreatContext,
+  resource?: ResourceContext
+): boolean {
   if (!isIdle(defender, cardId, labels)) return false;
   const suit = cardSuit(cardId);
-  const threshold = getIdleThreatThresholdRank(suit, ctx, labels);
+  const threshold = getIdleThreatThresholdRank(suit, ctx, labels, resource);
   if (!threshold) return false;
   return RANK_VALUE[cardRank(cardId)] < RANK_VALUE[threshold];
 }
 
-function tier2Predicate(defender: DefenderSeat, cardId: CardId, labels: DefenderLabels, ctx: ThreatContext): boolean {
+function tier2Predicate(
+  defender: DefenderSeat,
+  cardId: CardId,
+  labels: DefenderLabels,
+  ctx: ThreatContext,
+  resource?: ResourceContext
+): boolean {
   if (!isIdle(defender, cardId, labels)) return false;
-  return !tier1aPredicate(defender, cardId, labels, ctx) && !tier1bPredicate(defender, cardId, labels, ctx);
+  return !tier1aPredicate(defender, cardId, labels, ctx) && !tier1bPredicate(defender, cardId, labels, ctx, resource);
 }
 
 function isBusy(defender: DefenderSeat, cardId: CardId, labels: DefenderLabels): boolean {
@@ -184,20 +219,31 @@ export function chooseDiscard(
   ledSuit: Suit | null,
   ctx: ThreatContext,
   labels: DefenderLabels,
+  resource: ResourceContext | undefined,
   rng: RngFn
 ): CardId {
-  const { legal, tier1a, tier1b, tier2, tier3a, tier3b, tier4a, tier4b, tier5 } = computeDiscardTiers(defenderHandId, position, ledSuit, ctx, labels);
+  const { legal, tier1a, tier1b, tier2a, tier2b, tier3a, tier3b, tier3c, tier4a, tier4b, tier4c, tier5 } = computeDiscardTiers(
+    defenderHandId,
+    position,
+    ledSuit,
+    ctx,
+    labels,
+    resource
+  );
   if (legal.length === 0) {
     throw new Error(`No legal cards for defender ${defenderHandId}`);
   }
 
   if (tier1a.length > 0) return pickUniform(tier1a, rng);
   if (tier1b.length > 0) return pickUniform(tier1b, rng);
-  if (tier2.length > 0) return pickUniform(tier2, rng);
+  if (tier2a.length > 0) return pickUniform(tier2a, rng);
+  if (tier2b.length > 0) return pickUniform(tier2b, rng);
   if (tier3a.length > 0) return pickUniform(tier3a, rng);
   if (tier3b.length > 0) return pickUniform(tier3b, rng);
+  if (tier3c.length > 0) return pickUniform(tier3c, rng);
   if (tier4a.length > 0) return pickUniform(tier4a, rng);
   if (tier4b.length > 0) return pickUniform(tier4b, rng);
+  if (tier4c.length > 0) return pickUniform(tier4c, rng);
   return pickUniform(tier5, rng);
 }
 
@@ -206,14 +252,26 @@ export function computeDiscardTiers(
   position: Position,
   ledSuit: Suit | null,
   ctx: ThreatContext,
-  labels: DefenderLabels
+  labels: DefenderLabels,
+  resource?: ResourceContext
 ): DiscardTiers {
   const hand = position.hands[defenderHandId];
   const legal = legalCards(hand, ledSuit);
 
   const tier1a = legal.filter((cardId) => tier1aPredicate(defenderHandId, cardId, labels, ctx));
-  const tier1b = legal.filter((cardId) => tier1bPredicate(defenderHandId, cardId, labels, ctx));
-  const tier2 = legal.filter((cardId) => tier2Predicate(defenderHandId, cardId, labels, ctx));
+  const tier1b = legal.filter((cardId) => tier1bPredicate(defenderHandId, cardId, labels, ctx, resource));
+  const tier2a = legal.filter((cardId) => tier2Predicate(defenderHandId, cardId, labels, ctx, resource));
+  const tier2b = legal.filter((cardId) => {
+    const suit = cardSuit(cardId);
+    const entry = resource?.resourcesBySuit[suit];
+    if (!entry || !entry.active) return false;
+    const suitRanks = position.hands[defenderHandId][suit];
+    const hasHigher = suitRanks.some((r) => RANK_VALUE[r] > RANK_VALUE[entry.resourceRank]);
+    const longEnough = suitRanks.length >= entry.resourceLength;
+    if (!hasHigher || !longEnough) return false;
+    const stopperRanks = [...suitRanks].sort((a, b) => RANK_VALUE[b] - RANK_VALUE[a]).slice(0, entry.resourceLength);
+    return stopperRanks.includes(cardRank(cardId));
+  });
   const tier3a = legal.filter((cardId) => {
     if (!isBusyInActiveThreat(defenderHandId, cardId, labels, ctx)) return false;
     const suit = cardSuit(cardId);
@@ -223,6 +281,12 @@ export function computeDiscardTiers(
     if (!isBusyInActiveThreat(defenderHandId, cardId, labels, ctx)) return false;
     const suit = cardSuit(cardId);
     return isCoordinatedSuit(defenderHandId, suit, labels, ctx);
+  });
+  const tier3c = legal.filter((cardId) => {
+    const suit = cardSuit(cardId);
+    const threat = ctx.threatsBySuit[suit];
+    if (!threat || !threat.active) return false;
+    return (threat.symbol ?? '').toLowerCase().startsWith('g') && !String(threat.symbol ?? '').includes("'");
   });
   const tier4a = legal.filter((cardId) => {
     if (!isBusyInActiveThreat(defenderHandId, cardId, labels, ctx)) return false;
@@ -234,8 +298,29 @@ export function computeDiscardTiers(
     const suit = cardSuit(cardId);
     return isSoloBusySuit(defenderHandId, suit, labels, ctx);
   });
+  const tier4c = legal.filter((cardId) => {
+    const suit = cardSuit(cardId);
+    const threat = ctx.threatsBySuit[suit];
+    if (!threat || !threat.active) return false;
+    return String(threat.symbol ?? '').toLowerCase().startsWith("g'");
+  });
 
-  return { legal, tier1a, tier1b, tier2, tier3a, tier3b, tier4a, tier4b, tier5: legal };
+  return {
+    legal,
+    tier1a,
+    tier1b,
+    tier1c: [],
+    tier2: tier2a,
+    tier2a,
+    tier2b,
+    tier3a,
+    tier3b,
+    tier3c,
+    tier4a,
+    tier4b,
+    tier4c,
+    tier5: legal
+  };
 }
 
 export function explainTier1Membership(

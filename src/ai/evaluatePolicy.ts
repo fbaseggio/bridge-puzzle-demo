@@ -1,6 +1,6 @@
 import type { Hand, Play, Policy, Rank, RngState, Seat, State, Suit } from '../core';
 import { computeDiscardTiers, type DiscardTiers, getIdleThreatThresholdRank } from './defenderDiscard';
-import { parseCardId, toCardId, type CardId, type DefenderLabels, type ThreatContext } from './threatModel';
+import { parseCardId, toCardId, type CardId, type DefenderLabels, type ResourceContext, type ThreatContext } from './threatModel';
 import { classInfoForCard } from '../core/equivalence';
 import { applyStrictDdFilter, buildCanonicalPositionSignature, type DdPolicyTrace } from './ddPolicy';
 
@@ -50,6 +50,7 @@ export type EvaluatePolicyInput = {
   hands: Record<Seat, Hand>;
   trick: Play[];
   threat: ThreatContext | null;
+  resource?: ResourceContext | null;
   threatLabels: DefenderLabels | null;
   rng: RngState;
 };
@@ -74,7 +75,7 @@ export type EvaluatePolicyOutput = {
   chosenBucket?: string;
   bucketCards?: CardId[];
   policyClassByCard?: Record<string, string>;
-  tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>>;
+  tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier3c' | 'tier4a' | 'tier4b' | 'tier4c', CardId[]>>;
   discardTiers?: DiscardTiers;
   ddPolicy?: DdPolicyTrace;
   ddTrace?: DdDecisionTrace;
@@ -136,7 +137,7 @@ function buildPolicyClassByCard(
       out[card] = defaultClass;
     } else if (chosenBucket.startsWith('tier1')) {
       out[card] = 'idle:tier1';
-    } else if (chosenBucket === 'tier2') {
+    } else if (chosenBucket === 'tier2a' || chosenBucket === 'tier2b') {
       out[card] = `semiIdle:${card[0]}`;
     } else if (chosenBucket.startsWith('tier3') || chosenBucket.startsWith('tier4')) {
       out[card] = `busy:${card[0]}`;
@@ -148,7 +149,7 @@ function buildPolicyClassByCard(
 }
 
 export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput {
-  const { policy, seat, hands, trick, threat, threatLabels } = input;
+  const { policy, seat, hands, trick, threat, resource, threatLabels } = input;
   const leadSuit = trick[0]?.suit ?? null;
   const rngBefore = { seed: input.rng.seed >>> 0, counter: input.rng.counter };
   let rngAfter = { ...rngBefore };
@@ -371,7 +372,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
       };
     }
 
-    const threshold = getIdleThreatThresholdRank(leadSuit, threat, threatLabels);
+    const threshold = getIdleThreatThresholdRank(leadSuit, threat, threatLabels, resource ?? undefined);
     if (!threshold) {
       const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank) as CardId);
       const ddFiltered = applyDdFilter(bucketCards, inSuitCardIds);
@@ -422,15 +423,18 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
       E: { busy: new Set(), idle: new Set() },
       W: { busy: new Set(), idle: new Set() }
     };
-  const tiers = computeDiscardTiers(seat, { hands }, leadSuit, threat, labels);
+  const tiers = computeDiscardTiers(seat, { hands }, leadSuit, threat, labels, resource ?? undefined);
   const ordered: Array<{ name: string; cards: CardId[] }> = [
     { name: 'tier1a', cards: tiers.tier1a },
     { name: 'tier1b', cards: tiers.tier1b },
-    { name: 'tier2', cards: tiers.tier2 },
+    { name: 'tier2a', cards: tiers.tier2a },
+    { name: 'tier2b', cards: tiers.tier2b },
     { name: 'tier3a', cards: tiers.tier3a },
     { name: 'tier3b', cards: tiers.tier3b },
+    { name: 'tier3c', cards: tiers.tier3c },
     { name: 'tier4a', cards: tiers.tier4a },
     { name: 'tier4b', cards: tiers.tier4b },
+    { name: 'tier4c', cards: tiers.tier4c },
     { name: 'tier5', cards: tiers.tier5 }
   ];
   const chosen = ordered.find((o) => o.cards.length > 0) ?? { name: 'tier5', cards: tiers.tier5 };
@@ -439,17 +443,19 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
   rngAfter = nextRng;
   const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
   const policyClassByCard = buildPolicyClassByCard(hands, seat, chosen.name, ddFiltered.candidates) ?? {};
-  for (const card of tiers.tier2) {
+  for (const card of [...tiers.tier2a, ...tiers.tier2b]) {
     policyClassByCard[card] = `semiIdle:${card[0]}`;
   }
   for (const card of [...tiers.tier3a, ...tiers.tier3b, ...tiers.tier4a, ...tiers.tier4b]) {
     policyClassByCard[card] = `busy:${card[0]}`;
   }
-  const tierBuckets: Partial<Record<'tier3a' | 'tier3b' | 'tier4a' | 'tier4b', CardId[]>> = {};
+  const tierBuckets: Partial<Record<'tier3a' | 'tier3b' | 'tier3c' | 'tier4a' | 'tier4b' | 'tier4c', CardId[]>> = {};
   if (tiers.tier3a.length > 0) tierBuckets.tier3a = [...tiers.tier3a];
   if (tiers.tier3b.length > 0) tierBuckets.tier3b = [...tiers.tier3b];
+  if (tiers.tier3c.length > 0) tierBuckets.tier3c = [...tiers.tier3c];
   if (tiers.tier4a.length > 0) tierBuckets.tier4a = [...tiers.tier4a];
   if (tiers.tier4b.length > 0) tierBuckets.tier4b = [...tiers.tier4b];
+  if (tiers.tier4c.length > 0) tierBuckets.tier4c = [...tiers.tier4c];
 
   return {
     chosenCardId,

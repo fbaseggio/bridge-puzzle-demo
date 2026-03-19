@@ -614,6 +614,14 @@ html.mode-widget {
   background: rgba(29, 78, 216, 0.08);
 }
 
+.rank.rank--amber {
+  color: #d97706;
+  text-shadow: 0 0 0.5px rgba(180, 83, 9, 0.28);
+  padding: 0 1px;
+  border-radius: 2px;
+  background: rgba(217, 119, 6, 0.08);
+}
+
 .rank.rank--purple {
   color: #7e22ce;
   text-shadow: 0 0 0.5px rgba(107, 33, 168, 0.3);

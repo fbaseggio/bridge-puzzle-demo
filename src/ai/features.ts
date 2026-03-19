@@ -6,7 +6,7 @@ const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
 const RANK_ORDER: string[] = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
 
 export type FeatureCardRole = EngineCardRole;
-export type FeatureColor = 'purple' | 'green' | 'blue' | 'black' | 'grey';
+export type FeatureColor = 'purple' | 'green' | 'blue' | 'amber' | 'black' | 'grey';
 
 export type FeatureSuitState = {
   suit: Suit;
@@ -239,6 +239,7 @@ export function getRankColorForFeatureRole(role: FeatureCardRole, teachingMode: 
   if (!teachingMode) return 'black';
   if (role === 'promotedWinner') return 'purple';
   if (role === 'threat' || role === 'strandedThreat') return 'green';
+  if (role === 'resource') return 'amber';
   if (role === 'busy') return 'blue';
   if (role === 'winner' || role === 'idle') return 'black';
   return 'grey';

@@ -25,5 +25,6 @@ export const p012: ThreatProblem = {
     W: { kind: 'threatAware' }
   },
   threatCardIds: ['DJ'],
+  resourceCardIds: ['H5'],
   rngSeed: 412
 };

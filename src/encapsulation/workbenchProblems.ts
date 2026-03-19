@@ -32,7 +32,9 @@ const ENCAPSULATION_WORKBENCH_ENTRIES: EncapsulationWorkbenchEntry[] = [
   { id: 'encap_wa_wlc_gt_wc_ww', name: 'Encap: Wa, WLc > Wc, Ww', encapsulation: 'Wa, WLc > Wc, Ww' },
   { id: 'encap_la_wc_gt_wlc_ww', name: 'Encap: La, Wc > WLc, Ww', encapsulation: 'La, Wc > WLc, Ww' },
   { id: 'encap_a_wlc_gt_wlc_ww', name: 'Encap: a, WLc > WLc, Ww', encapsulation: 'a, WLc > WLc, Ww' },
-  { id: 'encap_wwa_wc_gt_wc_ww', name: 'Encap: Wwa, WC > Wc, Ww', encapsulation: 'Wwa, WC > Wc, Ww' }
+  { id: 'encap_wwa_wc_gt_wc_ww', name: 'Encap: Wwa, WC > Wc, Ww', encapsulation: 'Wwa, WC > Wc, Ww' },
+  { id: 'encap_c_wg_gt_wa_ww', name: 'Encap: c, Wg > wa, WW', encapsulation: 'c, Wg > wa, WW' },
+  { id: 'encap_wlg_ww_gt_a_c', name: 'Encap: WLg, WW > a, c', encapsulation: 'WLg, WW > a, c' }
 ];
 
 const ENC_WORKBENCH_BY_ID = new Map(ENCAPSULATION_WORKBENCH_ENTRIES.map((entry) => [entry.id, entry] as const));
@@ -69,7 +71,18 @@ export function buildEncapsulationWorkbenchProblem(
   const leader = selectLeader(bound.lead);
   const handSize = bound.metadata.finalHandSize;
   const goal = Math.max(0, handSize + bound.parsed.goalOffset);
-  const threatCardIds = [...new Set(bound.threatCards.map((t) => t.cardId as CardId))];
+  const resourceSymbols = new Set(['f', 'F']);
+  const threatCardIds = [
+    ...new Set(bound.threatCards.filter((t) => !resourceSymbols.has(t.symbol)).map((t) => t.cardId as CardId))
+  ];
+  const resourceCardIds = [
+    ...new Set(bound.threatCards.filter((t) => resourceSymbols.has(t.symbol)).map((t) => t.cardId as CardId))
+  ];
+  const threatSymbolByCardId: Partial<Record<CardId, string>> = {};
+  for (const t of bound.threatCards) {
+    if (resourceSymbols.has(t.symbol)) continue;
+    threatSymbolByCardId[t.cardId as CardId] = t.symbol;
+  }
 
   return {
     id: problemId,
@@ -108,6 +121,8 @@ export function buildEncapsulationWorkbenchProblem(
       W: { kind: 'threatAware' }
     },
     threatCardIds,
+    resourceCardIds,
+    threatSymbolByCardId,
     rngSeed: hashSeed(`${problemId}|${entry.encapsulation}|${bindingMode}|${options?.randomSeed ?? '-'}`)
   };
 }

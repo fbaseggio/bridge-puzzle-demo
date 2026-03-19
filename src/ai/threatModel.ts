@@ -14,17 +14,32 @@ type ThreatSuitState = {
   stranded?: boolean;
   threatLength: number;
   stopStatus?: StopStatus;
+  symbol?: string;
+};
+
+type ResourceSuitState = {
+  suit: Suit;
+  resourceCardId: CardId;
+  resourceRank: Rank;
+  establishedOwner: Seat;
+  active: boolean;
+  resourceLength: number;
 };
 
 export type ThreatContext = {
   threatsBySuit: Partial<Record<Suit, ThreatSuitState>>;
   threatCardIds: CardId[];
 };
+export type ResourceContext = {
+  resourcesBySuit: Partial<Record<Suit, ResourceSuitState>>;
+  resourceCardIds: CardId[];
+};
 
 export type DefenderLabels = Record<DefenderSeat, { busy: Set<CardId>; idle: Set<CardId> }>;
-export type CardRole = 'promotedWinner' | 'threat' | 'strandedThreat' | 'busy' | 'idle' | 'winner' | 'default';
+export type CardRole = 'promotedWinner' | 'threat' | 'strandedThreat' | 'resource' | 'busy' | 'idle' | 'winner' | 'default';
 export type ClassificationState = {
   threat: ThreatContext;
+  resource: ResourceContext;
   labels: DefenderLabels;
   perCardRole: Partial<Record<CardId, CardRole>>;
 };
@@ -305,7 +320,11 @@ function countThreatLength(position: Position, owner: Seat, suit: Suit, threatRa
   return base + Math.min(lowOwner, partnerWinners);
 }
 
-export function initThreatContext(position: Position, threatCardIds: CardId[]): ThreatContext {
+export function initThreatContext(
+  position: Position,
+  threatCardIds: CardId[],
+  threatSymbolByCardId?: Partial<Record<CardId, string>>
+): ThreatContext {
   const bySuit: Partial<Record<Suit, ThreatSuitState>> = {};
 
   for (const cardId of threatCardIds) {
@@ -326,11 +345,60 @@ export function initThreatContext(position: Position, threatCardIds: CardId[]): 
       threatRank: rank,
       establishedOwner,
       active: true,
-      threatLength: countThreatLength(position, establishedOwner, suit, rank)
+      threatLength: countThreatLength(position, establishedOwner, suit, rank),
+      symbol: threatSymbolByCardId?.[cardId]
     };
   }
 
   return { threatsBySuit: bySuit, threatCardIds: [...threatCardIds] };
+}
+
+export function initResourceContext(position: Position, resourceCardIds: CardId[]): ResourceContext {
+  const bySuit: Partial<Record<Suit, ResourceSuitState>> = {};
+  for (const cardId of resourceCardIds) {
+    const { suit, rank } = parseCardId(cardId);
+    if (bySuit[suit]) throw new Error(`Duplicate resource suit: ${suit}`);
+    const owners = ownersOfCard(position, cardId);
+    if (owners.length !== 1) {
+      throw new Error(`Resource card ${cardId} must exist in exactly one hand (found ${owners.length})`);
+    }
+    const establishedOwner = owners[0];
+    bySuit[suit] = {
+      suit,
+      resourceCardId: cardId,
+      resourceRank: rank,
+      establishedOwner,
+      active: true,
+      resourceLength: countThreatLength(position, establishedOwner, suit, rank)
+    };
+  }
+  return { resourcesBySuit: bySuit, resourceCardIds: [...resourceCardIds] };
+}
+
+function updateResourceContextAfterTrick(
+  ctx: ResourceContext,
+  position: Position,
+  trickCardsPlayed: CardId[]
+): ResourceContext {
+  const next: ResourceContext = {
+    resourcesBySuit: { ...ctx.resourcesBySuit },
+    resourceCardIds: [...ctx.resourceCardIds]
+  };
+  const touchedSuits = new Set<Suit>(trickCardsPlayed.map((c) => parseCardId(c).suit));
+  for (const suit of touchedSuits) {
+    const resource = next.resourcesBySuit[suit];
+    if (!resource) continue;
+    const owners = ownersOfCard(position, resource.resourceCardId);
+    const stillEstablished = owners.length === 1 && owners[0] === resource.establishedOwner;
+    next.resourcesBySuit[suit] = {
+      ...resource,
+      active: stillEstablished,
+      resourceLength: stillEstablished
+        ? countThreatLength(position, resource.establishedOwner, suit, resource.resourceRank)
+        : 0
+    };
+  }
+  return next;
 }
 
 export function updateThreatContextAfterTrick(
@@ -519,6 +587,21 @@ function updateRolesForSuit(
   }
 }
 
+function markResourceRoleForSuit(
+  perCardRole: Partial<Record<CardId, CardRole>>,
+  resource: ResourceContext,
+  threat: ThreatContext,
+  suit: Suit
+): void {
+  const r = resource.resourcesBySuit[suit];
+  if (!r || !r.active) return;
+  const existingThreat = threat.threatsBySuit[suit];
+  if (existingThreat && existingThreat.active && existingThreat.threatCardId === r.resourceCardId) return;
+  const current = perCardRole[r.resourceCardId];
+  if (current === 'threat' || current === 'strandedThreat' || current === 'promotedWinner') return;
+  perCardRole[r.resourceCardId] = 'resource';
+}
+
 function recomputeMechanicalWinnersForSuit(
   perCardRole: Partial<Record<CardId, CardRole>>,
   position: Position,
@@ -536,7 +619,14 @@ function recomputeMechanicalWinnersForSuit(
     for (const rank of position.hands[seat][suit]) {
       const cardId = toCardId(suit, rank);
       const current = perCardRole[cardId] ?? 'default';
-      if (current === 'busy' || current === 'idle' || current === 'threat' || current === 'strandedThreat' || current === 'promotedWinner') {
+      if (
+        current === 'busy' ||
+        current === 'idle' ||
+        current === 'threat' ||
+        current === 'strandedThreat' ||
+        current === 'promotedWinner' ||
+        current === 'resource'
+      ) {
         continue;
       }
       perCardRole[cardId] = rankValue(rank) > highestOpponent ? 'winner' : 'default';
@@ -544,8 +634,15 @@ function recomputeMechanicalWinnersForSuit(
   }
 }
 
-export function initClassification(position: Position, threatCardIds: CardId[], runtime?: RuntimeThreatContext): ClassificationState {
-  const threat = applyStrandedFlags(initThreatContext(position, threatCardIds), position, runtime);
+export function initClassification(
+  position: Position,
+  threatCardIds: CardId[],
+  resourceCardIds: CardId[] = [],
+  runtime?: RuntimeThreatContext,
+  threatSymbolByCardId?: Partial<Record<CardId, string>>
+): ClassificationState {
+  const threat = applyStrandedFlags(initThreatContext(position, threatCardIds, threatSymbolByCardId), position, runtime);
+  const resource = initResourceContext(position, resourceCardIds);
   const labels = computeDefenderLabels(threat, position);
   for (const suit of SUITS) {
     const entry = threat.threatsBySuit[suit];
@@ -558,8 +655,9 @@ export function initClassification(position: Position, threatCardIds: CardId[], 
   const perCardRole: Partial<Record<CardId, CardRole>> = {};
   for (const suit of SUITS) {
     updateRolesForSuit(perCardRole, threat, labels, position, suit);
+    markResourceRoleForSuit(perCardRole, resource, threat, suit);
   }
-  return { threat, labels, perCardRole };
+  return { threat, resource, labels, perCardRole };
 }
 
 export function updateClassificationAfterPlay(
@@ -573,6 +671,11 @@ export function updateClassificationAfterPlay(
   const nextThreat: ThreatContext = {
     threatCardIds: [...state.threat.threatCardIds],
     threatsBySuit: { ...state.threat.threatsBySuit }
+  };
+  const baseResource: ResourceContext = state.resource ?? { resourceCardIds: [], resourcesBySuit: {} };
+  const nextResource: ResourceContext = {
+    resourceCardIds: [...baseResource.resourceCardIds],
+    resourcesBySuit: { ...baseResource.resourcesBySuit }
   };
   const nextLabels = cloneLabels(state.labels);
   const nextRoles: Partial<Record<CardId, CardRole>> = { ...state.perCardRole };
@@ -618,6 +721,7 @@ export function updateClassificationAfterPlay(
         };
       }
       updateRolesForSuit(nextRoles, immediateThreat, nextLabels, position, suit);
+      markResourceRoleForSuit(nextRoles, nextResource, immediateThreat, suit);
     }
     for (const suit of SUITS) {
       const t = immediateThreat.threatsBySuit[suit];
@@ -634,6 +738,7 @@ export function updateClassificationAfterPlay(
   if (phase === 'immediate') {
     return {
       threat: immediateThreat,
+      resource: nextResource,
       labels: nextLabels,
       perCardRole: nextRoles
     };
@@ -642,6 +747,7 @@ export function updateClassificationAfterPlay(
   if (phase === 'all' && trigger === 'lead') {
     return {
       threat: immediateThreat,
+      resource: nextResource,
       labels: nextLabels,
       perCardRole: nextRoles
     };
@@ -659,6 +765,13 @@ export function updateClassificationAfterPlay(
     ? applyTrickEndThreatSubstitution(trickAdjustedThreat, position, runtime)
     : trickAdjustedThreat;
   const strandedThreat = applyStrandedFlags(substitutedThreat, position, runtime);
+  const updatedResource = isTrickEnd
+    ? updateResourceContextAfterTrick(
+        nextResource,
+        position,
+        (runtime?.trick ?? []).map((p) => toCardId(p.suit, p.rank))
+      )
+    : nextResource;
   const recomputedLabels = computeDefenderLabels(strandedThreat, position);
   for (const suit of SUITS) {
     const updatedThreat = strandedThreat.threatsBySuit[suit];
@@ -669,10 +782,12 @@ export function updateClassificationAfterPlay(
       };
     }
     updateRolesForSuit(nextRoles, strandedThreat, recomputedLabels, position, suit);
+    markResourceRoleForSuit(nextRoles, updatedResource, strandedThreat, suit);
   }
 
   return {
     threat: strandedThreat,
+    resource: updatedResource,
     labels: recomputedLabels,
     perCardRole: nextRoles
   };
