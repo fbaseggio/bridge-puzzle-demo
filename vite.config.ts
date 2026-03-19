@@ -8,7 +8,9 @@ export default defineConfig({
       input: {
         home: resolve(__dirname, 'index.html'),
         workbench: resolve(__dirname, 'workbench/index.html'),
-        practice: resolve(__dirname, 'practice/index.html')
+        practice: resolve(__dirname, 'practice/index.html'),
+        articles: resolve(__dirname, 'articles/index.html'),
+        squeezeSelf: resolve(__dirname, 'articles/squeeze-self/index.html')
       }
     }
   },
