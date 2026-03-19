@@ -2,11 +2,12 @@ import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
 
 export default defineConfig({
-  base: '/bridge-puzzle-demo/',
+  base: '/workbench/',
   build: {
     rollupOptions: {
       input: {
-        main: resolve(__dirname, 'index.html'),
+        home: resolve(__dirname, 'index.html'),
+        workbench: resolve(__dirname, 'workbench/index.html'),
         practice: resolve(__dirname, 'practice/index.html')
       }
     }

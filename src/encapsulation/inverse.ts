@@ -206,6 +206,14 @@ function stopperSeats(owner: 'N' | 'S', token: 'a' | 'b' | 'c'): Array<'E' | 'W'
   return token === 'a' ? ['E'] : ['W'];
 }
 
+function returnStopper(owner: 'N' | 'S'): 'E' | 'W' {
+  return owner === 'N' ? 'W' : 'E';
+}
+
+function outgoingStopper(owner: 'N' | 'S'): 'E' | 'W' {
+  return owner === 'N' ? 'E' : 'W';
+}
+
 function stopperSeatsForToken(
   owner: 'N' | 'S',
   _primary: 'N' | 'S',
@@ -213,6 +221,20 @@ function stopperSeatsForToken(
   _isUpper: boolean
 ): Array<'E' | 'W'> {
   return stopperSeats(owner, token);
+}
+
+function countUnboundHigher(seat: 'E' | 'W', threatRank: string, ranks: SeatRanks, bound: Set<string>): number {
+  return ranks[seat].filter((rank) => !bound.has(cardKey(seat, rank)) && rankIdx(rank) < rankIdx(threatRank)).length;
+}
+
+function countCapitalLinks(linkTokenSequence: string[]): { count: number; hasW: boolean } {
+  let count = 0;
+  let hasW = false;
+  for (const token of linkTokenSequence) {
+    if (token === 'W' || token === 'L') count += 1;
+    if (token === 'W') hasW = true;
+  }
+  return { count, hasW };
 }
 
 function simulatePattern(pattern: string, primary: 'N' | 'S', residualOpposite = 0): SeatRanks {
@@ -283,17 +305,31 @@ function simulatePattern(pattern: string, primary: 'N' | 'S', residualOpposite =
       add(opposite, nextLow());
       continue;
     }
+    let gPrime = false;
+    if ((token === 'g' || token === 'G') && pattern[index + 1] === "'") {
+      gPrime = true;
+      index += 1;
+    }
     const lower = token.toLowerCase();
-    if (lower === 'a' || lower === 'b' || lower === 'c') {
+    if (lower === 'a' || lower === 'b' || lower === 'c' || lower === 'f' || lower === 'g') {
       const isUpper = token === token.toUpperCase();
       const owner: 'N' | 'S' = isUpper ? opposite : primary;
       const stopperSize = linksSeen + 1;
       if (isUpper) add(primary, nextLow());
-      const stoppers = stopperSeatsForToken(owner, primary, lower, isUpper);
-      if (stoppers.length === 1) {
-        for (let i = 0; i < stopperSize; i += 1) add(stoppers[0], nextHigh());
+      if (lower === 'f' || lower === 'g') {
+        const ret = returnStopper(owner);
+        const out = outgoingStopper(owner);
+        for (let i = 0; i < stopperSize; i += 1) add(ret, nextHigh());
+        if (lower === 'g' && !gPrime) {
+          for (let i = 0; i < stopperSize; i += 1) add(out, nextHigh());
+        }
       } else {
-        for (let i = 0; i < stopperSize * 2; i += 1) add(stoppers[i % 2], nextHigh());
+        const stoppers = stopperSeatsForToken(owner, primary, lower, isUpper);
+        if (stoppers.length === 1) {
+          for (let i = 0; i < stopperSize; i += 1) add(stoppers[0], nextHigh());
+        } else {
+          for (let i = 0; i < stopperSize * 2; i += 1) add(stoppers[i % 2], nextHigh());
+        }
       }
       add(owner, nextHigh());
       continue;
@@ -393,7 +429,15 @@ function generateCandidatesForPrimary(ranks: SeatRanks, primary: 'N' | 'S'): Arr
 
 function canonicalForm(candidate: string): string {
   const count = (re: RegExp): number => (candidate.match(re) ?? []).length;
-  return `${'W'.repeat(count(/W/g))}${'w'.repeat(count(/w/g))}${'L'.repeat(count(/L/g))}${'l'.repeat(count(/l/g))}${'a'.repeat(count(/a/g))}${'b'.repeat(count(/b/g))}${'c'.repeat(count(/c/g))}${'i'.repeat(count(/i/g))}${'o'.repeat(count(/o/g))}${'u'.repeat(count(/u/g))}`;
+  return `${'W'.repeat(count(/W/g))}${'w'.repeat(count(/w/g))}${'L'.repeat(count(/L/g))}${'l'.repeat(count(/l/g))}${'A'.repeat(
+    count(/A/g)
+  )}${'B'.repeat(count(/B/g))}${'C'.repeat(count(/C/g))}${'F'.repeat(count(/F/g))}${'G'.repeat(count(/G/g))}${"G'".repeat(
+    count(/G'/g)
+  )}${'a'.repeat(count(/a/g))}${'b'.repeat(count(/b/g))}${'c'.repeat(count(/c/g))}${'f'.repeat(count(/f/g))}${'g'.repeat(
+    count(/g/g)
+  )}${"g'".repeat(count(/g'/g))}${'i'.repeat(count(/i/g))}${'m'.repeat(count(/m/g))}${'o'.repeat(count(/o/g))}${'u'.repeat(
+    count(/u/g)
+  )}`;
 }
 
 function candidateScore(
@@ -402,8 +446,8 @@ function candidateScore(
   threatKnowledge: ThreatKnowledge,
   residualOpposite: number
 ): number {
-  const hasThreat = /[abc]/.test(candidate);
-  const threatCount = (candidate.match(/[abc]/g) ?? []).length;
+  const hasThreat = /[abcfg]/.test(candidate);
+  const threatCount = (candidate.match(/[abcfg]/g) ?? []).length;
   const links = (candidate.match(/[wWlL]/g) ?? []).length;
   const highLinks = (candidate.match(/[wW]/g) ?? []).length;
   const lowerLinks = (candidate.match(/[l]/g) ?? []).length;
@@ -554,9 +598,15 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
   let aCount = 0;
   let bCount = 0;
   let cCount = 0;
+  let fCount = 0;
+  let gCount = 0;
+  let gPrimeCount = 0;
   let ACount = 0;
   let BCount = 0;
   let CCount = 0;
+  let FCount = 0;
+  let GCount = 0;
+  let GPrimeCount = 0;
   let iCount = 0;
   let mCount = 0;
   let oCount = 0;
@@ -574,14 +624,26 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
   };
 
   const cards = sortedCards(ranks);
+  let linkScanLimit = Math.min(n, cards.length);
   for (let i = 0; i < Math.min(n, cards.length); i += 1) {
+    if (cards[i].seat === 'E' || cards[i].seat === 'W') {
+      linkScanLimit = i;
+      break;
+    }
+  }
+
+  for (let i = 0; i < linkScanLimit; i += 1) {
     const card = cards[i];
     if (bound.has(cardKey(card.seat, card.rank))) continue;
-    if (card.seat === 'E' || card.seat === 'W') break;
     if (card.seat === primary) {
       linksSeen += 1;
+      // If an opposite-side winner candidate is still pending in the top
+      // winner window, do not consume it as a W-low.
+      const hasPendingOppositeWinner = cards
+        .slice(i + 1, linkScanLimit)
+        .some((next) => next.seat === opposite && !bound.has(cardKey(next.seat, next.rank)));
       const lowOpp = lowestUnboundFromSeat(opposite, ranks, bound);
-      if (lowOpp) {
+      if (lowOpp && !hasPendingOppositeWinner) {
         WCount += 1;
         linkTokenSequence.push('W');
         bindCard(card.seat, card.rank, `W${WCount}`);
@@ -607,8 +669,12 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
     }
   }
 
-  const nextNs = highestUnboundNsCard(ranks, bound);
-  if (nextNs) {
+  // Threat pass: keep descending through NS cards until we bind one threat shape
+  // (a/b/c/A/B/C) or run out. If a candidate is unstoppably promoted to winner/link,
+  // continue with the next lower NS card.
+  while (true) {
+    const nextNs = highestUnboundNsCard(ranks, bound);
+    if (!nextNs) break;
     const threatSeat = nextNs.seat;
     const threatRank = nextNs.rank;
     const stopperSize = linksSeen + 1;
@@ -618,17 +684,71 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
     let ownerUnderSeat: 'E' | 'W' | null = null;
     let ownerOverStops = false;
     let ownerUnderStops = false;
+    let boundThreatShape = false;
+    let promotedToLink = false;
+    const addStopperLabels = (seat: 'E' | 'W', count: number, base: string): void => {
+      const sorted = [...ranks[seat]].sort((a, b) => rankIdx(a) - rankIdx(b));
+      let added = 0;
+      for (const rank of sorted) {
+        if (added >= count) break;
+        const ok = bindCard(seat, rank, `${base}-stop${added + 1}`);
+        if (ok) added += 1;
+      }
+    };
 
     if (threatSeat === primary) {
+      const owner: 'N' | 'S' = threatSeat;
+      const retSeat = returnStopper(owner);
+      const outSeat = outgoingStopper(owner);
+      const retStops = defenderStops(retSeat, threatRank, stopperSize, ranks, bound);
+      const outStops = defenderStops(outSeat, threatRank, stopperSize, ranks, bound);
+      const retHigher = countUnboundHigher(retSeat, threatRank, ranks, bound);
+      const retUnbound = ranks[retSeat].filter((rank) => !bound.has(cardKey(retSeat, rank))).length;
+      const retLower = retUnbound - retHigher;
+      const finesseReturnShape = retStops && retHigher === 1 && retLower >= Math.max(0, stopperSize - 1);
+      const outGuards = outStops ? 0 : countUnboundHigher(outSeat, threatRank, ranks, bound);
+      const { count: capitalBackingCount, hasW } = countCapitalLinks(linkTokenSequence);
+      const backingNeeded = outGuards + 1;
+      const backingPass = hasW && capitalBackingCount >= backingNeeded;
+
+      if (finesseReturnShape) {
+        if (outStops) {
+          if (backingPass) {
+            gCount += 1;
+            bindCard(threatSeat, threatRank, `g${gCount}`);
+            addStopperLabels(retSeat, stopperSize, `g${gCount}`);
+            addStopperLabels(outSeat, stopperSize, `g${gCount}`);
+            boundThreatShape = true;
+          }
+        } else if (backingPass) {
+          fCount += 1;
+          bindCard(threatSeat, threatRank, `f${fCount}`);
+          addStopperLabels(retSeat, stopperSize, `f${fCount}`);
+          boundThreatShape = true;
+        } else if (capitalBackingCount > 0) {
+          gPrimeCount += 1;
+          bindCard(threatSeat, threatRank, `g'${gPrimeCount}`);
+          addStopperLabels(retSeat, stopperSize, `g'${gPrimeCount}`);
+          boundThreatShape = true;
+        }
+      }
+
+      if (boundThreatShape) {
+        break;
+      }
+
       if (overStops && underStops) {
         cCount += 1;
         bindCard(threatSeat, threatRank, `c${cCount}`);
+        boundThreatShape = true;
       } else if (overStops) {
         aCount += 1;
         bindCard(threatSeat, threatRank, `a${aCount}`);
+        boundThreatShape = true;
       } else if (underStops) {
         bCount += 1;
         bindCard(threatSeat, threatRank, `b${bCount}`);
+        boundThreatShape = true;
       } else {
         // Unstoppable threat candidate is effectively an additional winner.
         const lowOpp = lowestUnboundFromSeat(opposite, ranks, bound);
@@ -643,8 +763,61 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
           bindCard(threatSeat, threatRank, `w${wCount}`);
         }
         linksSeen += 1;
+        promotedToLink = true;
       }
     } else {
+      const owner: 'N' | 'S' = threatSeat;
+      const retSeat = returnStopper(owner);
+      const outSeat = outgoingStopper(owner);
+      const retStops = defenderStops(retSeat, threatRank, stopperSize, ranks, bound);
+      const outStops = defenderStops(outSeat, threatRank, stopperSize, ranks, bound);
+      const retHigher = countUnboundHigher(retSeat, threatRank, ranks, bound);
+      const retUnbound = ranks[retSeat].filter((rank) => !bound.has(cardKey(retSeat, rank))).length;
+      const retLower = retUnbound - retHigher;
+      const finesseReturnShape = retStops && retHigher === 1 && retLower >= Math.max(0, stopperSize - 1);
+      const outGuards = outStops ? 0 : countUnboundHigher(outSeat, threatRank, ranks, bound);
+      const { count: capitalBackingCount, hasW } = countCapitalLinks(linkTokenSequence);
+      const backingNeeded = outGuards + 1;
+      const backingPass = hasW && capitalBackingCount >= backingNeeded;
+
+      if (finesseReturnShape) {
+        if (outStops) {
+          if (backingPass) {
+            GCount += 1;
+            const label = `G${GCount}`;
+            bindCard(threatSeat, threatRank, label);
+            const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
+            if (!lowPrimary) return null;
+            bindCard(primary, lowPrimary, `${label}-low`);
+            addStopperLabels(retSeat, stopperSize, label);
+            addStopperLabels(outSeat, stopperSize, label);
+            boundThreatShape = true;
+          }
+        } else if (backingPass) {
+          FCount += 1;
+          const label = `F${FCount}`;
+          bindCard(threatSeat, threatRank, label);
+          const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
+          if (!lowPrimary) return null;
+          bindCard(primary, lowPrimary, `${label}-low`);
+          addStopperLabels(retSeat, stopperSize, label);
+          boundThreatShape = true;
+        } else if (capitalBackingCount > 0) {
+          GPrimeCount += 1;
+          const label = `G'${GPrimeCount}`;
+          bindCard(threatSeat, threatRank, label);
+          const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
+          if (!lowPrimary) return null;
+          bindCard(primary, lowPrimary, `${label}-low`);
+          addStopperLabels(retSeat, stopperSize, label);
+          boundThreatShape = true;
+        }
+      }
+
+      if (boundThreatShape) {
+        break;
+      }
+
       const stopsBySeat: Record<'E' | 'W', boolean> = {
         [overSeat]: overStops,
         [underSeat]: underStops
@@ -678,43 +851,54 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
           bindCard(threatSeat, threatRank, `l${lCount}`);
         }
         linksSeen += 1;
+        promotedToLink = true;
       }
       if (upperLabel) {
         bindCard(threatSeat, threatRank, upperLabel);
         const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
         if (!lowPrimary) return null;
         bindCard(primary, lowPrimary, `${upperLabel}-low`);
+        boundThreatShape = true;
       }
     }
 
-    const addStopperLabels = (seat: 'E' | 'W', count: number, base: string): void => {
-      const sorted = [...ranks[seat]].sort((a, b) => rankIdx(a) - rankIdx(b));
-      let added = 0;
-      for (const rank of sorted) {
-        if (added >= count) break;
-        const ok = bindCard(seat, rank, `${base}-stop${added + 1}`);
-        if (ok) added += 1;
+    if (boundThreatShape) {
+      if (threatSeat === primary) {
+        if (overStops && underStops) {
+          addStopperLabels(overSeat, stopperSize, `c${cCount}`);
+          addStopperLabels(underSeat, stopperSize, `c${cCount}`);
+        } else if (overStops) {
+          addStopperLabels(overSeat, stopperSize, `a${aCount}`);
+        } else if (underStops) {
+          addStopperLabels(underSeat, stopperSize, `b${bCount}`);
+        }
+      } else {
+        if (ownerOverStops && ownerUnderStops) {
+          if (ownerOverSeat) addStopperLabels(ownerOverSeat, stopperSize, `C${CCount}`);
+          if (ownerUnderSeat) addStopperLabels(ownerUnderSeat, stopperSize, `C${CCount}`);
+        } else if (ownerOverStops) {
+          if (ownerOverSeat) addStopperLabels(ownerOverSeat, stopperSize, `A${ACount}`);
+        } else if (ownerUnderStops) {
+          if (ownerUnderSeat) addStopperLabels(ownerUnderSeat, stopperSize, `B${BCount}`);
+        }
       }
-    };
-    if (threatSeat === primary) {
-      if (overStops && underStops) {
-        addStopperLabels(overSeat, stopperSize, `c${cCount}`);
-        addStopperLabels(underSeat, stopperSize, `c${cCount}`);
-      } else if (overStops) {
-        addStopperLabels(overSeat, stopperSize, `a${aCount}`);
-      } else if (underStops) {
-        addStopperLabels(underSeat, stopperSize, `b${bCount}`);
-      }
-    } else {
-      if (ownerOverStops && ownerUnderStops) {
-        if (ownerOverSeat) addStopperLabels(ownerOverSeat, stopperSize, `C${CCount}`);
-        if (ownerUnderSeat) addStopperLabels(ownerUnderSeat, stopperSize, `C${CCount}`);
-      } else if (ownerOverStops) {
-        if (ownerOverSeat) addStopperLabels(ownerOverSeat, stopperSize, `A${ACount}`);
-      } else if (ownerUnderStops) {
-        if (ownerUnderSeat) addStopperLabels(ownerUnderSeat, stopperSize, `B${BCount}`);
-      }
+      break;
     }
+
+    if (!promotedToLink) break;
+  }
+
+  // Normalize link structure before residual i/m/o/u assignment:
+  // promote lowercase winners to W when opposite-side lows remain.
+  while (true) {
+    const wPos = linkTokenSequence.indexOf('w');
+    if (wPos < 0) break;
+    const lowOpp = lowestUnboundFromSeat(opposite, ranks, bound);
+    if (!lowOpp) break;
+    wCount = Math.max(0, wCount - 1);
+    WCount += 1;
+    linkTokenSequence[wPos] = 'W';
+    bindCard(opposite, lowOpp, `W${WCount}-low`);
   }
 
   for (const rank of ranks[primary]) {
@@ -744,9 +928,11 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
 
   const text = `${linkTokenSequence.join('')}${'A'.repeat(
     ACount
-  )}${'B'.repeat(BCount)}${'C'.repeat(CCount)}${'a'.repeat(aCount)}${'b'.repeat(bCount)}${'c'.repeat(cCount)}${'i'.repeat(
-    iCount
-  )}${'m'.repeat(mCount)}${'o'.repeat(oCount)}${'u'.repeat(uCount)}`;
+  )}${'B'.repeat(BCount)}${'C'.repeat(CCount)}${'F'.repeat(FCount)}${'G'.repeat(GCount)}${"G'".repeat(
+    GPrimeCount
+  )}${'a'.repeat(aCount)}${'b'.repeat(bCount)}${'c'.repeat(cCount)}${'f'.repeat(fCount)}${'g'.repeat(gCount)}${"g'".repeat(
+    gPrimeCount
+  )}${'i'.repeat(iCount)}${'m'.repeat(mCount)}${'o'.repeat(oCount)}${'u'.repeat(uCount)}`;
 
   return {
     text,
@@ -812,11 +998,11 @@ function computeDetailed(input: SeatRanksInput, options: SuitInverseOptions = {}
   for (const candidate of linkPreferred) bestScore = Math.max(bestScore, candidate.score);
   let best = linkPreferred.filter((candidate) => candidate.score === bestScore);
 
-  const hasThreat = best.some((candidate) => /[abc]/.test(candidate.text));
-  const hasNonThreat = best.some((candidate) => !/[abc]/.test(candidate.text));
+  const hasThreat = best.some((candidate) => /[abcfg]/.test(candidate.text));
+  const hasNonThreat = best.some((candidate) => !/[abcfg]/.test(candidate.text));
   if (hasThreat && hasNonThreat) {
     best = best.filter((candidate) =>
-      threatKnowledge === 'known-true' ? /[abc]/.test(candidate.text) : !/[abc]/.test(candidate.text)
+      threatKnowledge === 'known-true' ? /[abcfg]/.test(candidate.text) : !/[abcfg]/.test(candidate.text)
     );
   }
   if (threatKnowledge === 'known-false') {

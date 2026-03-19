@@ -3,10 +3,87 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bridge Cardplay Puzzle v0.1</title>
+    <title>DeepSqueeze</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 32px 20px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: #f8fafc;
+        color: #0f172a;
+      }
+
+      main {
+        width: 100%;
+        max-width: 700px;
+        text-align: center;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2.3rem, 5vw, 3.2rem);
+        line-height: 1.1;
+      }
+
+      h2 {
+        margin: 12px 0 0;
+        font-size: clamp(1.1rem, 2.6vw, 1.45rem);
+        font-weight: 600;
+        color: #334155;
+      }
+
+      p {
+        margin: 18px auto 28px;
+        max-width: 56ch;
+        color: #334155;
+        font-size: 1.03rem;
+      }
+
+      nav {
+        display: grid;
+        gap: 12px;
+      }
+
+      a {
+        display: block;
+        text-align: left;
+        text-decoration: none;
+        color: #0f172a;
+        background: #ffffff;
+        border: 1px solid #dbe4ee;
+        border-radius: 12px;
+        padding: 14px 16px;
+        font-weight: 600;
+      }
+
+      a:hover,
+      a:focus-visible {
+        border-color: #94a3b8;
+        background: #f1f5f9;
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="/src/demo/main.ts"></script>
+    <main>
+      <h1>DeepSqueeze</h1>
+      <h2>Bridge Endgame Explorer</h2>
+      <p>Interactive diagrams, puzzles, and analysis of late-game bridge positions.</p>
+      <nav aria-label="Primary">
+        <a href="/workbench/">Workbench</a>
+        <a href="/practice/">Practice</a>
+        <a href="/articles/squeeze-self/">Articles (Squeeze Self)</a>
+      </nav>
+    </main>
   </body>
 </html>

@@ -55,6 +55,11 @@ export type ProblemStatus = 'active' | 'underConstruction';
 export type Problem = {
   id: string;
   status?: ProblemStatus;
+  source?: {
+    author?: string;
+    title?: string;
+    url?: string;
+  };
   contract: Contract;
   leader: Seat;
   userControls: Seat[];
