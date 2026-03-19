@@ -47,7 +47,7 @@ export const demoProblems: DemoProblem[] = [
     id: 'squeeze_self_01',
     label: 'Focus on the squeeze against yourself',
     problem: squeezeSelf01,
-    articlePath: 'articles/squeeze-self.html'
+    articlePath: 'articles/squeeze-self/'
   },
   { id: 'p001', label: 'p001', problem: p001 },
   { id: 'p002', label: 'p002', problem: p002, experimental: p002Experimental },
