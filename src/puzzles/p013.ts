@@ -1,6 +1,9 @@
 import type { Problem } from '../core';
+import type { CardId } from '../ai/threatModel';
 
-export const p013: Problem = {
+type ThreatProblem = Problem & { threatCardIds: CardId[] };
+
+export const p013: ThreatProblem = {
   id: 'p013',
   source: {
     author: 'Ivar Andersson',
@@ -20,6 +23,6 @@ export const p013: Problem = {
     E: { kind: 'randomLegal' },
     W: { kind: 'randomLegal' }
   },
+  threatCardIds: ['H3', 'D5', 'S5'],
   rngSeed: 613
 };
-
