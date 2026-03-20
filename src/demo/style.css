@@ -22,6 +22,10 @@ body.mode-widget .site-header {
   display: none;
 }
 
+body.mode-widget.mode-practice .site-header {
+  display: block;
+}
+
 html.mode-widget {
   background: transparent;
 }

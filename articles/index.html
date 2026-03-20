@@ -88,12 +88,12 @@
         font-size: 1rem;
       }
 
-      nav {
+      .article-links {
         display: grid;
         gap: 12px;
       }
 
-      a {
+      .article-links a {
         display: block;
         text-decoration: none;
         color: #0f172a;
@@ -104,8 +104,8 @@
         font-weight: 600;
       }
 
-      a:hover,
-      a:focus-visible {
+      .article-links a:hover,
+      .article-links a:focus-visible {
         border-color: #94a3b8;
         background: #f1f5f9;
       }
@@ -126,7 +126,7 @@
       <main>
         <h1>Articles</h1>
         <p>Long-form writeups and interactive walkthroughs for endgame bridge positions.</p>
-        <nav aria-label="Article list">
+        <nav class="article-links" aria-label="Article list">
           <a href="/articles/squeeze-self/">Squeeze Self</a>
           <a href="/articles/coffin-examples/">Coffin Examples</a>
         </nav>

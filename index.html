@@ -97,12 +97,12 @@
         font-size: 1.03rem;
       }
 
-      nav {
+      .hero-links {
         display: grid;
         gap: 12px;
       }
 
-      a {
+      .hero-links a {
         display: block;
         text-align: left;
         text-decoration: none;
@@ -114,8 +114,8 @@
         font-weight: 600;
       }
 
-      a:hover,
-      a:focus-visible {
+      .hero-links a:hover,
+      .hero-links a:focus-visible {
         border-color: #94a3b8;
         background: #f1f5f9;
       }
@@ -137,7 +137,7 @@
         <h1>DeepSqueeze</h1>
         <h2>Bridge Endgame Explorer</h2>
         <p>Interactive diagrams, puzzles, and analysis of late-game bridge positions.</p>
-        <nav aria-label="Primary">
+        <nav class="hero-links" aria-label="Primary">
           <a href="/workbench/">Workbench</a>
           <a href="/practice/">Practice</a>
           <a href="/articles/">Articles</a>
