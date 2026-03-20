@@ -33,7 +33,6 @@ import {
   type Position,
   type ThreatContext,
 } from '../ai/threatModel';
-import { ensureDdDatasetLoaded } from '../ai/ddPolicy';
 import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock, formatInitBlock } from '../ai/threatModelVerbose';
 import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/features';
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
@@ -56,10 +55,6 @@ const busyBranchingLabel: Record<'strict' | 'sameLevel' | 'allBusy', string> = {
   strict: 'Strict',
   sameLevel: 'Same level',
   allBusy: 'All busy'
-};
-const ddSourceLabel: Record<'off' | 'runtime', string> = {
-  off: 'Off',
-  runtime: 'Runtime'
 };
 type HintState = {
   bestCards: CardId[];
@@ -150,9 +145,7 @@ root.style.setProperty('--table-gap-y', `${verticalGap}px`);
 root.style.setProperty('--table-gap-x', `${horizontalGap}px`);
 root.style.setProperty('--slot-offset', '12%');
 let busyBranching: 'strict' | 'sameLevel' | 'allBusy' = 'sameLevel';
-// Legacy runtime ddPolicy backstop stays available behind DD source toggles,
-// but browser DDS backstop is the active default in widget/analysis runtime.
-let ddSourceMode: 'off' | 'runtime' = 'off';
+// Browser DDS backstop is the active DD path in widget/analysis runtime.
 const threatDetail = false;
 const verboseCoverageDetail = false;
 const browserDdsBackstopEnabled = true;
@@ -197,7 +190,6 @@ teachingReducer.setTrumpSuit(state.trumpSuit);
 const semanticReducer = new CompositeSemanticReducer([rawSemanticReducer, teachingReducer]);
 const semanticCollector = new InMemorySemanticEventCollector();
 semanticCollector.attachReducer(semanticReducer);
-warmDdDataset(currentProblemId);
 let logs: string[] = [];
 let deferredLogLines: string[] = [];
 let verboseLog = false;
@@ -402,15 +394,6 @@ function withRun(line: string): string {
 
 function withRunVisit(nodeKey: string, line: string): string {
   return `run=${currentLogRunId} visit=${nextVisitId(nodeKey)} ${line}`;
-}
-
-function warmDdDataset(problemId: string): void {
-  if (ddSourceMode !== 'runtime') return;
-  void ensureDdDatasetLoaded(problemId).then((loaded) => {
-    if (!verboseLog) return;
-    logs = [...logs, `[DD] browser preload problem=${problemId} loaded=${loaded ? 'yes' : 'no'}`].slice(-500);
-    render();
-  });
 }
 
 function clearHint(): void {
@@ -1136,8 +1119,7 @@ function withDdSource(problem: ProblemWithThreats): ProblemWithThreats {
   for (const seat of seatOrder) {
     const policy = problem.policies[seat];
     if (!policy) continue;
-    const source = policy.ddSource ?? (policy.kind === 'threatAware' ? ddSourceMode : 'off');
-    policies[seat] = { ...policy, ddSource: source };
+    policies[seat] = { ...policy, ddSource: 'off' };
   }
   return { ...problem, policies };
 }
@@ -2511,7 +2493,6 @@ function resetGame(seed: number, reason: string): void {
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
   resetSemanticStreams();
   teachingReducer.setTrumpSuit(state.trumpSuit);
-  warmDdDataset(currentProblemId);
   logs = [...logs, `${reason} seed=${currentSeed}`].slice(-500);
   runStatus = 'running';
   runPlayCounter = 0;
@@ -2554,7 +2535,6 @@ function selectProblem(problemId: string): void {
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
   resetSemanticStreams();
   teachingReducer.setTrumpSuit(state.trumpSuit);
-  warmDdDataset(currentProblemId);
   runStatus = 'running';
   runPlayCounter = 0;
   invEqVersion = 0;
@@ -2843,26 +2823,6 @@ function renderDebugControls(): HTMLElement {
   };
   variationsLabel.appendChild(variationsSelect);
   row.appendChild(variationsLabel);
-
-  const ddLabel = document.createElement('label');
-  ddLabel.textContent = 'DD source: ';
-  const ddSelect = document.createElement('select');
-  (['off', 'runtime'] as const).forEach((source) => {
-    const option = document.createElement('option');
-    option.value = source;
-    option.textContent = ddSourceLabel[source];
-    if (source === ddSourceMode) option.selected = true;
-    ddSelect.appendChild(option);
-  });
-  ddSelect.onchange = () => {
-    const nextSource = ddSelect.value as 'off' | 'runtime';
-    if (nextSource === ddSourceMode) return;
-    ddSourceMode = nextSource;
-    resetGame(currentSeed, `DD source changed: ${ddSourceLabel[nextSource]}`);
-    if (nextSource === 'runtime') warmDdDataset(currentProblemId);
-  };
-  ddLabel.appendChild(ddSelect);
-  row.appendChild(ddLabel);
 
   panel.appendChild(row);
   return panel;

@@ -2,7 +2,7 @@ import type { Hand, Play, Policy, Rank, RngState, Seat, State, Suit } from '../c
 import { computeDiscardTiers, type DiscardTiers, getIdleThreatThresholdRank } from './defenderDiscard';
 import { parseCardId, toCardId, type CardId, type DefenderLabels, type ResourceContext, type ThreatContext } from './threatModel';
 import { classInfoForCard } from '../core/equivalence';
-import { applyStrictDdFilter, buildCanonicalPositionSignature, type DdPolicyTrace } from './ddPolicy';
+import { buildCanonicalPositionSignature, type DdPolicyTrace } from './ddPolicy';
 
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
 const SEAT_ORDER: Seat[] = ['N', 'E', 'S', 'W'];
@@ -162,7 +162,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
   let rngAfter = { ...rngBefore };
   const contractStrain = input.contractStrain ?? 'NT';
   const signature = buildCanonicalPositionSignature({ contractStrain, seat, hands, trick });
-  const ddSource = policy.ddSource ?? 'runtime';
+  const ddSource = 'off' as const;
   const applyDdFilter = (
     candidates: CardId[],
     legalUniverse?: CardId[]
@@ -182,22 +182,12 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
         path: 'disabled'
       };
     }
-    const filtered = applyStrictDdFilter(input.problemId, signature, candidates, legalUniverse);
-    if (!filtered.trace) {
-      return {
-        candidates: filtered.candidates,
-        trace: undefined,
-        lookup: true,
-        found: false,
-        path: 'base-fallback'
-      };
-    }
     return {
-      candidates: filtered.candidates,
-      trace: filtered.trace,
-      lookup: true,
-      found: true,
-      path: filtered.trace.path
+      candidates: [...candidates],
+      trace: undefined,
+      lookup: false,
+      found: false,
+      path: 'disabled'
     };
   };
 

@@ -68,13 +68,9 @@ function buildIndex(records: DdRecord[]): Map<string, DdAdvice> {
   return out;
 }
 
-const ddRuntimeDataModules = import.meta.env.SSR
-  ? (import.meta.glob('../data/dd/*.json', { eager: true, import: 'default' }) as Record<string, DdRecord[]>)
-  : {};
-const ddRuntimeDataLoaders = import.meta.glob('../data/dd/*.json', { import: 'default' }) as Record<
-  string,
-  () => Promise<DdRecord[]>
->;
+// Precomputed DD datasets are intentionally disabled.
+const ddRuntimeDataModules: Record<string, DdRecord[]> = {};
+const ddRuntimeDataLoaders: Record<string, () => Promise<DdRecord[]>> = {};
 
 function problemIdFromDataPath(path: string): string | null {
   const slash = path.lastIndexOf('/');
