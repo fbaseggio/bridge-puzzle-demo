@@ -24,6 +24,7 @@ import {
 } from '../core';
 import { computeDiscardTiers, getIdleThreatThresholdRank } from '../ai/defenderDiscard';
 import { queryDdsNextPlays, warmDdsRuntime } from '../ai/ddsBrowser';
+import { buildDdsScoreByCard } from '../ai/ddsCardScores';
 import {
   toCardId,
   updateClassificationAfterPlay,
@@ -490,20 +491,6 @@ function hintDiag(message: string): void {
   logs = [...logs, `[HINT] ${message}`].slice(-500);
 }
 
-function normalizeDdsRank(raw: unknown): Rank | null {
-  if (typeof raw !== 'string' && typeof raw !== 'number') return null;
-  const value = String(raw).toUpperCase();
-  if (value === '10') return 'T';
-  return rankOrder.includes(value as Rank) ? (value as Rank) : null;
-}
-
-function normalizeDdsCardId(suitRaw: unknown, rankRaw: unknown): CardId | null {
-  const suit = typeof suitRaw === 'string' ? suitRaw.toUpperCase() : '';
-  const rank = normalizeDdsRank(rankRaw);
-  if (!['S', 'H', 'D', 'C'].includes(suit) || !rank) return null;
-  return `${suit}${rank}` as CardId;
-}
-
 function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameters<typeof apply>[2]>['autoplayBackstop'] {
   return ({ state: liveState, legalPlays, autoChoice }) => {
     if (!browserDdsBackstopEnabled || !autoChoice.play) return null;
@@ -533,12 +520,7 @@ function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameter
       };
     }
 
-    const scoreByCard = new Map<CardId, number>();
-    for (const candidate of dds.result.plays ?? []) {
-      const cardId = normalizeDdsCardId(candidate.suit, candidate.rank);
-      if (!cardId || typeof candidate.score !== 'number') continue;
-      scoreByCard.set(cardId, candidate.score);
-    }
+    const scoreByCard = buildDdsScoreByCard(dds.result.plays);
 
     const scoredLegal = legalCandidates.filter((card) => scoreByCard.has(card));
     if (scoredLegal.length === 0) {
@@ -640,29 +622,10 @@ function classifyHintForCurrentPosition(): HintState | null {
       .join(' ');
     hintDiag(`browser DDS result ${compactBrowserDds || '-'}`);
 
-    const scoreByCard = new Map<CardId, number>();
+    const scoreByCard = buildDdsScoreByCard(dds.result.plays);
     const rawDdsCards: string[] = [];
     for (const play of dds.result.plays ?? []) {
       rawDdsCards.push(`${play.suit}${String(play.rank)}`);
-      const baseCard = normalizeDdsCardId(play.suit, play.rank);
-      if (baseCard && typeof play.score === 'number') scoreByCard.set(baseCard, play.score);
-
-      const equalsRaw = Array.isArray(play.equals)
-        ? play.equals
-        : (typeof play.equals === 'string' ? [play.equals] : []);
-      for (const eq of equalsRaw) {
-        if (!eq) continue;
-        const normalized = String(eq).toUpperCase();
-        if (normalized.length === 1) {
-          const eqCard = normalizeDdsCardId(play.suit, normalized);
-          if (eqCard && typeof play.score === 'number') scoreByCard.set(eqCard, play.score);
-          continue;
-        }
-        const suitRank = normalizeDdsCardId(normalized.slice(0, 1), normalized.slice(1));
-        const rankSuit = normalizeDdsCardId(normalized.slice(-1), normalized.slice(0, -1));
-        const eqCard = suitRank ?? rankSuit;
-        if (eqCard && typeof play.score === 'number') scoreByCard.set(eqCard, play.score);
-      }
     }
 
     let bestScore = Number.NEGATIVE_INFINITY;
@@ -717,12 +680,7 @@ function classifyDdErrorForUserPlay(
       playedCardIds
     });
     if (!dds.ok) return undefined;
-    const scoreByCard = new Map<CardId, number>();
-    for (const candidate of dds.result.plays ?? []) {
-      const cardId = normalizeDdsCardId(candidate.suit, candidate.rank);
-      if (!cardId || typeof candidate.score !== 'number') continue;
-      scoreByCard.set(cardId, candidate.score);
-    }
+    const scoreByCard = buildDdsScoreByCard(dds.result.plays);
     const scoredLegal = legalCardIds.filter((card) => scoreByCard.has(card));
     if (scoredLegal.length === 0) return undefined;
     const maxScore = Math.max(...scoredLegal.map((card) => scoreByCard.get(card) ?? Number.NEGATIVE_INFINITY));
@@ -1912,7 +1870,12 @@ function applyEventToShadow(s: State, event: EngineEvent): void {
     s.trickClassIds.push(`${event.play.seat}:${classId}`);
     if (s.threat && s.threatLabels) {
       const next = updateClassificationAfterPlay(
-        { threat: s.threat, labels: s.threatLabels, perCardRole: s.cardRoles },
+        {
+          threat: s.threat,
+          resource: (s.resource as NonNullable<State['resource']>) ?? { resourceCardIds: [], resourcesBySuit: {} },
+          labels: s.threatLabels,
+          perCardRole: s.cardRoles
+        },
         { hands: s.hands },
         toCardId(event.play.suit, event.play.rank) as CardId,
         {
@@ -1924,6 +1887,7 @@ function applyEventToShadow(s: State, event: EngineEvent): void {
         }
       );
       s.threat = next.threat as State['threat'];
+      s.resource = next.resource as State['resource'];
       s.threatLabels = next.labels as State['threatLabels'];
       s.cardRoles = { ...next.perCardRole };
     }
@@ -1995,6 +1959,13 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
         } else {
           const classId = classInfoForCard(shadow, event.play.seat, cardId).classId;
           playLine += ` | eq=${classId}${event.chosenBucket ? ` (card=${cardId}; bucket=${event.chosenBucket})` : ''}`;
+        }
+        if (event.browserDdBackstop) {
+          const bs = event.browserDdBackstop;
+          playLine += ` | ddsBackstop=${bs.overridden ? 'override' : 'pass'} (policy=${bs.policyChoice}; final=${bs.finalChoice}; safe=${bs.safeCandidates.join(',') || '-'})`;
+        }
+        if (event.ddPolicy) {
+          playLine += ` | ddPolicy=${event.ddPolicy.bound ? 'bound' : 'fallback'}:${event.ddPolicy.path}`;
         }
       }
       lines.push(playLine);

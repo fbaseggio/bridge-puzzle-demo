@@ -74,7 +74,7 @@ function buildSet2Entries(seed: number): PracticeQueueEntry[] {
   return entries;
 }
 
-const DOUBLE_SQUEEZE_AUTHORED_IDS = new Set(['p003', 'p007', 'p008']);
+const DOUBLE_SQUEEZE_AUTHORED_IDS = new Set(['p003', 'p008']);
 const DOUBLE_SQUEEZE_ENCAP_IDS = new Set([
   'encap_wwc_gt_a_b_w',
   'encap_a_wc_gt_a_w',

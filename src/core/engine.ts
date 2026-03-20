@@ -646,6 +646,7 @@ function applyOnePlay(
       const updated = updateClassificationAfterPlay(
         {
           threat: beforeThreat,
+          resource: (state.resource as NonNullable<State['resource']>) ?? { resourceCardIds: [], resourcesBySuit: {} },
           labels: state.threatLabels as NonNullable<State['threatLabels']>,
           perCardRole: beforeRoles
         },
@@ -710,6 +711,7 @@ function applyOnePlay(
     const updated = updateClassificationAfterPlay(
       {
         threat: beforeThreat,
+        resource: (state.resource as NonNullable<State['resource']>) ?? { resourceCardIds: [], resourcesBySuit: {} },
         labels: state.threatLabels as NonNullable<State['threatLabels']>,
         perCardRole: beforeRoles
       },

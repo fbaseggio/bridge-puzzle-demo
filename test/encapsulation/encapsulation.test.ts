@@ -34,6 +34,11 @@ describe('encapsulation parser', () => {
     expect(parsed.suits[3]).toEqual({ suit: 'C', primary: 'S', pattern: 'W', allowIdleFill: true, isEmpty: false });
   });
 
+  it("parses g' as a token (not as suit-level no-idle marker)", () => {
+    const parsed = parseEncapsulation("Wg' =");
+    expect(parsed.suits[0]).toEqual({ suit: 'S', primary: 'N', pattern: "Wg'", allowIdleFill: true, isEmpty: false });
+  });
+
   it('parses explicit suit-order headers and 0 placeholders', () => {
     const parsed = parseEncapsulation('[schd] Wa, a > w, 0');
     expect(parsed.explicitSuitOrder).toBe(true);
@@ -147,5 +152,14 @@ describe('deterministic binding examples', () => {
     // g requires both return and outgoing stopper participation.
     expect(b.hands.W.S.length).toBeGreaterThan(0);
     expect(b.hands.E.S.length).toBeGreaterThan(0);
+  });
+
+  it("binds g' with one-less outbound stopper length", () => {
+    const b = bindStandard("Wg' =");
+    expect(b.hands.N.S).toEqual(['A', 'J']);
+    expect(b.hands.S.S).toEqual(['2']);
+    expect(b.hands.W.S).toEqual(['K', '3']);
+    expect(b.hands.E.S).toEqual(['Q']);
+    expect(b.threatCards.some((t) => t.symbol === "g'" && t.suit === 'S' && t.seat === 'N')).toBe(true);
   });
 });

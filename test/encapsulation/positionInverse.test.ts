@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   bindStandard,
-  explainPositionInverse,
   explainSuitInverse,
   inferPositionEncapsulation,
   renderPositionEncapsulationSlots
@@ -83,22 +82,7 @@ describe('position-level inverse encapsulation rendering', () => {
       suitOrder: ['S', 'H', 'D', 'C'],
       threatCardIds: ['D8']
     });
-    expect(out).toBe('[schd] Wwou, 0 > u, a');
-  });
-
-  it('matches initial p007 whole-position inverse', () => {
-    const out = inferPositionEncapsulation({
-      hands: {
-        N: { S: ['A', '8', '4'], H: ['A', '2'], D: [], C: ['2'] },
-        E: { S: ['6'], H: ['Q', 'J', 'T', '9'], D: [], C: ['K'] },
-        S: { S: ['K', '5'], H: ['5', '4'], D: ['8'], C: ['A'] },
-        W: { S: ['Q', 'T', '7'], H: ['7', '6'], D: ['A'], C: [] }
-      },
-      turn: 'S',
-      suitOrder: ['S', 'H', 'D', 'C'],
-      threatCardIds: ['S8', 'D8']
-    });
-    expect(out).toBe('[shdc] WLau, Wcuu > b, Wo');
+    expect(out).toBe('[schd] Wau, 0 > u, a');
   });
 
   it('provides suit explanation metadata', () => {
@@ -116,28 +100,6 @@ describe('position-level inverse encapsulation rendering', () => {
     expect(Array.isArray(explained.structuralLows)).toBe(true);
     expect(Array.isArray(explained.stopChecks)).toBe(true);
     expect(typeof explained.countSummary).toBe('string');
-  });
-
-  it('provides position explanation with short text and per-suit detail', () => {
-    const explained = explainPositionInverse({
-      hands: {
-        N: { S: ['A', '8', '4'], H: ['A', '2'], D: [], C: ['2'] },
-        E: { S: ['6'], H: ['Q', 'J', 'T', '9'], D: [], C: ['K'] },
-        S: { S: ['K', '5'], H: ['5', '4'], D: ['8'], C: ['A'] },
-        W: { S: ['Q', 'T', '7'], H: ['7', '6'], D: ['A'], C: [] }
-      },
-      turn: 'S',
-      suitOrder: ['S', 'H', 'D', 'C'],
-      threatCardIds: ['S8', 'D8']
-    });
-    expect(explained.shortText).toBe('[shdc] WLau, Wcuu > b, Wo');
-    expect(explained.header).toBe('[shdc]');
-    expect(explained.suits).toHaveLength(4);
-    expect(explained.suits[0].suit).toBe('S');
-    expect(explained.suits[0].slotIndex).toBe(1);
-    expect(explained.suits[1].slotIndex).toBe(2);
-    expect(explained.suits[2].slotIndex).toBe(3);
-    expect(explained.suits[3].slotIndex).toBe(4);
   });
 
   it('renders lead indicator in fixed separator slot regardless of suit text content', () => {

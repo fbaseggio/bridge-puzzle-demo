@@ -299,6 +299,101 @@ function defendersOf(owner: Seat): Seat[] {
   return owner === 'N' || owner === 'S' ? ['E', 'W'] : ['N', 'S'];
 }
 
+function returnDefender(owner: Seat): DefenderSeat {
+  return owner === 'N' ? 'W' : 'E';
+}
+
+function outgoingDefender(owner: Seat): DefenderSeat {
+  return owner === 'N' ? 'E' : 'W';
+}
+
+function symbolBase(symbol?: string): string {
+  if (!symbol) return '';
+  const lower = symbol.toLowerCase();
+  if (lower.startsWith("g'")) return "g'";
+  return lower.slice(0, 1);
+}
+
+function sameCaseSymbol(from: string | undefined, lowerTarget: string): string {
+  if (!from) return lowerTarget;
+  const upper = from[0] === from[0].toUpperCase();
+  return upper ? lowerTarget.toUpperCase() : lowerTarget;
+}
+
+function defenderCanStopThreat(
+  position: Position,
+  defender: DefenderSeat,
+  suit: Suit,
+  threatRank: Rank,
+  threatLength: number
+): boolean {
+  const suitRanks = position.hands[defender][suit];
+  const hasHigher = suitRanks.some((r) => rankValue(r) > rankValue(threatRank));
+  const longEnough = suitRanks.length >= threatLength;
+  return hasHigher && longEnough;
+}
+
+function defenderCanAlmostStopThreatForGPrime(
+  position: Position,
+  defender: DefenderSeat,
+  suit: Suit,
+  threatRank: Rank,
+  threatLength: number
+): boolean {
+  const suitRanks = position.hands[defender][suit];
+  const hasHigher = suitRanks.some((r) => rankValue(r) > rankValue(threatRank));
+  const required = Math.max(0, threatLength - 1);
+  return hasHigher && suitRanks.length >= required;
+}
+
+function defenderRelevantForThreatSymbol(threat: ThreatSuitState, defender: DefenderSeat): boolean {
+  const owner = threat.establishedOwner;
+  if (owner !== 'N' && owner !== 'S') return true;
+  const ret = returnDefender(owner);
+  const out = outgoingDefender(owner);
+  const base = symbolBase(threat.symbol);
+  if (base === 'a' || base === 'f') return defender === ret;
+  if (base === 'b') return defender === out;
+  if (base === 'c' || base === 'g' || base === "g'") return true;
+  return true;
+}
+
+function normalizeSpecialThreatSymbols(ctx: ThreatContext, position: Position): ThreatContext {
+  const next: ThreatContext = { threatCardIds: [...ctx.threatCardIds], threatsBySuit: { ...ctx.threatsBySuit } };
+  for (const suit of SUITS) {
+    const threat = next.threatsBySuit[suit];
+    if (!threat || !threat.active || !threat.symbol) continue;
+    const owner = threat.establishedOwner;
+    if (owner !== 'N' && owner !== 'S') continue;
+    const base = symbolBase(threat.symbol);
+    if (base !== 'g' && base !== "g'") continue;
+    const ret = returnDefender(owner);
+    const out = outgoingDefender(owner);
+    const retStops = defenderCanStopThreat(position, ret, suit, threat.threatRank, threat.threatLength);
+    const outStops = defenderCanStopThreat(position, out, suit, threat.threatRank, threat.threatLength);
+    let nextSymbol = threat.symbol;
+    if (retStops && !outStops) {
+      if (base === "g'") {
+        const outAlmost = defenderCanAlmostStopThreatForGPrime(position, out, suit, threat.threatRank, threat.threatLength);
+        nextSymbol = outAlmost ? sameCaseSymbol(threat.symbol, "g'") : sameCaseSymbol(threat.symbol, 'f');
+      } else {
+        nextSymbol = sameCaseSymbol(threat.symbol, 'f');
+      }
+    } else if (!retStops && outStops) {
+      nextSymbol = sameCaseSymbol(threat.symbol, 'b');
+    } else if (retStops && outStops) {
+      nextSymbol = sameCaseSymbol(threat.symbol, base === "g'" ? "g'" : 'g');
+    }
+    if (nextSymbol !== threat.symbol) {
+      next.threatsBySuit[suit] = {
+        ...threat,
+        symbol: nextSymbol
+      };
+    }
+  }
+  return next;
+}
+
 function countThreatLength(position: Position, owner: Seat, suit: Suit, threatRank: Rank): number {
   const ownerSuitRanks = position.hands[owner][suit];
   const threatValue = rankValue(threatRank);
@@ -446,6 +541,7 @@ export function computeDefenderLabels(ctx: ThreatContext, position: Position): D
 
       const threat = ctx.threatsBySuit[suit];
       if (!threat || !threat.active || threat.stranded || threat.threatLength <= 0) continue;
+      if (!defenderRelevantForThreatSymbol(threat, defender)) continue;
 
       const suitRanks = position.hands[defender][suit];
       const hasHigher = suitRanks.some((r) => rankValue(r) > rankValue(threat.threatRank));
@@ -518,6 +614,7 @@ function recomputeSuitLabels(ctx: ThreatContext, position: Position, labels: Def
 
     const threat = ctx.threatsBySuit[suit];
     if (!threat || !threat.active || threat.stranded || threat.threatLength <= 0) continue;
+    if (!defenderRelevantForThreatSymbol(threat, defender)) continue;
     const suitRanks = position.hands[defender][suit];
     const hasHigher = suitRanks.some((r) => rankValue(r) > rankValue(threat.threatRank));
     const longEnough = suitRanks.length >= threat.threatLength;
@@ -580,7 +677,8 @@ function updateRolesForSuit(
 
   const threat = ctx.threatsBySuit[suit];
   if (threat?.active) {
-    perCardRole[threat.threatCardId] = threat.stranded ? 'strandedThreat' : 'threat';
+    const base = symbolBase(threat.symbol);
+    perCardRole[threat.threatCardId] = threat.stranded ? 'strandedThreat' : base === 'f' ? 'resource' : 'threat';
     if (!threat.stranded && isPromotedWinnerSuit(ctx, labels, suit)) {
       perCardRole[threat.threatCardId] = 'promotedWinner';
     }
@@ -641,7 +739,8 @@ export function initClassification(
   runtime?: RuntimeThreatContext,
   threatSymbolByCardId?: Partial<Record<CardId, string>>
 ): ClassificationState {
-  const threat = applyStrandedFlags(initThreatContext(position, threatCardIds, threatSymbolByCardId), position, runtime);
+  const strandedThreat = applyStrandedFlags(initThreatContext(position, threatCardIds, threatSymbolByCardId), position, runtime);
+  const threat = normalizeSpecialThreatSymbols(strandedThreat, position);
   const resource = initResourceContext(position, resourceCardIds);
   const labels = computeDefenderLabels(threat, position);
   for (const suit of SUITS) {
@@ -702,11 +801,21 @@ export function updateClassificationAfterPlay(
       beforeStrandedBySuit.set(suit, Boolean(immediateThreat.threatsBySuit[suit]?.stranded));
     }
     immediateThreat = applyStrandedFlags(immediateThreat, position, runtime);
+    const beforeSymbolBySuit = new Map<Suit, string | undefined>();
+    for (const suit of SUITS) {
+      beforeSymbolBySuit.set(suit, immediateThreat.threatsBySuit[suit]?.symbol);
+    }
+    immediateThreat = normalizeSpecialThreatSymbols(immediateThreat, position);
     const strandedChangedSuits: Suit[] = [];
     for (const suit of SUITS) {
       const before = beforeStrandedBySuit.get(suit) ?? false;
       const after = Boolean(immediateThreat.threatsBySuit[suit]?.stranded);
       if (before !== after) strandedChangedSuits.push(suit);
+    }
+    for (const suit of SUITS) {
+      const before = beforeSymbolBySuit.get(suit);
+      const after = immediateThreat.threatsBySuit[suit]?.symbol;
+      if (before !== after && !strandedChangedSuits.includes(suit)) strandedChangedSuits.push(suit);
     }
     // Strandedness changes alter whether defenders must keep guards in a suit.
     // Recompute that suit's defender labels/roles immediately so policy sees it
@@ -727,8 +836,11 @@ export function updateClassificationAfterPlay(
       const t = immediateThreat.threatsBySuit[suit];
       if (!t || !t.active) continue;
       const currentRole = nextRoles[t.threatCardId];
+      const base = symbolBase(t.symbol);
       if (t.stranded) {
         nextRoles[t.threatCardId] = 'strandedThreat';
+      } else if (base === 'f') {
+        nextRoles[t.threatCardId] = 'resource';
       } else if (currentRole !== 'promotedWinner') {
         nextRoles[t.threatCardId] = 'threat';
       }
@@ -764,7 +876,7 @@ export function updateClassificationAfterPlay(
   const substitutedThreat = isTrickEnd
     ? applyTrickEndThreatSubstitution(trickAdjustedThreat, position, runtime)
     : trickAdjustedThreat;
-  const strandedThreat = applyStrandedFlags(substitutedThreat, position, runtime);
+  const strandedThreat = normalizeSpecialThreatSymbols(applyStrandedFlags(substitutedThreat, position, runtime), position);
   const updatedResource = isTrickEnd
     ? updateResourceContextAfterTrick(
         nextResource,

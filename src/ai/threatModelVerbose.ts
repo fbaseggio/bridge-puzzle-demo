@@ -39,8 +39,9 @@ function fmtRanks(ranks: Rank[]): string {
   return ranks.length > 0 ? ranks.join(',') : '-';
 }
 
-function fmtCards(ids: CardId[]): string {
-  return ids.length > 0 ? ids.join(' ') : '-';
+function fmtCards(ids?: CardId[] | null): string {
+  if (!ids || ids.length === 0) return '-';
+  return ids.join(' ');
 }
 
 function sortCardIds(ids: CardId[]): CardId[] {

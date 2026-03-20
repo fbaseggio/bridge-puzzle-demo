@@ -6,6 +6,9 @@ const ROUND_TRIP_CASES = [
   'Waou',
   'Wwc > a, b, W',
   "WLa, WB > b', W -1",
+  "Wg', Wg > wwo",
+  'Wf > LF, w',
+  'Wf > wLF',
   '[shdc] wau, WWu > WLc, Wc',
   '[schd] Wa, a > w, iooo'
 ];

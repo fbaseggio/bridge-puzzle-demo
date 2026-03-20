@@ -6,6 +6,7 @@ import { computeCoverageCandidates, divergenceCandidates, hasUntriedAlternatives
 import { p001 } from '../src/puzzles/p001';
 import { p002 } from '../src/puzzles/p002';
 import { p004 } from '../src/puzzles/p004';
+import { p012 } from '../src/puzzles/p012';
 
 describe('bridge engine v0.1', () => {
   test('follow suit enforcement', () => {
@@ -228,7 +229,7 @@ describe('bridge engine v0.1', () => {
       contract: { strain: 'C' },
       leader: 'N',
       userControls: ['N', 'E', 'S', 'W'],
-      goal: { type: 'minTricks', side: 'NS', n: 1 },
+      goal: { type: 'minTricks', side: 'NS', n: 2 },
       hands: {
         N: { S: ['A'], H: ['2'], D: [], C: [] },
         E: { S: ['K'], H: ['A'], D: [], C: [] },
@@ -256,10 +257,12 @@ describe('bridge engine v0.1', () => {
     state = apply(state, { seat: 'N', suit: 'H', rank: '2' }).state;
     const trick2 = apply(state, { seat: 'E', suit: 'H', rank: 'A' });
     const t2Event = trick2.events.find((e) => e.type === 'trickComplete');
+    const handComplete = trick2.events.find((e) => e.type === 'handComplete');
 
     expect(t2Event && t2Event.type === 'trickComplete' ? t2Event.winner : null).toBe('E');
     expect(trick2.state.tricksWon).toEqual({ NS: 1, EW: 1 });
     expect(trick2.state.phase).toBe('end');
+    expect(handComplete && handComplete.type === 'handComplete' ? handComplete.success : null).toBe(false);
   });
 
   test('p001 first W discard tiers and deterministic chosen card under seed=101', () => {
@@ -274,8 +277,8 @@ describe('bridge engine v0.1', () => {
     expect(tiers.tier2a).toEqual([]);
     expect(tiers.tier2b).toEqual([]);
     expect(tiers.tier3a).toEqual([]);
-    expect(tiers.tier3b.sort()).toEqual(['HA', 'SJ', 'SK']);
-    expect(tiers.tier4.sort()).toEqual(['HA', 'SJ', 'SK']);
+    expect(tiers.tier3b).toEqual([]);
+    expect(tiers.tier4b.sort()).toEqual(['HA', 'SJ', 'SK']);
 
     const step = apply(start, { seat: 'S', suit: 'C', rank: 'A' });
     const firstAuto = step.events.find((e) => e.type === 'autoplay');
@@ -287,7 +290,7 @@ describe('bridge engine v0.1', () => {
     const wAuto = step.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
     expect(wAuto && wAuto.type === 'autoplay').toBe(true);
     if (!wAuto || wAuto.type !== 'autoplay') return;
-    expect(wAuto.chosenBucket).toBe('tier3b');
+    expect(wAuto.chosenBucket).toBe('tier4b');
     expect(wAuto.bucketCards?.sort()).toEqual(['HA', 'SJ', 'SK']);
     expect(wAuto.policyClassByCard).toEqual({
       SK: 'busy:S',
@@ -316,7 +319,7 @@ describe('bridge engine v0.1', () => {
           chosenCard,
           chosenClassId: classInfoForCard(init(p001), 'W', chosenCard).classId,
           chosenAltClassId,
-          chosenBucket: wAuto.chosenBucket ?? 'tier3b',
+          chosenBucket: wAuto.chosenBucket ?? 'tier4b',
           bucketCards: [...(wAuto.bucketCards ?? [])],
           sameBucketAlternativeClassIds,
           representativeCardByClass: {
@@ -423,12 +426,12 @@ describe('bridge engine v0.1', () => {
     expect(wAuto && wAuto.type === 'autoplay').toBe(true);
     if (!wAuto || wAuto.type !== 'autoplay') return;
 
-    expect(wAuto.chosenBucket).toBe('tier2a');
+    expect(wAuto.chosenBucket).toBe('tier3a');
     const tierBuckets = wAuto.tierBuckets ?? {};
-    expect(tierBuckets.tier2a && tierBuckets.tier2a.length > 0).toBe(true);
-    expect(tierBuckets.tier2b && tierBuckets.tier2b.length > 0).toBe(true);
-    expect((tierBuckets.tier2b ?? []).some((c) => c.startsWith('H'))).toBe(true);
-    expect((tierBuckets.tier2b ?? []).some((c) => c.startsWith('D'))).toBe(true);
+    expect(tierBuckets.tier3a && tierBuckets.tier3a.length > 0).toBe(true);
+    expect(tierBuckets.tier3b && tierBuckets.tier3b.length > 0).toBe(true);
+    expect((tierBuckets.tier3b ?? []).some((c) => c.startsWith('H'))).toBe(true);
+    expect((tierBuckets.tier3b ?? []).some((c) => c.startsWith('D'))).toBe(true);
 
     const chosenCard = `${wAuto.play.suit}${wAuto.play.rank}` as CardId;
     const altClass = (card: CardId) => wAuto.policyClassByCard?.[card] ?? classInfoForCard(start, 'W', card).classId;
@@ -437,7 +440,7 @@ describe('bridge engine v0.1', () => {
       let exploration = [...base];
       if (mode === 'sameLevel') {
         const merged: CardId[] = [];
-        for (const key of ['tier2a', 'tier2b'] as const) {
+        for (const key of ['tier3a', 'tier3b'] as const) {
           for (const card of tierBuckets[key] ?? []) {
             if (!merged.includes(card)) merged.push(card);
           }
@@ -479,11 +482,11 @@ describe('bridge engine v0.1', () => {
     expect(tiers.tier1a).toEqual([]);
     expect(tiers.tier1b).toEqual([]);
     expect(tiers.tier1c).toEqual([]);
-    expect(tiers.tier2a).toEqual(['S3']);
-    expect(tiers.tier2b.sort()).toEqual(['S3', 'SK']);
-    expect(tiers.tier3a).toEqual([]);
-    expect(tiers.tier3b).toEqual([]);
-    expect(tiers.tier4.sort()).toEqual(['S3', 'SK']);
+    expect(tiers.tier2a).toEqual([]);
+    expect(tiers.tier2b).toEqual([]);
+    expect(tiers.tier3a).toEqual(['S3']);
+    expect(tiers.tier3b.sort()).toEqual(['S3', 'SK']);
+    expect(tiers.tier4b).toEqual([]);
   });
 
   test('threatAware fails fast when threatCardIds are missing', () => {
@@ -561,9 +564,10 @@ describe('bridge engine v0.1', () => {
     expect(tiers.tier1b).toEqual(['H4']);
     expect(tiers.tier1c).toEqual([]);
     expect(tiers.tier2a).toEqual([]);
-    expect(tiers.tier2b.sort()).toEqual(['S9', 'SQ']);
+    expect(tiers.tier2b).toEqual([]);
+    expect(tiers.tier3b.sort()).toEqual(['S9', 'SQ']);
 
-    const chosen = chooseDiscard('E', position, 'C', inactiveCtx, labels, () => 0);
+    const chosen = chooseDiscard('E', position, 'C', inactiveCtx, labels, undefined, () => 0);
     expect(chosen).toBe('D7');
   });
 
@@ -620,8 +624,10 @@ describe('bridge engine v0.1', () => {
     const tiersForE = computeDiscardTiers('E', { hands: step.state.hands }, 'C', step.state.threat!, labels);
     expect(tiersForE.tier2a).toEqual([]);
     expect(tiersForE.tier2b).toEqual([]);
-    expect(tiersForE.tier3a).toEqual(['S2']);
-    expect(tiersForE.tier3b.sort()).toEqual(['S2', 'SJ', 'SK']);
+    expect(tiersForE.tier3a).toEqual([]);
+    expect(tiersForE.tier3b).toEqual([]);
+    expect(tiersForE.tier4a).toEqual(['S2']);
+    expect(tiersForE.tier4b.sort()).toEqual(['S2', 'SJ', 'SK']);
   });
 
   test('threatAware follow-suit chooses below-threshold cards when available', () => {
@@ -650,6 +656,81 @@ describe('bridge engine v0.1', () => {
     const step = apply(start, { seat: 'N', suit: 'S', rank: '9' });
     const eAuto = step.events.find((e) => e.type === 'autoplay' && e.play.seat === 'E');
     expect(eAuto && eAuto.type === 'autoplay' ? `${eAuto.play.suit}${eAuto.play.rank}` : null).toBe('S7');
+  });
+
+  test('resource follow-suit prefers low follow (does not use busy-protect-threat cover)', () => {
+    const problem: Problem = {
+      id: 'follow-resource-low',
+      contract: { strain: 'NT' },
+      leader: 'S',
+      userControls: ['S'],
+      goal: { type: 'minTricks', side: 'NS', n: 0 },
+      hands: {
+        N: { S: ['9', '8'], H: [], D: [], C: [] },
+        E: { S: ['7', '2'], H: [], D: [], C: [] },
+        S: { S: ['A'], H: [], D: [], C: [] },
+        W: { S: ['K', '3'], H: [], D: [], C: [] }
+      },
+      policies: {
+        W: { kind: 'threatAware' },
+        N: { kind: 'randomLegal' },
+        E: { kind: 'randomLegal' }
+      },
+      threatCardIds: ['S8'],
+      threatSymbolByCardId: { S8: 'f' },
+      rngSeed: 17
+    };
+
+    const start = init(problem);
+    const step = apply(start, { seat: 'S', suit: 'S', rank: 'A' });
+    const wAuto = step.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
+    expect(wAuto && wAuto.type === 'autoplay' ? `${wAuto.play.suit}${wAuto.play.rank}` : null).toBe('S3');
+    expect(wAuto && wAuto.type === 'autoplay' ? wAuto.chosenBucket : null).toBe('follow:below');
+  });
+
+  test('tier-2b follow-suit prefers low over cheap-win', () => {
+    const problem: Problem = {
+      id: 'follow-tier2b-low-over-cheap-win',
+      contract: { strain: 'NT' },
+      leader: 'S',
+      userControls: ['S'],
+      goal: { type: 'minTricks', side: 'NS', n: 0 },
+      hands: {
+        N: { S: ['Q', '2'], H: [], D: [], C: [] },
+        E: { S: ['J'], H: [], D: [], C: [] },
+        S: { S: ['K'], H: [], D: [], C: [] },
+        W: { S: ['A', '3'], H: [], D: [], C: [] }
+      },
+      policies: {
+        W: { kind: 'threatAware' },
+        N: { kind: 'randomLegal' },
+        E: { kind: 'randomLegal' }
+      },
+      threatCardIds: ['S2'],
+      resourceCardIds: ['S2'],
+      threatSymbolByCardId: { S2: 'f' },
+      rngSeed: 29
+    };
+
+    const start = init(problem);
+    const step = apply(start, { seat: 'S', suit: 'S', rank: 'K' });
+
+    const wAuto = step.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
+    expect(wAuto && wAuto.type === 'autoplay' ? `${wAuto.play.suit}${wAuto.play.rank}` : null).toBe('S3');
+    expect(wAuto && wAuto.type === 'autoplay' ? wAuto.chosenBucket : null).toBe('follow:below');
+  });
+
+  test('p012: after HA-HQ-H6, East does not follow with H9', () => {
+    const start = init(p012);
+    const step1 = apply(start, { seat: 'S', suit: 'H', rank: 'A' });
+    const westAuto = step1.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
+    expect(westAuto && westAuto.type === 'autoplay' ? `${westAuto.play.suit}${westAuto.play.rank}` : null).toBe('HQ');
+
+    const step2 = apply(step1.state, { seat: 'N', suit: 'H', rank: '6' });
+    const eastAuto = step2.events.find((e) => e.type === 'autoplay' && e.play.seat === 'E');
+    const eastCard = eastAuto && eastAuto.type === 'autoplay' ? `${eastAuto.play.suit}${eastAuto.play.rank}` : null;
+    expect(eastCard).not.toBe('H9');
+    expect(eastAuto && eastAuto.type === 'autoplay' ? eastAuto.chosenBucket : null).toBe('follow:below');
   });
 
   test('replay state forces recorded defender autoplay decision on matching signature', () => {

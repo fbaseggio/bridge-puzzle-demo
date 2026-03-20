@@ -89,12 +89,12 @@ describe('threat verbose formatters', () => {
       legal: ['HA', 'SJ', 'SK'],
       tier1a: ['HA'],
       tier1b: [],
-      tier1c: [],
-      tier2a: ['SJ'],
-      tier2b: ['SJ', 'SK'],
+      tier2: [],
       tier3a: [],
       tier3b: [],
-      tier4: ['HA', 'SJ', 'SK'],
+      tier4a: [],
+      tier4b: [],
+      tier5: ['HA', 'SJ', 'SK'],
       chosen: 'HA',
       rngState: { seed: 101, counter: 3 }
     });
@@ -103,8 +103,7 @@ describe('threat verbose formatters', () => {
     expect(discard).toContain('threat suit=S active=true threatRank=8 threatLength=2');
     expect(discard).toContain('thresholds=H=8 S=8');
     expect(discard).toContain('tier1a=HA');
-    expect(discard).toContain('tier2a=SJ');
-    expect(discard).toContain('tier2b=SJ SK');
+    expect(discard).toContain('tier2=-');
     expect(discard).toContain('candidate SJ status=busy group=solo belowThreat=false');
     expect(discard).toContain('chosenTier=tier1a chosen=HA');
     expect(discard).toContain('[THREAT:discard:explainTier1]');

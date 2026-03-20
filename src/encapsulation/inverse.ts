@@ -227,14 +227,16 @@ function countUnboundHigher(seat: 'E' | 'W', threatRank: string, ranks: SeatRank
   return ranks[seat].filter((rank) => !bound.has(cardKey(seat, rank)) && rankIdx(rank) < rankIdx(threatRank)).length;
 }
 
-function countCapitalLinks(linkTokenSequence: string[]): { count: number; hasW: boolean } {
+function countCapitalLinks(linkTokenSequence: string[]): { count: number; hasW: boolean; hasL: boolean } {
   let count = 0;
   let hasW = false;
+  let hasL = false;
   for (const token of linkTokenSequence) {
     if (token === 'W' || token === 'L') count += 1;
     if (token === 'W') hasW = true;
+    if (token === 'L') hasL = true;
   }
-  return { count, hasW };
+  return { count, hasW, hasL };
 }
 
 function simulatePattern(pattern: string, primary: 'N' | 'S', residualOpposite = 0): SeatRanks {
@@ -320,8 +322,14 @@ function simulatePattern(pattern: string, primary: 'N' | 'S', residualOpposite =
         const ret = returnStopper(owner);
         const out = outgoingStopper(owner);
         for (let i = 0; i < stopperSize; i += 1) add(ret, nextHigh());
-        if (lower === 'g' && !gPrime) {
-          for (let i = 0; i < stopperSize; i += 1) add(out, nextHigh());
+        if (lower === 'g') {
+          if (gPrime) {
+            const outNeed = Math.max(0, stopperSize - 1);
+            if (outNeed > 0) add(out, nextHigh());
+            for (let i = 0; i < Math.max(0, outNeed - 1); i += 1) add(out, nextLow());
+          } else {
+            for (let i = 0; i < stopperSize; i += 1) add(out, nextHigh());
+          }
         }
       } else {
         const stoppers = stopperSeatsForToken(owner, primary, lower, isUpper);
@@ -695,6 +703,16 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
         if (ok) added += 1;
       }
     };
+    const addGuardLabels = (seat: 'E' | 'W', count: number, base: string): void => {
+      const sorted = [...ranks[seat]].sort((a, b) => rankIdx(a) - rankIdx(b));
+      let added = 0;
+      for (const rank of sorted) {
+        if (added >= count) break;
+        if (rankIdx(rank) >= rankIdx(threatRank)) continue;
+        const ok = bindCard(seat, rank, `${base}-guard${added + 1}`);
+        if (ok) added += 1;
+      }
+    };
 
     if (threatSeat === primary) {
       const owner: 'N' | 'S' = threatSeat;
@@ -702,11 +720,14 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
       const outSeat = outgoingStopper(owner);
       const retStops = defenderStops(retSeat, threatRank, stopperSize, ranks, bound);
       const outStops = defenderStops(outSeat, threatRank, stopperSize, ranks, bound);
+      const outUnbound = ranks[outSeat].filter((rank) => !bound.has(cardKey(outSeat, rank))).length;
       const retHigher = countUnboundHigher(retSeat, threatRank, ranks, bound);
       const retUnbound = ranks[retSeat].filter((rank) => !bound.has(cardKey(retSeat, rank))).length;
       const retLower = retUnbound - retHigher;
       const finesseReturnShape = retStops && retHigher === 1 && retLower >= Math.max(0, stopperSize - 1);
       const outGuards = outStops ? 0 : countUnboundHigher(outSeat, threatRank, ranks, bound);
+      const outAlmostStops =
+        outUnbound === Math.max(0, stopperSize - 1) && countUnboundHigher(outSeat, threatRank, ranks, bound) > 0;
       const { count: capitalBackingCount, hasW } = countCapitalLinks(linkTokenSequence);
       const backingNeeded = outGuards + 1;
       const backingPass = hasW && capitalBackingCount >= backingNeeded;
@@ -725,10 +746,11 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
           bindCard(threatSeat, threatRank, `f${fCount}`);
           addStopperLabels(retSeat, stopperSize, `f${fCount}`);
           boundThreatShape = true;
-        } else if (capitalBackingCount > 0) {
+        } else if (outAlmostStops && capitalBackingCount > 0) {
           gPrimeCount += 1;
           bindCard(threatSeat, threatRank, `g'${gPrimeCount}`);
           addStopperLabels(retSeat, stopperSize, `g'${gPrimeCount}`);
+          addGuardLabels(outSeat, Math.max(0, stopperSize - 1), `g'${gPrimeCount}`);
           boundThreatShape = true;
         }
       }
@@ -771,14 +793,17 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
       const outSeat = outgoingStopper(owner);
       const retStops = defenderStops(retSeat, threatRank, stopperSize, ranks, bound);
       const outStops = defenderStops(outSeat, threatRank, stopperSize, ranks, bound);
+      const outUnbound = ranks[outSeat].filter((rank) => !bound.has(cardKey(outSeat, rank))).length;
       const retHigher = countUnboundHigher(retSeat, threatRank, ranks, bound);
       const retUnbound = ranks[retSeat].filter((rank) => !bound.has(cardKey(retSeat, rank))).length;
       const retLower = retUnbound - retHigher;
       const finesseReturnShape = retStops && retHigher === 1 && retLower >= Math.max(0, stopperSize - 1);
       const outGuards = outStops ? 0 : countUnboundHigher(outSeat, threatRank, ranks, bound);
-      const { count: capitalBackingCount, hasW } = countCapitalLinks(linkTokenSequence);
+      const outAlmostStops =
+        outUnbound === Math.max(0, stopperSize - 1) && countUnboundHigher(outSeat, threatRank, ranks, bound) > 0;
+      const { count: capitalBackingCount, hasL } = countCapitalLinks(linkTokenSequence);
       const backingNeeded = outGuards + 1;
-      const backingPass = hasW && capitalBackingCount >= backingNeeded;
+      const backingPass = hasL && capitalBackingCount >= backingNeeded;
 
       if (finesseReturnShape) {
         if (outStops) {
@@ -802,7 +827,7 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
           bindCard(primary, lowPrimary, `${label}-low`);
           addStopperLabels(retSeat, stopperSize, label);
           boundThreatShape = true;
-        } else if (capitalBackingCount > 0) {
+        } else if (outAlmostStops && capitalBackingCount > 0) {
           GPrimeCount += 1;
           const label = `G'${GPrimeCount}`;
           bindCard(threatSeat, threatRank, label);
@@ -810,6 +835,7 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
           if (!lowPrimary) return null;
           bindCard(primary, lowPrimary, `${label}-low`);
           addStopperLabels(retSeat, stopperSize, label);
+          addGuardLabels(outSeat, Math.max(0, stopperSize - 1), label);
           boundThreatShape = true;
         }
       }

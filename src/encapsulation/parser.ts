@@ -49,12 +49,27 @@ function parseSuitPattern(rawPattern: string): { pattern: string; allowIdleFill:
   if (trimmed === '0') {
     return { pattern: '', allowIdleFill: false };
   }
-  const apostrophes = (trimmed.match(/'/g) ?? []).length;
-  if (apostrophes > 1 || (apostrophes === 1 && !trimmed.endsWith("'"))) {
+  let allowIdleFill = true;
+  let pattern = '';
+  for (let i = 0; i < trimmed.length; i += 1) {
+    const ch = trimmed[i] as string;
+    if (ch !== "'") {
+      pattern += ch;
+      continue;
+    }
+    const prev = i > 0 ? trimmed[i - 1] : '';
+    // g' / G' token suffix
+    if (prev === 'g' || prev === 'G') {
+      pattern += ch;
+      continue;
+    }
+    // Suit-level no-idle suffix.
+    if (i === trimmed.length - 1) {
+      allowIdleFill = false;
+      continue;
+    }
     throw new Error(`Invalid apostrophe marker placement in suit pattern '${rawPattern}'`);
   }
-  const allowIdleFill = !trimmed.endsWith("'");
-  const pattern = allowIdleFill ? trimmed : trimmed.slice(0, -1);
   if (!pattern) throw new Error(`Missing suit tokens before apostrophe in pattern '${rawPattern}'`);
   return { pattern, allowIdleFill };
 }
@@ -80,7 +95,13 @@ function extractHeader(source: string): { body: string; suitOrder: Suit[]; expli
 }
 
 function assertTokens(pattern: string): void {
-  for (const ch of pattern) {
+  for (let i = 0; i < pattern.length; i += 1) {
+    const ch = pattern[i] as string;
+    if (ch === "'") {
+      const prev = i > 0 ? pattern[i - 1] : '';
+      if (prev === 'g' || prev === 'G') continue;
+      throw new Error(`Invalid token '${ch}' in suit pattern '${pattern}'`);
+    }
     if (!VALID_TOKENS.has(ch as EncapsulationToken)) {
       throw new Error(`Invalid token '${ch}' in suit pattern '${pattern}'`);
     }

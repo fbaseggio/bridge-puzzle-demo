@@ -3,6 +3,7 @@ import type { Hand, Seat, Suit } from '../src/core';
 import { chooseDiscard, getIdleThreatThresholdRank } from '../src/ai/defenderDiscard';
 import {
   computeDefenderLabels,
+  initClassification,
   initThreatContext,
   updateThreatContextAfterTrick,
   type CardId,
@@ -68,7 +69,7 @@ describe('threat model + defender discard', () => {
     const labels = computeDefenderLabels(ctx, position);
 
     // Tier 1a/1b/1c split: DA is 1a (no active threat suit), S2 is 1c.
-    const pick1 = chooseDiscard('W', position, 'H' as Suit, ctx, labels, () => 0);
+    const pick1 = chooseDiscard('W', position, 'H' as Suit, ctx, labels, undefined, () => 0);
     expect(pick1).toBe('DA');
 
     // No tier 1, tier 2 available (busy and below threat rank => S7)
@@ -80,7 +81,7 @@ describe('threat model + defender discard', () => {
     });
     const ctx2 = initThreatContext(position2, ['S9' as CardId]);
     const labels2 = computeDefenderLabels(ctx2, position2);
-    const pick2 = chooseDiscard('W', position2, null, ctx2, labels2, () => 0);
+    const pick2 = chooseDiscard('W', position2, null, ctx2, labels2, undefined, () => 0);
     expect(pick2).toBe('S7');
   });
 
@@ -111,7 +112,7 @@ describe('threat model + defender discard', () => {
     expect(labels.W.idle.has('SK' as CardId)).toBe(true);
   });
 
-  test('teaching annotations: threat green, busy blue, otherwise black', () => {
+  test('teaching annotations: threat green, busy blue, idle grey when teaching colors enabled', () => {
     const position = makePosition({
       N: { S: ['A', 'Q', '9', '5'], H: [], D: [], C: [] },
       E: { S: ['8', '6', '4'], H: [], D: [], C: [] },
@@ -124,7 +125,7 @@ describe('threat model + defender discard', () => {
 
     expect(getCardRankColor('S9' as CardId, ctx, labels, true)).toBe('green');
     expect(getCardRankColor('SK' as CardId, ctx, labels, true)).toBe('blue');
-    expect(getCardRankColor('S2' as CardId, ctx, labels, true)).toBe('black');
+    expect(getCardRankColor('S2' as CardId, ctx, labels, true)).toBe('grey');
     expect(getCardRankColor('SK' as CardId, ctx, labels, false)).toBe('black');
 
     const offCtx = updateThreatContextAfterTrick(
@@ -147,7 +148,7 @@ describe('threat model + defender discard', () => {
         W: { S: ['K', 'J', '7', '2'], H: [], D: [], C: [] }
       }
     });
-    expect(getCardRankColor('S9' as CardId, offCtx, offLabels, true)).toBe('black');
+    expect(getCardRankColor('S9' as CardId, offCtx, offLabels, true)).toBe('grey');
   });
 
   test('promotedWinner is purple when active threat has no busy defenders', () => {
@@ -165,4 +166,38 @@ describe('threat model + defender discard', () => {
     expect(getCardRankColor('S9' as CardId, ctx, labels, false)).toBe('black');
     expect(getIdleThreatThresholdRank('S', ctx, labels)).toBe('9');
   });
+
+  test('symbol-aware guard analysis: g can downgrade to b/f and f can promote to winner', () => {
+    const gToB = makePosition({
+      N: { S: [], H: ['A', '9'], D: [], C: [] },
+      E: { S: [], H: ['8'], D: [], C: [] },
+      S: { S: [], H: ['5', '2'], D: [], C: [] },
+      W: { S: [], H: ['K', 'Q'], D: [], C: [] }
+    });
+    const gToBClass = initClassification(gToB, ['H5' as CardId], [], undefined, { H5: 'g' });
+    expect(gToBClass.threat.threatsBySuit.H?.symbol).toBe('b');
+
+    const gToF = makePosition({
+      N: { S: [], H: ['A', '9'], D: [], C: [] },
+      E: { S: [], H: ['K', 'Q'], D: [], C: [] },
+      S: { S: [], H: ['5', '2'], D: [], C: [] },
+      W: { S: [], H: ['8'], D: [], C: [] }
+    });
+    const gToFClass = initClassification(gToF, ['H5' as CardId], [], undefined, { H5: 'g' });
+    expect(gToFClass.threat.threatsBySuit.H?.symbol).toBe('f');
+    expect(gToFClass.perCardRole['H5' as CardId]).toBe('resource');
+
+    const fPromoted = makePosition({
+      N: { S: [], H: ['A', '9'], D: [], C: [] },
+      E: { S: [], H: ['4', '3'], D: [], C: [] },
+      S: { S: [], H: ['5', '2'], D: [], C: [] },
+      W: { S: [], H: ['K', 'Q'], D: [], C: [] }
+    });
+    const fCtx = initThreatContext(fPromoted, ['H5' as CardId], { H5: 'f' });
+    const fLabels = computeDefenderLabels(fCtx, fPromoted);
+    expect(fLabels.E.busy.size).toBe(0);
+    expect(fLabels.W.busy.size).toBe(0);
+    expect(getCardRankColor('H5' as CardId, fCtx, fLabels, true)).toBe('purple');
+  });
+
 });

@@ -31,6 +31,13 @@ function rankOfCardId(cardId: CardId): Rank {
   return parseCardId(cardId).rank;
 }
 
+function threatSymbolBase(symbol?: string): string {
+  if (!symbol) return '';
+  const lower = symbol.toLowerCase();
+  if (lower.startsWith("g'")) return "g'";
+  return lower.slice(0, 1);
+}
+
 function chooseLowestByRank(cards: CardId[]): CardId | null {
   if (cards.length === 0) return null;
   let best = cards[0];
@@ -260,6 +267,31 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
   if (hands[seat][leadSuit].length > 0) {
     const inSuitCardIds = inSuit.map((p) => toCardId(p.suit, p.rank) as CardId);
 
+    // Resource-stopper follow (tier-2b semantics): play low before "cheap-win" logic.
+    if (resource) {
+      const entry = resource.resourcesBySuit[leadSuit];
+      const suitRanks = hands[seat][leadSuit];
+      const hasHigher = !!entry && suitRanks.some((r) => RANK_STRENGTH[r] > RANK_STRENGTH[entry.resourceRank]);
+      const longEnough = !!entry && suitRanks.length >= entry.resourceLength;
+      if (entry?.active && hasHigher && longEnough) {
+        const ddFiltered = applyDdFilter(inSuitCardIds, inSuitCardIds);
+        const chosenCardId = chooseLowestByRank(ddFiltered.candidates);
+        if (chosenCardId) {
+          const chosenBucket = 'follow:below';
+          return {
+            chosenCardId,
+            chosenBucket,
+            bucketCards: [...ddFiltered.candidates],
+            policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+            ddPolicy: ddFiltered.trace,
+            ddTrace: buildDdDecisionTrace(inSuitCardIds, inSuitCardIds, ddFiltered, chosenCardId),
+            rngBefore,
+            rngAfter
+          };
+        }
+      }
+    }
+
     // Rule 1: when all in-suit options are idle, win as cheaply as possible if we can.
     if (threatLabels) {
       const idleCards = inSuitCardIds.filter((cardId) => threatLabels[seat].idle.has(cardId));
@@ -306,8 +338,10 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
 
     // Rule 2: second hand busy follow; if partner cannot beat third-hand threat, cover it cheaply now.
     if (threat && threatLabels && trick.length === 1) {
+      const leadSuitThreat = leadSuit ? threat.threatsBySuit[leadSuit] : undefined;
+      const leadSuitIsResource = threatSymbolBase(leadSuitThreat?.symbol) === 'f';
       const busyCards = inSuitCardIds.filter((cardId) => threatLabels[seat].busy.has(cardId));
-      if (busyCards.length > 0 && busyCards.length === inSuitCardIds.length) {
+      if (!leadSuitIsResource && busyCards.length > 0 && busyCards.length === inSuitCardIds.length) {
         const ddOnBusy = applyDdFilter(busyCards, inSuitCardIds);
         if (ddOnBusy.trace?.bound) {
           const chosenCardId = chooseLowestByRank(ddOnBusy.candidates);

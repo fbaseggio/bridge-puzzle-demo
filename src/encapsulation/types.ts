@@ -63,7 +63,7 @@ export type BoundEncapsulation = {
 };
 
 export type BoundThreatCard = {
-  symbol: 'a' | 'b' | 'c' | 'f' | 'g' | 'A' | 'B' | 'C' | 'F' | 'G';
+  symbol: 'a' | 'b' | 'c' | 'f' | 'g' | "g'" | 'A' | 'B' | 'C' | 'F' | 'G' | "G'";
   suit: Suit;
   seat: 'N' | 'S';
   rank: string;

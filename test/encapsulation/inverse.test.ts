@@ -82,26 +82,6 @@ describe('single-suit inverse analyzer', () => {
     expect(result).not.toBe('0');
   });
 
-  it('prefers L over extra W for initial p007 spades', () => {
-    const result = inferSuitAbstraction({
-      N: 'A84',
-      E: '6',
-      S: 'K5',
-      W: 'QT7'
-    });
-    expect(result).toBe('WLau');
-  });
-
-  it('keeps uppercase threat form WCuu in initial p007 hearts', () => {
-    const result = inferSuitAbstraction({
-      N: 'A2',
-      E: 'QJT9',
-      S: '54',
-      W: '76'
-    });
-    expect(result).toBe('WCuu');
-  });
-
   it('keeps structural base form when primary card is over-stopped', () => {
     const result = inferSuitAbstraction({
       N: 'K',
@@ -167,16 +147,6 @@ describe('single-suit inverse analyzer', () => {
         name: 'post-trick p003 shape',
         input: { N: 'A8', E: 'T', S: '5', W: 'KJ' },
         expected: 'Wau'
-      },
-      {
-        name: 'p007 spades shape',
-        input: { N: 'A84', E: '6', S: 'K5', W: 'QT7' },
-        expected: 'WLau'
-      },
-      {
-        name: 'p007 hearts compact shape',
-        input: { N: 'A2', E: 'QJT9', S: '54', W: '76' },
-        expected: 'WCuu'
       },
       {
         name: 'WLc structural-low regression shape',

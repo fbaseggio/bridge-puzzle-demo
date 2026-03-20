@@ -5,7 +5,6 @@ import { p003 } from '../puzzles/p003';
 import { p004 } from '../puzzles/p004';
 import { p005 } from '../puzzles/p005';
 import { p006 } from '../puzzles/p006';
-import { p007 } from '../puzzles/p007';
 import { p008 } from '../puzzles/p008';
 import { p009 } from '../puzzles/p009';
 import { p010 } from '../puzzles/p010';
@@ -55,7 +54,6 @@ export const demoProblems: DemoProblem[] = [
   { id: 'p004', label: 'p004', problem: p004 },
   { id: 'p005', label: 'p005', problem: p005 },
   { id: 'p006', label: 'p006', problem: p006 },
-  { id: 'p007', label: 'p007', problem: p007 },
   { id: 'p008', label: 'p008', problem: p008 },
   { id: 'p009', label: 'p009', problem: p009 },
   { id: 'p010', label: 'p010', problem: p010 },
