@@ -10,6 +10,7 @@ import { p009 } from '../puzzles/p009';
 import { p010 } from '../puzzles/p010';
 import { p011 } from '../puzzles/p011';
 import { p012 } from '../puzzles/p012';
+import { p013 } from '../puzzles/p013';
 import { squeezeSelf01 } from '../puzzles/squeeze_self_01';
 import { listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } from '../encapsulation/workbenchProblems';
 
@@ -59,5 +60,6 @@ export const demoProblems: DemoProblem[] = [
   { id: 'p010', label: 'p010', problem: p010 },
   { id: 'p011', label: 'p011', problem: p011 },
   { id: 'p012', label: 'p012', problem: p012 },
+  { id: 'p013', label: 'p013', problem: p013 },
   ...encapsulationDemoProblems
 ];

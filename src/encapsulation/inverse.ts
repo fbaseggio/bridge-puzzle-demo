@@ -773,19 +773,21 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
         boundThreatShape = true;
       } else {
         // Unstoppable threat candidate is effectively an additional winner.
-        const lowOpp = lowestUnboundFromSeat(opposite, ranks, bound);
-        if (lowOpp) {
-          WCount += 1;
-          linkTokenSequence.push('W');
-          bindCard(threatSeat, threatRank, `W${WCount}`);
-          bindCard(opposite, lowOpp, `W${WCount}-low`);
-        } else {
-          wCount += 1;
-          linkTokenSequence.push('w');
-          bindCard(threatSeat, threatRank, `w${wCount}`);
+        if (linksSeen < n) {
+          const lowOpp = lowestUnboundFromSeat(opposite, ranks, bound);
+          if (lowOpp) {
+            WCount += 1;
+            linkTokenSequence.push('W');
+            bindCard(threatSeat, threatRank, `W${WCount}`);
+            bindCard(opposite, lowOpp, `W${WCount}-low`);
+          } else {
+            wCount += 1;
+            linkTokenSequence.push('w');
+            bindCard(threatSeat, threatRank, `w${wCount}`);
+          }
+          linksSeen += 1;
+          promotedToLink = true;
         }
-        linksSeen += 1;
-        promotedToLink = true;
       }
     } else {
       const owner: 'N' | 'S' = threatSeat;
@@ -865,19 +867,21 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
         upperLabel = `B${BCount}`;
       } else {
         // Unstoppable opposite-side candidate is effectively an additional link.
-        const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
-        if (lowPrimary) {
-          LCount += 1;
-          linkTokenSequence.push('L');
-          bindCard(threatSeat, threatRank, `L${LCount}`);
-          bindCard(primary, lowPrimary, `L${LCount}-low`);
-        } else {
-          lCount += 1;
-          linkTokenSequence.push('l');
-          bindCard(threatSeat, threatRank, `l${lCount}`);
+        if (linksSeen < n) {
+          const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
+          if (lowPrimary) {
+            LCount += 1;
+            linkTokenSequence.push('L');
+            bindCard(threatSeat, threatRank, `L${LCount}`);
+            bindCard(primary, lowPrimary, `L${LCount}-low`);
+          } else {
+            lCount += 1;
+            linkTokenSequence.push('l');
+            bindCard(threatSeat, threatRank, `l${lCount}`);
+          }
+          linksSeen += 1;
+          promotedToLink = true;
         }
-        linksSeen += 1;
-        promotedToLink = true;
       }
       if (upperLabel) {
         bindCard(threatSeat, threatRank, upperLabel);
