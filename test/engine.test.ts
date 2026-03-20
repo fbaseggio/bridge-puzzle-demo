@@ -7,6 +7,7 @@ import { p001 } from '../src/puzzles/p001';
 import { p002 } from '../src/puzzles/p002';
 import { p004 } from '../src/puzzles/p004';
 import { p012 } from '../src/puzzles/p012';
+import { p013 } from '../src/puzzles/p013';
 
 describe('bridge engine v0.1', () => {
   test('follow suit enforcement', () => {
@@ -731,6 +732,15 @@ describe('bridge engine v0.1', () => {
     const eastCard = eastAuto && eastAuto.type === 'autoplay' ? `${eastAuto.play.suit}${eastAuto.play.rank}` : null;
     expect(eastCard).not.toBe('H9');
     expect(eastAuto && eastAuto.type === 'autoplay' ? eastAuto.chosenBucket : null).toBe('follow:below');
+  });
+
+  test('p013 uses threatAware policy (first East discard is tiered, not legal)', () => {
+    const start = init(p013);
+    const step1 = apply(start, { seat: 'S', suit: 'C', rank: '2' });
+    const step2 = apply(step1.state, { seat: 'N', suit: 'C', rank: 'A' });
+    const eastAuto = step2.events.find((e) => e.type === 'autoplay' && e.play.seat === 'E');
+    expect(eastAuto && eastAuto.type === 'autoplay').toBe(true);
+    expect(eastAuto && eastAuto.type === 'autoplay' ? eastAuto.chosenBucket : null).not.toBe('legal');
   });
 
   test('replay state forces recorded defender autoplay decision on matching signature', () => {

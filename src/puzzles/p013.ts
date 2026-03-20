@@ -20,8 +20,8 @@ export const p013: ThreatProblem = {
     W: { S: ['7'], H: ['K', '4'], D: ['J', '6'], C: ['3'] }
   },
   policies: {
-    E: { kind: 'randomLegal' },
-    W: { kind: 'randomLegal' }
+    E: { kind: 'threatAware' },
+    W: { kind: 'threatAware' }
   },
   threatCardIds: ['H3', 'D5', 'S5'],
   rngSeed: 613
