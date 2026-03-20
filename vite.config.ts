@@ -10,7 +10,8 @@ export default defineConfig({
         workbench: resolve(__dirname, 'workbench/index.html'),
         practice: resolve(__dirname, 'practice/index.html'),
         articles: resolve(__dirname, 'articles/index.html'),
-        squeezeSelf: resolve(__dirname, 'articles/squeeze-self/index.html')
+        squeezeSelf: resolve(__dirname, 'articles/squeeze-self/index.html'),
+        coffinExamples: resolve(__dirname, 'articles/coffin-examples/index.html')
       }
     }
   },

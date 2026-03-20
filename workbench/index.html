@@ -4,8 +4,63 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bridge Cardplay Puzzle v0.1</title>
+    <style>
+      .site-header {
+        border-bottom: 1px solid #e2e8f0;
+        background: #f8fafc;
+      }
+
+      .site-header-inner {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 12px 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .site-title {
+        text-decoration: none;
+        color: #0f172a;
+        font-weight: 700;
+        font-size: 1rem;
+      }
+
+      .site-nav {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .site-nav a {
+        text-decoration: none;
+        color: #334155;
+        font-size: 0.95rem;
+      }
+
+      .site-nav a.active {
+        color: #0f172a;
+        font-weight: 600;
+      }
+
+      .site-nav a:hover,
+      .site-nav a:focus-visible {
+        color: #0f172a;
+      }
+    </style>
   </head>
   <body>
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-title" href="/">DeepSqueeze</a>
+        <nav class="site-nav" aria-label="Site">
+          <a class="active" href="/workbench/">Workbench</a>
+          <a href="/practice/">Practice</a>
+          <a href="/articles/">Articles</a>
+        </nav>
+      </div>
+    </header>
     <div id="app"></div>
     <script type="module" src="/src/demo/main.ts"></script>
   </body>

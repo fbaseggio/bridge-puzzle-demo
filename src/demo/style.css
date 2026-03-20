@@ -18,6 +18,10 @@ body.mode-widget {
   padding: 0;
 }
 
+body.mode-widget .site-header {
+  display: none;
+}
+
 html.mode-widget {
   background: transparent;
 }
