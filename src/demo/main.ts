@@ -1078,6 +1078,17 @@ function attemptClaim(): void {
   render();
 }
 
+function endPracticeRun(): void {
+  if (!practiceSession || practiceSession.solutionMode) return;
+  if (practiceSession.isTerminal || runStatus === 'success' || runStatus === 'failure') return;
+  clearHint();
+  clearWidgetMessage();
+  state.phase = 'end';
+  runStatus = 'failure';
+  onPracticeTerminal('failure');
+  render();
+}
+
 function renderPracticeClaimDebugPanel(): HTMLElement {
   const panel = document.createElement('section');
   panel.className = 'practice-claim-debug';
@@ -3356,16 +3367,29 @@ function renderPracticeHeader(view: State): HTMLElement {
 function renderPracticePuzzleStateBar(view: State): HTMLElement {
   const bar = document.createElement('section');
   bar.className = 'practice-puzzle-state-bar';
-  const strain = view.contract.strain;
+  const appendGoalLine = (goalText: string): void => {
+    bar.appendChild(document.createTextNode(`Take ${goalText} tricks `));
+    if (view.contract.strain === 'NT') {
+      bar.appendChild(document.createTextNode('in NT'));
+    } else {
+      bar.appendChild(document.createTextNode('with '));
+      const strainEl = document.createElement('span');
+      strainEl.className = `suit-${view.contract.strain}`;
+      strainEl.textContent = suitSymbol[view.contract.strain];
+      bar.appendChild(strainEl);
+      bar.appendChild(document.createTextNode(' as trumps'));
+    }
+    bar.appendChild(document.createTextNode(` · NS ${view.tricksWon.NS} · EW ${view.tricksWon.EW}`));
+  };
   if (view.goal.type === 'minTricks') {
     const initialTricksInDeal = seatOrder
       .filter((seat) => seat === 'N' || seat === 'S')
       .map((seat) => suitOrder.reduce((sum, suit) => sum + currentProblem.hands[seat][suit].length, 0))
       .reduce((max, count) => Math.max(max, count), 0);
     const currentGoal = view.goal.n;
-    bar.textContent = `${strain} · Goal ${currentGoal}/${initialTricksInDeal} · NS ${view.tricksWon.NS} · EW ${view.tricksWon.EW}`;
+    appendGoalLine(`${currentGoal}/${initialTricksInDeal}`);
   } else {
-    bar.textContent = `${strain} · Goal ${formatGoal(view)} · NS ${view.tricksWon.NS} · EW ${view.tricksWon.EW}`;
+    appendGoalLine(formatGoal(view));
   }
   return bar;
 }
@@ -3473,6 +3497,15 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   }
 
   if (practicePuzzleMode) {
+    const endBtn = document.createElement('button');
+    endBtn.type = 'button';
+    endBtn.textContent = isWidgetShellMode ? '⏭' : 'End';
+    endBtn.title = 'End puzzle';
+    endBtn.setAttribute('aria-label', 'End puzzle');
+    if (isWidgetShellMode) endBtn.classList.add('icon-btn');
+    endBtn.onclick = () => endPracticeRun();
+    transport.appendChild(endBtn);
+
     const claimBtn = document.createElement('button');
     claimBtn.type = 'button';
     claimBtn.textContent = 'Claim';
