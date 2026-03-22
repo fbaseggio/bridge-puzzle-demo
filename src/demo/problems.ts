@@ -12,6 +12,22 @@ import { p011 } from '../puzzles/p011';
 import { p012 } from '../puzzles/p012';
 import { p013 } from '../puzzles/p013';
 import { squeezeSelf01 } from '../puzzles/squeeze_self_01';
+import {
+  gorillas01,
+  gorillas02,
+  gorillas03,
+  gorillas04,
+  gorillas05,
+  gorillas06,
+  gorillas07,
+  gorillas08,
+  gorillas09,
+  gorillas10,
+  gorillas11,
+  gorillas12a,
+  gorillas12b,
+  gorillasFullDeal
+} from '../puzzles/gorillas';
 import { listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } from '../encapsulation/workbenchProblems';
 
 export type DemoProblem = {
@@ -61,5 +77,19 @@ export const demoProblems: DemoProblem[] = [
   { id: 'p011', label: 'p011', problem: p011 },
   { id: 'p012', label: 'p012', problem: p012 },
   { id: 'p013', label: 'p013', problem: p013 },
+  { id: 'gorillas_01', label: 'gorillas_01', problem: gorillas01, practiceEligible: false },
+  { id: 'gorillas_02', label: 'gorillas_02', problem: gorillas02, practiceEligible: false },
+  { id: 'gorillas_03', label: 'gorillas_03', problem: gorillas03, practiceEligible: false },
+  { id: 'gorillas_04', label: 'gorillas_04', problem: gorillas04, practiceEligible: false },
+  { id: 'gorillas_05', label: 'gorillas_05', problem: gorillas05, practiceEligible: false },
+  { id: 'gorillas_full_deal', label: 'gorillas_full_deal', problem: gorillasFullDeal, practiceEligible: false },
+  { id: 'gorillas_06', label: 'gorillas_06', problem: gorillas06, practiceEligible: false },
+  { id: 'gorillas_07', label: 'gorillas_07', problem: gorillas07, practiceEligible: false },
+  { id: 'gorillas_08', label: 'gorillas_08', problem: gorillas08, practiceEligible: false },
+  { id: 'gorillas_09', label: 'gorillas_09', problem: gorillas09, practiceEligible: false },
+  { id: 'gorillas_10', label: 'gorillas_10', problem: gorillas10, practiceEligible: false },
+  { id: 'gorillas_11', label: 'gorillas_11', problem: gorillas11, practiceEligible: false },
+  { id: 'gorillas_12a', label: 'gorillas_12a', problem: gorillas12a, practiceEligible: false },
+  { id: 'gorillas_12b', label: 'gorillas_12b', problem: gorillas12b, practiceEligible: false },
   ...encapsulationDemoProblems
 ];

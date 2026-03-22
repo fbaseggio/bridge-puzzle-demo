@@ -11,7 +11,8 @@ export default defineConfig({
         practice: resolve(__dirname, 'practice/index.html'),
         articles: resolve(__dirname, 'articles/index.html'),
         squeezeSelf: resolve(__dirname, 'articles/squeeze-self/index.html'),
-        coffinExamples: resolve(__dirname, 'articles/coffin-examples/index.html')
+        coffinExamples: resolve(__dirname, 'articles/coffin-examples/index.html'),
+        gorillas: resolve(__dirname, 'articles/gorillas/index.html')
       }
     }
   },
