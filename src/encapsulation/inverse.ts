@@ -645,13 +645,14 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
     if (bound.has(cardKey(card.seat, card.rank))) continue;
     if (card.seat === primary) {
       linksSeen += 1;
-      // If an opposite-side winner candidate is still pending in the top
-      // winner window, do not consume it as a W-low.
-      const hasPendingOppositeWinner = cards
+      // If the candidate opposite low is itself still pending as an opposite
+      // winner candidate in the top winner window, do not consume it as W-low.
+      const pendingOppositeWinnerKeys = cards
         .slice(i + 1, linkScanLimit)
-        .some((next) => next.seat === opposite && !bound.has(cardKey(next.seat, next.rank)));
+        .filter((next) => next.seat === opposite && !bound.has(cardKey(next.seat, next.rank)))
+        .map((next) => cardKey(next.seat, next.rank));
       const lowOpp = lowestUnboundFromSeat(opposite, ranks, bound);
-      if (lowOpp && !hasPendingOppositeWinner) {
+      if (lowOpp && !pendingOppositeWinnerKeys.includes(cardKey(opposite, lowOpp))) {
         WCount += 1;
         linkTokenSequence.push('W');
         bindCard(card.seat, card.rank, `W${WCount}`);
