@@ -11,7 +11,13 @@ type HandSpec = {
 function makeGorillaProblem(
   id: string,
   hands: { N: HandSpec; E: HandSpec; S: HandSpec; W: HandSpec },
-  opts?: { strain?: 'NT' | 'S' | 'H' | 'D' | 'C'; goal?: number; sourceUrl?: string; threatCardIds?: CardId[] }
+  opts?: {
+    strain?: 'NT' | 'S' | 'H' | 'D' | 'C';
+    goal?: number;
+    sourceUrl?: string;
+    threatCardIds?: CardId[];
+    leader?: 'N' | 'E' | 'S' | 'W';
+  }
 ): Problem {
   const nsLen = Math.max(
     hands.N.S.length + hands.N.H.length + hands.N.D.length + hands.N.C.length,
@@ -26,7 +32,7 @@ function makeGorillaProblem(
       url: opts?.sourceUrl ?? 'https://example.invalid/gorillas'
     },
     contract: { strain: opts?.strain ?? 'NT' },
-    leader: 'S',
+    leader: opts?.leader ?? 'S',
     userControls: ['N', 'S'],
     goal: { type: 'minTricks', side: 'NS', n: opts?.goal ?? nsLen },
     hands,
@@ -82,7 +88,7 @@ export const gorillasFullDeal = makeGorillaProblem(
     S: { S: ['A', 'K', '2'], H: ['A', 'K', 'Q', 'J', 'T', '2'], D: ['K', 'J'], C: ['A', '2'] },
     W: { S: ['5', '3'], H: ['8', '7', '6'], D: ['Q', '9', '7'], C: ['Q', 'T', '9', '8', '7'] }
   },
-  { goal: 13, threatCardIds: ['C5'] }
+  { goal: 13, leader: 'W', threatCardIds: ['C5', 'D5', 'S2'] }
 );
 
 export const gorillas06 = makeGorillaProblem(

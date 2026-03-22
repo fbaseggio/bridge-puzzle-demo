@@ -283,11 +283,93 @@ type ApplyOptions = {
   }) => { play: Play; trace?: AutoChoice['browserDdBackstop'] } | null;
 };
 
+type AutoAdvanceOptions = Omit<ApplyOptions, 'userDdError'>;
+
 export type EngineRunInput = {
   state: State;
   play: Play;
   eventCollector?: SemanticEventCollector;
 };
+
+function advanceAutoplayLoop(next: State, events: EngineEvent[], collector: SemanticEventCollector | undefined, options?: AutoAdvanceOptions): void {
+  while (next.phase !== 'end' && !isUserTurn(next)) {
+    if (allHandsEmpty(next.hands)) break;
+    next.phase = 'auto';
+    const policy = next.policies[next.turn];
+    if (!policy) {
+      events.push({ type: 'illegal', reason: `No policy configured for auto seat ${next.turn}` });
+      break;
+    }
+    let auto = chooseAutoplay(next, policy, collector);
+    if (!auto.play) {
+      const legalNow = legalPlays(next);
+      events.push({
+        type: 'illegal',
+        reason: `Autoplay failed for ${next.turn} (policy=${(policy as any)?.kind ?? 'none'}, legal=${legalNow.length}${auto.replay?.reason ? `, replay=${auto.replay.reason}` : ''})`,
+      });
+      break;
+    }
+    const legalNow = legalPlays(next);
+    if (options?.autoplayBackstop) {
+      const adjusted = options.autoplayBackstop({
+        state: next,
+        policy,
+        legalPlays: legalNow,
+        autoChoice: auto
+      });
+      if (adjusted?.play) {
+        auto = {
+          ...auto,
+          play: adjusted.play,
+          browserDdBackstop: adjusted.trace ?? auto.browserDdBackstop
+        };
+      }
+    }
+    emitSemantic(collector, {
+      type: 'decision-evaluated',
+      seat: next.turn,
+      card: auto.play ? (toCardId(auto.play.suit, auto.play.rank) as CardId) : undefined,
+      tags: semanticTagsForBucket(auto.chosenBucket),
+      details: {
+        chosenBucket: auto.chosenBucket,
+        bucketCards: auto.bucketCards,
+        policyClassByCard: auto.policyClassByCard,
+        tierBuckets: auto.tierBuckets
+      }
+    });
+    emitSemantic(collector, {
+      type: 'decision-chosen',
+      seat: auto.play.seat,
+      card: toCardId(auto.play.suit, auto.play.rank) as CardId,
+      suit: auto.play.suit,
+      rank: auto.play.rank,
+      tags: semanticTagsForBucket(auto.chosenBucket),
+      details: {
+        chosenBucket: auto.chosenBucket,
+        ddPolicy: auto.ddPolicy,
+        decisionSig: auto.decisionSig
+      }
+    });
+
+    events.push(
+      ...applyOnePlay(
+        next,
+        auto.play,
+        collector,
+        'autoplay',
+        auto.preferredDiscard,
+        auto.chosenBucket,
+        auto.bucketCards,
+        auto.policyClassByCard,
+        auto.tierBuckets,
+        auto.ddPolicy,
+        auto.decisionSig,
+        auto.replay,
+        auto.browserDdBackstop
+      )
+    );
+  }
+}
 
 function emitSemantic(collector: SemanticEventCollector | undefined, event: SemanticEventInput): void {
   collector?.emit(event);
@@ -914,83 +996,7 @@ export function apply(state: State, play: Play, options?: ApplyOptions): { state
   });
   events.push(...applyOnePlay(next, play, collector, 'played'));
 
-  while (next.phase !== 'end' && !isUserTurn(next)) {
-    if (allHandsEmpty(next.hands)) break;
-    next.phase = 'auto';
-    const policy = next.policies[next.turn];
-    if (!policy) {
-      events.push({ type: 'illegal', reason: `No policy configured for auto seat ${next.turn}` });
-      break;
-    }
-    let auto = chooseAutoplay(next, policy, collector);
-    if (!auto.play) {
-      const legalNow = legalPlays(next);
-      events.push({
-        type: 'illegal',
-        reason: `Autoplay failed for ${next.turn} (policy=${(policy as any)?.kind ?? 'none'}, legal=${legalNow.length}${auto.replay?.reason ? `, replay=${auto.replay.reason}` : ''})`,
-      });
-      break;
-    }
-    const legalNow = legalPlays(next);
-    if (options?.autoplayBackstop) {
-      const adjusted = options.autoplayBackstop({
-        state: next,
-        policy,
-        legalPlays: legalNow,
-        autoChoice: auto
-      });
-      if (adjusted?.play) {
-        auto = {
-          ...auto,
-          play: adjusted.play,
-          browserDdBackstop: adjusted.trace ?? auto.browserDdBackstop
-        };
-      }
-    }
-    emitSemantic(collector, {
-      type: 'decision-evaluated',
-      seat: next.turn,
-      card: auto.play ? (toCardId(auto.play.suit, auto.play.rank) as CardId) : undefined,
-      tags: semanticTagsForBucket(auto.chosenBucket),
-      details: {
-        chosenBucket: auto.chosenBucket,
-        bucketCards: auto.bucketCards,
-        policyClassByCard: auto.policyClassByCard,
-        tierBuckets: auto.tierBuckets
-      }
-    });
-    emitSemantic(collector, {
-      type: 'decision-chosen',
-      seat: auto.play.seat,
-      card: toCardId(auto.play.suit, auto.play.rank) as CardId,
-      suit: auto.play.suit,
-      rank: auto.play.rank,
-      tags: semanticTagsForBucket(auto.chosenBucket),
-      details: {
-        chosenBucket: auto.chosenBucket,
-        ddPolicy: auto.ddPolicy,
-        decisionSig: auto.decisionSig
-      }
-    });
-
-    events.push(
-      ...applyOnePlay(
-        next,
-        auto.play,
-        collector,
-        'autoplay',
-        auto.preferredDiscard,
-        auto.chosenBucket,
-        auto.bucketCards,
-        auto.policyClassByCard,
-        auto.tierBuckets,
-        auto.ddPolicy,
-        auto.decisionSig,
-        auto.replay,
-        auto.browserDdBackstop
-      )
-    );
-  }
+  advanceAutoplayLoop(next, events, collector, options);
 
   if (next.phase === 'end') {
     return { state: next, events };
@@ -1003,6 +1009,16 @@ export function apply(state: State, play: Play, options?: ApplyOptions): { state
 
   next.phase = isUserTurn(next) ? 'awaitUser' : 'auto';
 
+  return { state: next, events };
+}
+
+export function autoplayUntilUserOrEnd(state: State, options?: AutoAdvanceOptions): { state: State; events: EngineEvent[] } {
+  const next = cloneState(state);
+  const events: EngineEvent[] = [];
+  const collector = options?.eventCollector;
+  advanceAutoplayLoop(next, events, collector, options);
+  next.phase = isUserTurn(next) ? 'awaitUser' : 'auto';
+  if (next.phase === 'auto' && allHandsEmpty(next.hands)) next.phase = 'end';
   return { state: next, events };
 }
 

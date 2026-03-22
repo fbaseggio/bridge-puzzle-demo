@@ -8,6 +8,7 @@ import {
   InMemorySemanticEventCollector,
   init,
   legalPlays,
+  autoplayUntilUserOrEnd,
   RawSemanticReducer,
   TeachingReducer,
   type DecisionRecord,
@@ -67,6 +68,7 @@ type DdErrorVisualState = {
   badCard: CardId;
 };
 type DisplayMode = 'analysis' | 'widget' | 'practice';
+type WidgetUiMode = 'default' | 'dd-puzzle' | 'sd-puzzle';
 type PracticeSession = {
   setId: PracticeSetId;
   queue: string[];
@@ -111,6 +113,14 @@ const displayMode: DisplayMode = (() => {
     return 'practice';
   }
   return 'analysis';
+})();
+const widgetUiMode: WidgetUiMode = (() => {
+  if (typeof window === 'undefined') return 'default';
+  const params = new URLSearchParams(window.location.search);
+  const raw = (params.get('uiMode') ?? params.get('ui') ?? '').trim().toLowerCase();
+  if (raw === 'dd-puzzle') return 'dd-puzzle';
+  if (raw === 'sd-puzzle') return 'sd-puzzle';
+  return 'default';
 })();
 const compactWidgetLayout = displayMode !== 'analysis';
 const isWidgetShellMode = displayMode !== 'analysis';
@@ -171,6 +181,21 @@ const initialUserHistoryFromUrl: CardId[] = (() => {
     .filter((token) => /^[SHDC](10|[AKQJT2-9])$/.test(token))
     .map((token) => `${token[0]}${token.slice(1) === '10' ? 'T' : token.slice(1)}` as CardId);
 })();
+const initialOpeningFromUrl: CardId[] = (() => {
+  if (typeof window === 'undefined') return [];
+  const raw = new URLSearchParams(window.location.search).get('opening');
+  if (!raw) return [];
+  return raw
+    .split('.')
+    .map((token) => token.trim().toUpperCase())
+    .filter((token) => /^[SHDC](10|[AKQJT2-9])$/.test(token))
+    .map((token) => `${token[0]}${token.slice(1) === '10' ? 'T' : token.slice(1)}` as CardId);
+})();
+const startupGateEnabledFromUrl: boolean = (() => {
+  if (typeof window === 'undefined') return false;
+  const raw = (new URLSearchParams(window.location.search).get('start') ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+})();
 
 function resolveProblemById(problemId: string): ProblemWithThreats {
   const override = practiceProblemOverrides.get(problemId);
@@ -201,6 +226,15 @@ let autoplaySingletons = false;
 let alwaysHint = displayMode === 'widget';
 let cardColoringEnabled = true;
 let narrate = displayMode === 'widget';
+let hintsEnabled = true;
+let hideEastWest = false;
+if (displayMode === 'widget' && (widgetUiMode === 'dd-puzzle' || widgetUiMode === 'sd-puzzle')) {
+  alwaysHint = false;
+  cardColoringEnabled = false;
+  narrate = false;
+  hintsEnabled = false;
+  hideEastWest = widgetUiMode === 'sd-puzzle';
+}
 let showWidgetTeachingPane = false;
 let advancedPanelOpen = false;
 let ddsPlayHistory: string[] = [];
@@ -222,6 +256,7 @@ let inversePrimaryBySuit: Partial<Record<Suit, 'N' | 'S'>> = {};
 let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
 let renderingNow = false;
+let startPending = startupGateEnabledFromUrl;
 
 let trickFrozen = false;
 let lastCompletedTrick: Play[] | null = null;
@@ -684,6 +719,7 @@ function encodeUserHistoryForUrl(history: CardId[]): string {
 }
 
 function requestHint(): void {
+  if (!hintsEnabled) return;
   hintDiag('requestHint start');
   const reqSeq = ++hintRequestSeq;
   hintLoading = true;
@@ -2524,6 +2560,7 @@ function resetGame(seed: number, reason: string): void {
   clearHint();
   clearTeachingEvents();
   inversePrimaryBySuit = {};
+  startPending = startupGateEnabledFromUrl;
   if (practiceSession) beginPracticeRun(practiceSession.solutionMode);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -2565,6 +2602,7 @@ function selectProblem(problemId: string): void {
   clearHint();
   clearTeachingEvents();
   inversePrimaryBySuit = {};
+  startPending = startupGateEnabledFromUrl;
   if (practiceSession) beginPracticeRun(practiceSession.solutionMode);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -3043,7 +3081,15 @@ function renderSuitRow(
     }
   }
   if (ranks.length > 0) {
+    const hideSeatCards = hideEastWest && (seat === 'E' || seat === 'W');
     for (const rank of ranks) {
+      if (hideSeatCards) {
+        const hiddenEl = document.createElement('span');
+        hiddenEl.className = 'rank-text muted rank-hidden';
+        hiddenEl.textContent = '•';
+        cards.appendChild(hiddenEl);
+        continue;
+      }
       const key = `${suit}${rank}`;
       const isLegal = canAct && legalSet.has(key);
       const isEquivalent = equivalentRanks.has(rank);
@@ -3098,9 +3144,10 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
     }
   }
 
-  const legal = !trickFrozen && active ? legalPlays(view) : [];
+  const startBlocked = startPending && !trickFrozen;
+  const legal = !trickFrozen && !startBlocked && active ? legalPlays(view) : [];
   const legalSet = new Set(legal.map((p) => `${p.suit}${p.rank}`));
-  const canAct = !trickFrozen && view.phase !== 'end' && view.userControls.includes(seat) && active;
+  const canAct = !trickFrozen && !startBlocked && view.phase !== 'end' && view.userControls.includes(seat) && active;
   const hintBestSet = new Set<CardId>();
   const ddErrorGoodSet = new Set<CardId>();
 
@@ -3150,7 +3197,8 @@ function applyNarrationBubbleCollisionAvoidance(tableCanvas: HTMLElement): void 
 
 function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
   const table = document.createElement('section');
-  table.className = `trick-table${trickFrozen ? ' frozen' : ''}${visuallyHidden ? ' reading-hidden' : ''}`;
+  const hideTrickVisual = visuallyHidden && !startPending;
+  table.className = `trick-table${trickFrozen ? ' frozen' : ''}${hideTrickVisual ? ' reading-hidden' : ''}`;
   if (trickFrozen) {
     if (!isWidgetShellMode) {
       table.title = 'Click to dismiss trick';
@@ -3183,6 +3231,15 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
       slot.appendChild(text);
     }
     table.appendChild(slot);
+  }
+
+  if (startPending && !trickFrozen && sourceTrick.length === 0 && view.phase !== 'end') {
+    const startBtn = document.createElement('button');
+    startBtn.type = 'button';
+    startBtn.className = 'start-overlay-btn';
+    startBtn.textContent = 'Start';
+    startBtn.onclick = () => launchStartSequence();
+    table.appendChild(startBtn);
   }
 
   return table;
@@ -3515,19 +3572,21 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     claimBtn.onclick = () => attemptClaim();
     transport.appendChild(claimBtn);
   } else {
-    const hintBtn = document.createElement('button');
-    hintBtn.type = 'button';
-    hintBtn.textContent = isWidgetShellMode ? '💡' : 'Hint';
-    hintBtn.title = 'Hint';
-    hintBtn.setAttribute('aria-label', 'Hint');
-    if (isWidgetShellMode) hintBtn.classList.add('icon-btn');
-    hintBtn.onclick = (event) => {
-      hintDiag('button click');
-      event.preventDefault();
-      event.stopPropagation();
-      requestHint();
-    };
-    transport.appendChild(hintBtn);
+    if (hintsEnabled) {
+      const hintBtn = document.createElement('button');
+      hintBtn.type = 'button';
+      hintBtn.textContent = isWidgetShellMode ? '💡' : 'Hint';
+      hintBtn.title = 'Hint';
+      hintBtn.setAttribute('aria-label', 'Hint');
+      if (isWidgetShellMode) hintBtn.classList.add('icon-btn');
+      hintBtn.onclick = (event) => {
+        hintDiag('button click');
+        event.preventDefault();
+        event.stopPropagation();
+        requestHint();
+      };
+      transport.appendChild(hintBtn);
+    }
   }
 
   if (isWidgetShellMode && typeof window !== 'undefined') {
@@ -3597,6 +3656,12 @@ function renderBoardNavigationArea(view: State): HTMLElement {
       panel.appendChild(
         mkToggle('Card coloring', cardColoringEnabled, (checked) => {
           cardColoringEnabled = checked;
+          render();
+        })
+      );
+      panel.appendChild(
+        mkToggle('Hide E/W', hideEastWest, (checked) => {
+          hideEastWest = checked;
           render();
         })
       );
@@ -3881,6 +3946,85 @@ function replayInitialUserHistoryIfPresent(): void {
   threatCtx = (state.threat as ThreatContext | null) ?? null;
   threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
   refreshThreatModel(currentProblemId, false);
+}
+
+function launchStartSequence(): void {
+  if (!startPending) return;
+  startPending = false;
+  if (initialOpeningFromUrl.length === 0) {
+    const before = state;
+    const ddsHistoryForTurn = [...ddsPlayHistory];
+    const result = autoplayUntilUserOrEnd(state, {
+      eventCollector: semanticCollector,
+      autoplayBackstop: buildBrowserDdsBackstop(ddsHistoryForTurn)
+    });
+    state = result.state;
+    threatCtx = (state.threat as ThreatContext | null) ?? null;
+    threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
+    collectTeachingRecolorEventsForTurn(before, result.events);
+    const trickCompleteIndex = result.events.findIndex((event) => event.type === 'trickComplete');
+    if (trickCompleteIndex >= 0) {
+      const visibleEvents = result.events.slice(0, trickCompleteIndex + 1);
+      const visibleShadow = cloneStateForLog(before);
+      for (const event of visibleEvents) applyEventToShadow(visibleShadow, event);
+      trickFrozen = true;
+      frozenViewState = visibleShadow;
+      const trickEvent = visibleEvents[visibleEvents.length - 1];
+      if (trickEvent.type === 'trickComplete') {
+        lastCompletedTrick = trickEvent.trick.map((p) => ({ ...p }));
+      }
+      canLeadDismiss = state.phase !== 'end' && state.trick.length === 0 && state.userControls.includes(state.turn);
+    }
+    const complete = result.events.find((e) => e.type === 'handComplete');
+    if (complete?.type === 'handComplete') {
+      runStatus = complete.success ? 'success' : 'failure';
+    }
+    clearDdErrorVisual();
+    refreshThreatModel(currentProblemId, false);
+    render();
+    return;
+  }
+
+  let appliedAny = false;
+  const originalUserControls = [...state.userControls];
+  const forcedManualUserControls: Seat[] = ['N', 'E', 'S', 'W'];
+  for (const cardId of initialOpeningFromUrl) {
+    if (state.phase === 'end') break;
+    const legal = legalPlays(state).filter((p) => p.seat === state.turn);
+    const play = legal.find((p) => (toCardId(p.suit, p.rank) as CardId) === cardId);
+    if (!play) break;
+    const before = state;
+    const steppedState: State = { ...state, userControls: forcedManualUserControls };
+    const result = apply(steppedState, play, { eventCollector: semanticCollector });
+    state = result.state;
+    state.userControls = [...originalUserControls];
+    collectTeachingRecolorEventsForTurn(before, result.events);
+    const trickCompleteIndex = result.events.findIndex((event) => event.type === 'trickComplete');
+    if (trickCompleteIndex >= 0) {
+      const visibleEvents = result.events.slice(0, trickCompleteIndex + 1);
+      const visibleShadow = cloneStateForLog(before);
+      for (const event of visibleEvents) applyEventToShadow(visibleShadow, event);
+      trickFrozen = true;
+      frozenViewState = visibleShadow;
+      const trickEvent = visibleEvents[visibleEvents.length - 1];
+      if (trickEvent.type === 'trickComplete') {
+        lastCompletedTrick = trickEvent.trick.map((p) => ({ ...p }));
+      }
+      canLeadDismiss = state.phase !== 'end' && state.trick.length === 0 && state.userControls.includes(state.turn);
+    }
+    const complete = result.events.find((e) => e.type === 'handComplete');
+    appliedAny = true;
+    if (complete?.type === 'handComplete') {
+      runStatus = complete.success ? 'success' : 'failure';
+      break;
+    }
+  }
+  if (!appliedAny) return;
+  clearDdErrorVisual();
+  threatCtx = (state.threat as ThreatContext | null) ?? null;
+  threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
+  refreshThreatModel(currentProblemId, false);
+  render();
 }
 
 if (practiceSession) beginPracticeRun(false);

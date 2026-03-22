@@ -518,6 +518,10 @@ html.mode-widget {
   opacity: 1;
 }
 
+.rank-text.rank-hidden {
+  color: #94a3b8;
+}
+
 .void {
   color: #94a3b8;
   font-size: 14px;
@@ -549,6 +553,22 @@ html.mode-widget {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.start-overlay-btn {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
 }
 
 .played-text {

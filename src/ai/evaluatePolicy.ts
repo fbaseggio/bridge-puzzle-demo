@@ -31,6 +31,24 @@ function rankOfCardId(cardId: CardId): Rank {
   return parseCardId(cardId).rank;
 }
 
+function highestNonWinnerNonThreatRankForNs(suit: Suit, hands: Record<Seat, Hand>, threat: ThreatContext | null): Rank | null {
+  const defenderRanks = [...hands.E[suit], ...hands.W[suit]];
+  if (defenderRanks.length === 0) return null;
+  const maxDefender = defenderRanks.reduce((max, rank) => Math.max(max, RANK_STRENGTH[rank]), 0);
+  const activeThreatCard = threat?.threatsBySuit[suit]?.active ? threat.threatsBySuit[suit]?.threatCardId : null;
+  const candidates: Rank[] = [];
+  for (const seat of ['N', 'S'] as const) {
+    for (const rank of hands[seat][suit]) {
+      const cardId = toCardId(suit, rank) as CardId;
+      if (activeThreatCard && cardId === activeThreatCard) continue;
+      if (RANK_STRENGTH[rank] > maxDefender) continue; // obvious winner
+      candidates.push(rank);
+    }
+  }
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, rank) => (RANK_STRENGTH[rank] > RANK_STRENGTH[best] ? rank : best), candidates[0]);
+}
+
 function threatSymbolBase(symbol?: string): string {
   if (!symbol) return '';
   const lower = symbol.toLowerCase();
@@ -377,7 +395,12 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
       }
     }
 
-    if (!threat || !threatLabels) {
+    const threatThreshold = threat && threatLabels
+      ? getIdleThreatThresholdRank(leadSuit, threat, threatLabels, resource ?? undefined)
+      : null;
+    const nsSoftThreshold = highestNonWinnerNonThreatRankForNs(leadSuit, hands, threat);
+
+    if (!threatThreshold && !nsSoftThreshold) {
       const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank) as CardId);
       const ddFiltered = applyDdFilter(bucketCards, inSuitCardIds);
       const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
@@ -396,35 +419,32 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
       };
     }
 
-    const threshold = getIdleThreatThresholdRank(leadSuit, threat, threatLabels, resource ?? undefined);
-    if (!threshold) {
-      const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank) as CardId);
-      const ddFiltered = applyDdFilter(bucketCards, inSuitCardIds);
-      const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
-      rngAfter = nextRng;
-      const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
-      const chosenBucket = 'follow:baseline';
-      return {
-        chosenCardId,
-        chosenBucket,
-        bucketCards: [...ddFiltered.candidates],
-        policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
-        ddPolicy: ddFiltered.trace,
-        ddTrace: buildDdDecisionTrace(inSuitCardIds, bucketCards, ddFiltered, chosenCardId),
-        rngBefore,
-        rngAfter
-      };
-    }
-
-    const below = inSuit.filter((p) => RANK_STRENGTH[p.rank] < RANK_STRENGTH[threshold]);
-    const above = inSuit.filter((p) => RANK_STRENGTH[p.rank] >= RANK_STRENGTH[threshold]);
-    const bucket = below.length > 0 ? below : above;
+    const belowBoth = inSuit.filter((p) => {
+      const rank = RANK_STRENGTH[p.rank];
+      const belowThreat = threatThreshold ? rank < RANK_STRENGTH[threatThreshold] : true;
+      const belowSoft = nsSoftThreshold ? rank < RANK_STRENGTH[nsSoftThreshold] : true;
+      return belowThreat && belowSoft;
+    });
+    const belowEither = inSuit.filter((p) => {
+      const rank = RANK_STRENGTH[p.rank];
+      const belowThreat = threatThreshold ? rank < RANK_STRENGTH[threatThreshold] : false;
+      const belowSoft = nsSoftThreshold ? rank < RANK_STRENGTH[nsSoftThreshold] : false;
+      return belowThreat || belowSoft;
+    });
+    const aboveBoth = inSuit.filter((p) => {
+      const rank = RANK_STRENGTH[p.rank];
+      const atOrAboveThreat = threatThreshold ? rank >= RANK_STRENGTH[threatThreshold] : true;
+      const atOrAboveSoft = nsSoftThreshold ? rank >= RANK_STRENGTH[nsSoftThreshold] : true;
+      return atOrAboveThreat && atOrAboveSoft;
+    });
+    const bucket = belowBoth.length > 0 ? belowBoth : belowEither.length > 0 ? belowEither : aboveBoth;
     const bucketCards = bucket.map((p) => toCardId(p.suit, p.rank) as CardId);
     const ddFiltered = applyDdFilter(bucketCards, inSuitCardIds);
     const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
     rngAfter = nextRng;
     const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
-    const chosenBucket = below.length > 0 ? 'follow:below' : 'follow:above';
+    const chosenBucket =
+      belowBoth.length > 0 ? 'follow:below' : belowEither.length > 0 ? 'follow:below-partial' : 'follow:above';
     return {
       chosenCardId,
       chosenBucket,
