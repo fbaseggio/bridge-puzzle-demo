@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { init } from '../../src/core';
+import { apply, init } from '../../src/core';
 import { sureTricksDemo } from '../../src/puzzles/sure_tricks_demo';
-import { fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from '../../src/demo/ewVariantView';
+import { fixedCardVariantColors, fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from '../../src/demo/ewVariantView';
 
 describe('multi-EW version-unknown view', () => {
   it('shows only seat-fixed E/W cards and isolates unresolved cards to the slash line', () => {
@@ -17,5 +17,15 @@ describe('multi-EW version-unknown view', () => {
     expect(unresolved.H).toEqual(['HJ']);
     expect(unresolved.D).toEqual([]);
     expect(unresolved.C).toEqual([]);
+  });
+
+  it('aggregates fixed-card colors across active variants', () => {
+    let state = init(sureTricksDemo);
+    for (const cardId of ['CT', 'CA', 'CQ']) {
+      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+    }
+
+    expect(fixedCardVariantColors(state, 'W', 'SK', true)).toEqual(['blue']);
+    expect(fixedCardVariantColors(state, 'E', 'DA', true)).toEqual(['black']);
   });
 });

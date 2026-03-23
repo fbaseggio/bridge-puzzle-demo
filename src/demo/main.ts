@@ -39,7 +39,7 @@ import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
 import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem } from './problems';
 import { buildPracticeQueue, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
-import { fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from './ewVariantView';
+import { fixedCardVariantColors, fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from './ewVariantView';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -259,6 +259,15 @@ function versionUnknownModeEnabled(): boolean {
   return !currentProblemVariantId && Boolean(currentProblem.ewVariants && currentProblem.ewVariants.length > 0);
 }
 
+function configuredUserControls(base: Seat[] = currentProblem.userControls): Seat[] {
+  return autoplayEw ? [...base] : ['N', 'E', 'S', 'W'];
+}
+
+function syncConfiguredUserControls(): void {
+  state.userControls = configuredUserControls();
+  if (frozenViewState) frozenViewState.userControls = configuredUserControls();
+}
+
 const initialProblemId = initialPracticeQueue[0] ?? initialProblemIdFromUrl;
 let currentProblemVariantId = resolveProblemVariantId(initialProblemId, initialVariantIdFromUrl);
 let currentProblem = resolveProblemById(initialProblemId, currentProblemVariantId);
@@ -281,6 +290,7 @@ let expandedLogFamilies = new Set<LogChannelFamilyId>(['core', 'diagnostics', 'a
 let enabledLogChannels = new Set<LogChannelId>(['play', 'threat', 'dds', 'variants', 'replay']);
 let teachingMode = true;
 let autoplaySingletons = false;
+let autoplayEw = true;
 let alwaysHint = displayMode === 'widget';
 let cardColoringEnabled = true;
 let narrate = displayMode === 'widget';
@@ -389,6 +399,20 @@ type TeachingEventKind = 'threatSummary' | 'recolor' | 'info';
 type TeachingEvent = { id: number; kind: TeachingEventKind; label: string; detail?: string; at?: string };
 let teachingEvents: TeachingEvent[] = [];
 let nextTeachingEventId = 1;
+type TeachingEntryView = {
+  seq: number;
+  seat: string;
+  card: string;
+  summary: string;
+  reasons: string[];
+  effects: string[];
+  variantGroups?: Array<{
+    labels: string[];
+    summary: string;
+    reasons: string[];
+    effects: string[];
+  }>;
+};
 let pulseUntilByCardKey = new Map<string, number>();
 let pulseTimer: ReturnType<typeof setTimeout> | null = null;
 const PULSE_MS = 360;
@@ -532,6 +556,92 @@ function summarizeForNarration(summary: string): string {
     const r = rank === '10' ? '10' : rank;
     return `${sym}${r}`;
   });
+}
+
+function variantLabelPrefix(variantId: string): string {
+  return variantId.trim().toUpperCase();
+}
+
+function teachingEntriesForUnknownMode(): TeachingEntryView[] | null {
+  if (!versionUnknownModeEnabled()) return null;
+  const view = currentViewState();
+  const activeVariantIds = view.ewVariantState?.activeVariantIds ?? [];
+  if (activeVariantIds.length <= 1) return null;
+
+  const rawEvents = (rawSemanticReducer.snapshot() as { events: Array<{ type: string; seat?: Seat; card?: CardId; details?: Record<string, unknown> }> }).events;
+  const pendingSourceByCardKey = new Map<string, string | undefined>();
+  const userPlayedEvents: Array<{ seat: Seat; card: CardId }> = [];
+  for (const event of rawEvents) {
+    if (event.type === 'decision-chosen' && event.seat && event.card) {
+      pendingSourceByCardKey.set(`${event.seat}:${event.card}`, typeof event.details?.source === 'string' ? event.details.source : undefined);
+      continue;
+    }
+    if (event.type === 'card-played' && event.seat && event.card) {
+      const key = `${event.seat}:${event.card}`;
+      const source = pendingSourceByCardKey.get(key);
+      pendingSourceByCardKey.delete(key);
+      if (source === 'user') {
+        userPlayedEvents.push({ seat: event.seat, card: event.card });
+      }
+    }
+  }
+  const perVariant = new Map<string, TeachingEntryView[]>();
+
+  for (const variantId of activeVariantIds) {
+    const concrete = resolveProblemById(currentProblemId, variantId);
+    const replayProblem: ProblemWithThreats = { ...concrete };
+    let replayState = init(replayProblem);
+    const reducer = new TeachingReducer();
+    reducer.setTrumpSuit(replayState.trumpSuit);
+    const collector = new InMemorySemanticEventCollector();
+    collector.attachReducer(reducer);
+    let failed = false;
+
+    for (const event of userPlayedEvents) {
+      const play = { seat: event.seat, suit: event.card[0] as Suit, rank: event.card.slice(1) as Rank };
+      const result = apply(replayState, play, { eventCollector: collector });
+      if (result.events.some((e) => e.type === 'illegal')) {
+        failed = true;
+        break;
+      }
+      replayState = result.state;
+    }
+    if (!failed) {
+      perVariant.set(variantId, (reducer.snapshot() as { entries: TeachingEntryView[] }).entries);
+    }
+  }
+
+  if (perVariant.size <= 1) return null;
+  const maxEntries = Math.max(...[...perVariant.values()].map((entries) => entries.length), 0);
+  const merged: TeachingEntryView[] = [];
+  for (let i = 0; i < maxEntries; i += 1) {
+    const present = [...perVariant.entries()]
+      .map(([variantId, entries]) => ({ variantId, entry: entries[i] }))
+      .filter((item): item is { variantId: string; entry: TeachingEntryView } => Boolean(item.entry));
+    if (present.length === 0) continue;
+
+    const base = present[0].entry;
+    const groups = new Map<string, NonNullable<TeachingEntryView['variantGroups']>[number]>();
+    for (const { variantId, entry } of present) {
+      const key = JSON.stringify([entry.summary, entry.reasons, entry.effects]);
+      const existing = groups.get(key);
+      if (existing) {
+        existing.labels.push(variantLabelPrefix(variantId));
+      } else {
+        groups.set(key, {
+          labels: [variantLabelPrefix(variantId)],
+          summary: entry.summary,
+          reasons: [...entry.reasons],
+          effects: [...entry.effects]
+        });
+      }
+    }
+
+    const variantGroups = [...groups.values()];
+    merged.push(variantGroups.length === 1 ? { ...base } : { ...base, variantGroups });
+  }
+
+  return merged;
 }
 
 function syncWidgetNarrationFeedFromTeaching(): void {
@@ -918,9 +1028,71 @@ function rankColorClass(cardId: CardId, featureSource: Pick<State, 'cardRoles' |
           : 'rank--black';
 }
 
-function appendRankContent(target: HTMLElement, rank: Rank, colorClass: string, isEquivalent = false): void {
+type RankColorVisual =
+  | { kind: 'solid'; colorClass: string }
+  | { kind: 'split'; colors: string[] }
+  | { kind: 'stripes'; colors: string[] };
+
+function rankPalette(colorClass: string): { text: string; background: string } {
+  if (colorClass === 'rank--purple') return { text: '#7e22ce', background: 'rgba(126, 34, 206, 0.16)' };
+  if (colorClass === 'rank--green') return { text: '#15803d', background: 'rgba(21, 128, 61, 0.16)' };
+  if (colorClass === 'rank--blue') return { text: '#1d4ed8', background: 'rgba(29, 78, 216, 0.16)' };
+  if (colorClass === 'rank--amber') return { text: '#d97706', background: 'rgba(217, 119, 6, 0.18)' };
+  if (colorClass === 'rank--grey') return { text: '#6b7280', background: 'rgba(148, 163, 184, 0.16)' };
+  return { text: '#111827', background: 'transparent' };
+}
+
+function rankColorVisualForCard(
+  view: State,
+  seat: Seat,
+  cardId: CardId
+): RankColorVisual {
+  if (!versionUnknownModeEnabled() || (seat !== 'E' && seat !== 'W')) {
+    return { kind: 'solid', colorClass: rankColorClass(cardId, view) };
+  }
+  const colors = fixedCardVariantColors(view, seat, cardId, teachingMode)
+    .map((color) => color === 'purple'
+      ? 'rank--purple'
+      : color === 'green'
+        ? 'rank--green'
+        : color === 'blue'
+          ? 'rank--blue'
+          : color === 'amber'
+            ? 'rank--amber'
+            : color === 'grey'
+              ? 'rank--grey'
+              : 'rank--black')
+    .filter((color, index, arr) => arr.indexOf(color) === index);
+  if (colors.length <= 1) return { kind: 'solid', colorClass: colors[0] ?? 'rank--black' };
+  if (colors.length === 2) return { kind: 'split', colors };
+  return { kind: 'stripes', colors };
+}
+
+function applyRankVisual(target: HTMLElement, visual: RankColorVisual): void {
+  if (visual.kind === 'solid') {
+    target.classList.add(visual.colorClass);
+    return;
+  }
+  const palettes = visual.colors.map(rankPalette);
+  target.classList.add('rank--mixed');
+  target.style.color = '#111827';
+  if (visual.kind === 'split') {
+    target.style.backgroundImage = `linear-gradient(135deg, ${palettes[0]?.background ?? 'transparent'} 0 50%, ${palettes[1]?.background ?? 'transparent'} 50% 100%)`;
+    return;
+  }
+  const step = 100 / palettes.length;
+  const stops = palettes.flatMap((palette, index) => {
+    const start = Number((index * step).toFixed(2));
+    const end = Number(((index + 1) * step).toFixed(2));
+    return [`${palette.background} ${start}%`, `${palette.background} ${end}%`];
+  });
+  target.style.backgroundImage = `linear-gradient(180deg, ${stops.join(', ')})`;
+}
+
+function appendRankContent(target: HTMLElement, rank: Rank, colorVisual: RankColorVisual, isEquivalent = false): void {
   const wrap = document.createElement('span');
-  wrap.className = `rank ${colorClass}${isEquivalent ? ' eq-underline' : ''}`;
+  wrap.className = `rank${isEquivalent ? ' eq-underline' : ''}`;
+  applyRankVisual(wrap, colorVisual);
 
   if (rank !== 'T') {
     wrap.textContent = displayRank(rank);
@@ -929,7 +1101,8 @@ function appendRankContent(target: HTMLElement, rank: Rank, colorClass: string, 
   }
 
   const ten = document.createElement('span');
-  ten.className = `rank ten ${colorClass}${isEquivalent ? ' eq-underline' : ''}`;
+  ten.className = `rank ten${isEquivalent ? ' eq-underline' : ''}`;
+  applyRankVisual(ten, colorVisual);
   const one = document.createElement('span');
   one.className = 'digit-one';
   one.textContent = '1';
@@ -1395,12 +1568,14 @@ function restoreSnapshot(snapshot: GameSnapshot): void {
   currentProblemId = snapshot.currentProblemId;
   currentProblemVariantId = snapshot.currentProblemVariantId;
   currentProblem = resolveProblemById(currentProblemId, currentProblemVariantId);
+  syncConfiguredUserControls();
   currentSeed = snapshot.currentSeed;
   logs = [...snapshot.logs];
   deferredLogLines = [...snapshot.deferredLogLines];
   trickFrozen = snapshot.trickFrozen;
   lastCompletedTrick = cloneCompletedTrick(snapshot.lastCompletedTrick);
   frozenViewState = snapshot.frozenViewState ? cloneStateForLog(snapshot.frozenViewState) : null;
+  syncConfiguredUserControls();
   canLeadDismiss = snapshot.canLeadDismiss;
   threatCtx = cloneThreatContext(snapshot.threatCtx);
   threatLabels = cloneThreatLabels(snapshot.threatLabels);
@@ -1999,6 +2174,16 @@ function applyEventToShadow(s: State, event: EngineEvent): void {
     if (idx >= 0) {
       hand.splice(idx, 1);
     }
+    if (s.ewVariantState && (event.play.seat === 'E' || event.play.seat === 'W')) {
+      for (const variant of s.ewVariantState.variants) {
+        if (!s.ewVariantState.activeVariantIds.includes(variant.id)) continue;
+        const variantHand = variant.hands[event.play.seat][event.play.suit];
+        const variantIdx = variantHand.indexOf(event.play.rank);
+        if (variantIdx >= 0) {
+          variantHand.splice(variantIdx, 1);
+        }
+      }
+    }
     s.trick.push({ ...event.play });
     s.trickClassIds.push(`${event.play.seat}:${classId}`);
     if (s.threat && s.threatLabels) {
@@ -2150,7 +2335,7 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
         );
         for (const variant of trace.perVariant) {
           lines.push(
-            `[EW-VARIANT:${variant.variantId}] bucket=${variant.chosenBucket ?? '-'} preferred=${variant.chosenCardId ?? '-'} A={${variant.a.join(',') || '-'}} B={${variant.b.join(',') || '-'}} C={${variant.c.join(',') || '-'}} D={${variant.d.join(',') || '-'}} playable={${variant.playable.join(',') || '-'}}`
+            `[EW-VARIANT:${variant.variantId}] bucket=${variant.chosenBucket ?? '-'} preferred=${variant.chosenCardId ?? '-'} A={${variant.a.join(',') || '-'}} B[${variant.bBuckets.join(',') || '-'}]={${variant.b.join(',') || '-'}} C={${variant.c.join(',') || '-'}} D={${variant.d.join(',') || '-'}} playable={${variant.playable.join(',') || '-'}}`
           );
         }
         if (trace.arbitration === 'eliminate') {
@@ -2547,6 +2732,7 @@ function stateSingletonKey(s: State, play: Play): string {
 }
 
 function syncSingletonAutoplay(): void {
+  syncConfiguredUserControls();
   const userControlledSeats = state.userControls;
   const userTurn = userControlledSeats.includes(state.turn);
   const canAutoplayNow =
@@ -2647,6 +2833,39 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
   }
 }
 
+function advanceAutoplayFromCurrentState(): void {
+  const before = state;
+  const ddsHistoryForTurn = [...ddsPlayHistory];
+  const result = autoplayUntilUserOrEnd(state, {
+    eventCollector: semanticCollector,
+    autoplayBackstop: buildBrowserDdsBackstop(ddsHistoryForTurn)
+  });
+  state = result.state;
+  syncConfiguredUserControls();
+  threatCtx = (state.threat as ThreatContext | null) ?? null;
+  threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
+  collectTeachingRecolorEventsForTurn(before, result.events);
+  const trickCompleteIndex = result.events.findIndex((event) => event.type === 'trickComplete');
+  if (trickCompleteIndex >= 0) {
+    const visibleEvents = result.events.slice(0, trickCompleteIndex + 1);
+    const visibleShadow = cloneStateForLog(before);
+    for (const event of visibleEvents) applyEventToShadow(visibleShadow, event);
+    trickFrozen = true;
+    frozenViewState = visibleShadow;
+    const trickEvent = visibleEvents[visibleEvents.length - 1];
+    if (trickEvent.type === 'trickComplete') {
+      lastCompletedTrick = trickEvent.trick.map((p) => ({ ...p }));
+    }
+    canLeadDismiss = state.phase !== 'end' && state.trick.length === 0 && state.userControls.includes(state.turn);
+  }
+  const complete = result.events.find((e) => e.type === 'handComplete');
+  if (complete?.type === 'handComplete') {
+    runStatus = complete.success ? 'success' : 'failure';
+  }
+  clearDdErrorVisual();
+  refreshThreatModel(currentProblemId, false);
+}
+
 function resetGame(seed: number, reason: string): void {
   clearSingletonAutoplayTimer();
   clearPulseTimer();
@@ -2659,6 +2878,7 @@ function resetGame(seed: number, reason: string): void {
   }
   currentSeed = nextSeed;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+  syncConfiguredUserControls();
   resetSemanticStreams();
   teachingReducer.setTrumpSuit(state.trumpSuit);
   logs = [...logs, `${reason} seed=${currentSeed}`].slice(-500);
@@ -2703,6 +2923,7 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   currentProblemId = problemId;
   currentSeed = currentProblem.rngSeed >>> 0;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+  syncConfiguredUserControls();
   resetSemanticStreams();
   teachingReducer.setTrumpSuit(state.trumpSuit);
   runStatus = 'running';
@@ -2815,6 +3036,7 @@ function runTurn(play: Play): void {
     autoplayBackstop: buildBrowserDdsBackstop(backstopHistoryForTurn)
   });
   state = result.state;
+  syncConfiguredUserControls();
   threatCtx = (state.threat as ThreatContext | null) ?? null;
   threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
   collectTeachingRecolorEventsForTurn(before, result.events);
@@ -3311,7 +3533,7 @@ function renderSuitRow(
         if ((pulseUntilByCardKey.get(cardPulseKey(seat, cardId)) ?? 0) > Date.now()) {
           rankBtn.classList.add('card-pulse');
         }
-        appendRankContent(rankBtn, rank, rankColorClass(cardId, view), isEquivalent);
+        appendRankContent(rankBtn, rank, rankColorVisualForCard(view, seat, cardId), isEquivalent);
         rankBtn.onclick = () => runTurn({ seat, suit, rank });
         cards.appendChild(rankBtn);
       } else {
@@ -3322,7 +3544,7 @@ function renderSuitRow(
         if ((pulseUntilByCardKey.get(cardPulseKey(seat, cardId)) ?? 0) > Date.now()) {
           rankEl.classList.add('card-pulse');
         }
-        appendRankContent(rankEl, rank, rankColorClass(cardId, view), isEquivalent);
+        appendRankContent(rankEl, rank, rankColorVisualForCard(view, seat, cardId), isEquivalent);
         cards.appendChild(rankEl);
       }
     }
@@ -3464,7 +3686,7 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
       suitEl.textContent = suitSymbol[play.suit];
       const rankEl = document.createElement('span');
       rankEl.className = 'played-rank';
-      appendRankContent(rankEl, play.rank, rankColorClass(cardId, view));
+      appendRankContent(rankEl, play.rank, { kind: 'solid', colorClass: rankColorClass(cardId, view) });
       text.append(suitEl, rankEl);
       slot.appendChild(text);
     }
@@ -3633,6 +3855,22 @@ function renderControlsBanner(): HTMLElement {
   };
   singletonLabel.append(singletonBox, ' Autoplay singletons');
   row.appendChild(singletonLabel);
+
+  const autoplayEwLabel = document.createElement('label');
+  const autoplayEwBox = document.createElement('input');
+  autoplayEwBox.type = 'checkbox';
+  autoplayEwBox.checked = autoplayEw;
+  autoplayEwBox.onchange = () => {
+    autoplayEw = autoplayEwBox.checked;
+    syncConfiguredUserControls();
+    if (autoplayEw && !trickFrozen && state.phase !== 'end' && !state.userControls.includes(state.turn)) {
+      advanceAutoplayFromCurrentState();
+    }
+    syncSingletonAutoplay();
+    render();
+  };
+  autoplayEwLabel.append(autoplayEwBox, ' Autoplay E/W');
+  row.appendChild(autoplayEwLabel);
 
   bar.appendChild(row);
   return bar;
@@ -3920,6 +4158,17 @@ function renderBoardNavigationArea(view: State): HTMLElement {
         })
       );
       panel.appendChild(
+        mkToggle('Autoplay E/W', autoplayEw, (checked) => {
+          autoplayEw = checked;
+          syncConfiguredUserControls();
+          if (autoplayEw && !trickFrozen && state.phase !== 'end' && !state.userControls.includes(state.turn)) {
+            advanceAutoplayFromCurrentState();
+          }
+          syncSingletonAutoplay();
+          render();
+        })
+      );
+      panel.appendChild(
         mkToggle('Always hint', alwaysHint, (checked) => {
           alwaysHint = checked;
           if (!checked) clearHint();
@@ -4026,10 +4275,11 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
 
   const list = document.createElement('div');
   list.className = 'teaching-events';
+  const unknownEntries = teachingEntriesForUnknownMode();
   const snapshot = teachingReducer.snapshot() as {
     entries: Array<{ seq: number; seat: string; card: string; summary: string; reasons: string[]; effects: string[] }>;
   };
-  const entries = mode === 'widget'
+  const entries: TeachingEntryView[] = unknownEntries ?? (mode === 'widget'
     ? widgetNarrationEntries.map((entry) => ({
         seq: entry.seq,
         seat: entry.seat ?? '-',
@@ -4038,7 +4288,7 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
         reasons: [],
         effects: []
       }))
-    : (snapshot.entries ?? []);
+    : (snapshot.entries ?? []));
 
   if (entries.length === 0) {
     const row = document.createElement('div');
@@ -4077,19 +4327,30 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
       marker.textContent = `#${entry.seq} ${entry.seat}`;
       row.appendChild(marker);
 
-      const ddReasons = (entry.reasons ?? [])
-        .map(parseDdReason)
-        .filter((item): item is { short: string; full: string } => Boolean(item));
-      const nonDdReasons = (entry.reasons ?? []).filter((reason) => !reason.startsWith('DD:'));
-      const bracketParts: string[] = [];
-      if (ddReasons.length > 0) {
-        bracketParts.push(...ddReasons.map((item) => (verboseDetailEnabled() ? item.full : item.short)));
+      if (entry.variantGroups && entry.variantGroups.length > 0) {
+        text.classList.add('teaching-text-variants');
+        for (const group of entry.variantGroups) {
+          const line = document.createElement('div');
+          line.className = 'teaching-variant-line';
+          line.textContent = `${group.labels.join('/')}: ${group.summary}`;
+          text.appendChild(line);
+        }
+        row.appendChild(text);
+      } else {
+        const ddReasons = (entry.reasons ?? [])
+          .map(parseDdReason)
+          .filter((item): item is { short: string; full: string } => Boolean(item));
+        const nonDdReasons = (entry.reasons ?? []).filter((reason) => !reason.startsWith('DD:'));
+        const bracketParts: string[] = [];
+        if (ddReasons.length > 0) {
+          bracketParts.push(...ddReasons.map((item) => (verboseDetailEnabled() ? item.full : item.short)));
+        }
+        if (verboseDetailEnabled() && nonDdReasons.length > 0) {
+          bracketParts.push(...nonDdReasons);
+        }
+        text.textContent = bracketParts.length > 0 ? `${entry.summary} [${bracketParts.join('; ')}]` : entry.summary;
+        row.appendChild(text);
       }
-      if (verboseDetailEnabled() && nonDdReasons.length > 0) {
-        bracketParts.push(...nonDdReasons);
-      }
-      text.textContent = bracketParts.length > 0 ? `${entry.summary} [${bracketParts.join('; ')}]` : entry.summary;
-      row.appendChild(text);
 
       const ddsSummary = ddsTeachingSummaries[idx];
       if (ddsSummary) {
@@ -4099,7 +4360,9 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
         row.appendChild(ddsLine);
       }
 
-      const shownEffects = (entry.effects ?? []).filter((effect) => verboseDetailEnabled() || !isIdleTransitionEffect(effect));
+      const shownEffects = entry.variantGroups && entry.variantGroups.length > 0
+        ? []
+        : (entry.effects ?? []).filter((effect) => verboseDetailEnabled() || !isIdleTransitionEffect(effect));
       if (shownEffects.length > 0) {
         const detail = document.createElement('pre');
         detail.className = 'teaching-detail';

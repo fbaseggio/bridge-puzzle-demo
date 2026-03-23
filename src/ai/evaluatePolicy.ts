@@ -114,6 +114,7 @@ export type EvaluatePolicyOutput = {
       chosenCardId: CardId | null;
       a: CardId[];
       b: CardId[];
+      bBuckets: string[];
       c: CardId[];
       d: CardId[];
     }>;
@@ -165,24 +166,26 @@ function combinedHandsForVariant(
   };
 }
 
+function cardExistsInHands(hands: Record<Seat, Hand>, cardId: CardId): boolean {
+  const { suit, rank } = parseCardId(cardId);
+  return ['N', 'E', 'S', 'W'].some((seat) => hands[seat as Seat][suit].includes(rank));
+}
+
 function classifyWorld(input: EvaluatePolicyInput, hands: Record<Seat, Hand>): {
   threat: ThreatContext | null;
   resource: ResourceContext | null;
   threatLabels: DefenderLabels | null;
 } {
-  const threatCardIds = input.threat?.threatCardIds ?? [];
-  const resourceCardIds = input.resource?.resourceCardIds ?? [];
+  const threatCardIds = (input.threat?.threatCardIds ?? []).filter((cardId) => cardExistsInHands(hands, cardId));
+  const resourceCardIds = (input.resource?.resourceCardIds ?? []).filter((cardId) => cardExistsInHands(hands, cardId));
   if (threatCardIds.length === 0 && resourceCardIds.length === 0) {
-    return {
-      threat: input.threat,
-      resource: input.resource ?? null,
-      threatLabels: input.threatLabels
-    };
+    return { threat: null, resource: null, threatLabels: null };
   }
   const threatSymbolByCardId = Object.fromEntries(
     Object.values(input.threat?.threatsBySuit ?? {})
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       .map((entry) => [entry.threatCardId, entry.symbol])
+      .filter(([cardId]) => threatCardIds.includes(cardId as CardId))
       .filter(([, symbol]) => typeof symbol === 'string')
   ) as Partial<Record<CardId, string>>;
   const classification = initClassification(
@@ -225,14 +228,17 @@ type VariantCardLabel = 'A' | 'B' | 'C' | 'D';
 
 function classifyVariantCard(
   card: CardId,
-  output: EvaluatePolicyOutput
+  output: EvaluatePolicyOutput,
+  hands: Record<Seat, Hand>,
+  seat: 'E' | 'W'
 ): VariantCardLabel {
   const legalUniverse = new Set(legalUniverseFromEvaluation(output));
   const playable = new Set(playableCardsFromEvaluation(output));
   const bucket = new Set(output.bucketCards ?? []);
+  const preferred = new Set(preferredCardsForEvaluation(hands, seat, output));
   if (!legalUniverse.has(card)) return 'D';
   if (!playable.has(card)) return 'D';
-  if (output.chosenCardId === card) return 'A';
+  if (preferred.has(card)) return 'A';
   if (bucket.has(card)) return 'B';
   return 'C';
 }
@@ -318,6 +324,18 @@ function buildPolicyClassByCard(
     }
   }
   return out;
+}
+
+function preferredCardsForEvaluation(
+  hands: Record<Seat, Hand>,
+  seat: 'E' | 'W',
+  output: EvaluatePolicyOutput
+): CardId[] {
+  if (!output.chosenCardId) return [];
+  const legalUniverse = new Set(legalUniverseFromEvaluation(output));
+  const members = classInfoForCard({ hands } as unknown as State, seat, output.chosenCardId).members
+    .filter((card): card is CardId => legalUniverse.has(card as CardId));
+  return members.length > 0 ? members : [output.chosenCardId];
 }
 
 function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOutput {
@@ -605,7 +623,23 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
   }
 
   if (!threat) {
-    return { chosenCardId: null, rngBefore, rngAfter };
+    const legal = legalPlaysForSeat(hands, seat, leadSuit);
+    const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
+    const ddFiltered = applyDdFilter(legalCardIds, legalCardIds);
+    const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
+    rngAfter = nextRng;
+    const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
+    const chosenBucket = 'discard:baseline';
+    return {
+      chosenCardId,
+      chosenBucket,
+      bucketCards: [...ddFiltered.candidates],
+      policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+      ddPolicy: ddFiltered.trace,
+      ddTrace: buildDdDecisionTrace(legalCardIds, legalCardIds, ddFiltered, chosenCardId),
+      rngBefore,
+      rngAfter
+    };
   }
 
   const labels: DefenderLabels =
@@ -696,9 +730,16 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
             playable: playableCardsFromEvaluation(output),
             chosenCardId: output.chosenCardId
             ,
-            a: output.chosenCardId ? [output.chosenCardId] : [],
-            b: (output.bucketCards ?? []).filter((card) => card !== output.chosenCardId),
-            c: playableCardsFromEvaluation(output).filter((card) => !(output.bucketCards ?? []).includes(card)),
+            a: preferredCardsForEvaluation(worldHands, input.seat, output),
+            b: (output.bucketCards ?? []).filter((card) => !preferredCardsForEvaluation(worldHands, input.seat, output).includes(card)),
+            bBuckets: (output.bucketCards ?? []).some((card) => !preferredCardsForEvaluation(worldHands, input.seat, output).includes(card))
+              ? [output.chosenBucket ?? '-']
+              : [],
+            c: playableCardsFromEvaluation(output).filter((card) => {
+              const a = preferredCardsForEvaluation(worldHands, input.seat, output);
+              const b = (output.bucketCards ?? []).filter((bucketCard) => !a.includes(bucketCard));
+              return !a.includes(card) && !b.includes(card);
+            }),
             d: []
           }
         ],
@@ -718,24 +759,23 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
 
   const rngBefore = { seed: input.rng.seed >>> 0, counter: input.rng.counter };
   let rngAfter = { ...rngBefore };
-  const evaluations = activeVariants.map((variant) => ({
-    variant,
-    ...(() => {
-      const worldHands = combinedHandsForVariant(input.hands, variant);
-      const world = classifyWorld(input, worldHands);
-      return {
-        output: evaluatePolicySingleWorld({
-          ...input,
-          hands: worldHands,
-          threat: world.threat,
-          resource: world.resource,
-          threatLabels: world.threatLabels,
-          ewVariantState: null,
-          rng: rngBefore
-        })
-      };
-    })()
-  }));
+  const evaluations = activeVariants.map((variant) => {
+    const worldHands = combinedHandsForVariant(input.hands, variant);
+    const world = classifyWorld(input, worldHands);
+    return {
+      variant,
+      worldHands,
+      output: evaluatePolicySingleWorld({
+        ...input,
+        hands: worldHands,
+        threat: world.threat,
+        resource: world.resource,
+        threatLabels: world.threatLabels,
+        ewVariantState: null,
+        rng: rngBefore
+      })
+    };
+  });
   const playableByVariant = evaluations.map(({ variant, output }) => ({
     variant,
     output,
@@ -743,7 +783,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
   }));
   const candidateCards = [...new Set(playableByVariant.flatMap(({ output }) => legalUniverseFromEvaluation(output)))];
   const cardScores = candidateCards.map((card) => {
-    const labels = playableByVariant.map(({ output }) => classifyVariantCard(card, output));
+    const labels = evaluations.map(({ output, worldHands }) => classifyVariantCard(card, output, worldHands, input.seat));
     const dCount = labels.filter((label) => label === 'D').length;
     const cCount = labels.filter((label) => label === 'C').length;
     const aCount = labels.filter((label) => label === 'A').length;
@@ -780,10 +820,11 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     bucketCards: chosenCardId ? [chosenCardId] : [],
     ewVariantTrace: {
       activeVariantIds: activeVariants.map((variant) => variant.id),
-      perVariant: playableByVariant.map(({ variant, output, playable }) => {
-        const a = output.chosenCardId ? [output.chosenCardId] : [];
-        const b = (output.bucketCards ?? []).filter((card) => card !== output.chosenCardId);
-        const c = playable.filter((card) => !(output.bucketCards ?? []).includes(card));
+      perVariant: evaluations.map(({ variant, output, worldHands }) => {
+        const playable = playableCardsFromEvaluation(output);
+        const a = preferredCardsForEvaluation(worldHands, input.seat, output);
+        const b = (output.bucketCards ?? []).filter((card) => !a.includes(card));
+        const c = playable.filter((card) => !a.includes(card) && !b.includes(card));
         const legalUniverse = legalUniverseFromEvaluation(output);
         const d = legalUniverse.filter((card) => !playable.includes(card));
         return {
@@ -793,6 +834,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
           chosenCardId: output.chosenCardId,
           a,
           b,
+          bBuckets: b.length > 0 ? [output.chosenBucket ?? '-'] : [],
           c,
           d
         };

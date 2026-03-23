@@ -361,6 +361,17 @@ html.mode-widget {
   font-weight: 600;
 }
 
+.teaching-text-variants {
+  display: grid;
+  gap: 2px;
+}
+
+.teaching-variant-line {
+  font-size: 12px;
+  color: #334155;
+  font-weight: 600;
+}
+
 .teaching-detail {
   margin: 0;
   white-space: pre-wrap;
@@ -645,6 +656,12 @@ html.mode-widget {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   text-shadow: 0 0 0.35px rgba(15, 23, 42, 0.32);
+}
+
+.rank.rank--mixed {
+  padding: 0 1px;
+  border-radius: 2px;
+  background-repeat: no-repeat;
 }
 
 .rank.ten {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { init } from '../../src/core';
+import { apply, init, legalPlays } from '../../src/core';
 import { evaluatePolicy } from '../../src/ai/evaluatePolicy';
 import { sureTricksDemo } from '../../src/puzzles/sure_tricks_demo';
 
@@ -53,5 +53,56 @@ describe('multi-EW defender policy arbitration', () => {
     expect(result.ewVariantTrace?.intersection).toEqual([]);
     expect(result.ewVariantTrace?.chosenVariantId).toBe(result.ewVariantState?.activeVariantIds[0]);
     expect(result.chosenCardId).toBeTruthy();
+  });
+
+  it('continues autoplay after a designated threat has been played from the unknown view branch', () => {
+    let state = init(sureTricksDemo);
+    const seq = ['CT', 'CA', 'CQ', 'CK', 'DQ'];
+    for (const cardId of seq) {
+      const legal = legalPlays(state).map((play) => `${play.suit}${play.rank}`);
+      expect(legal).toContain(cardId);
+      const play = { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const;
+      state = apply(state, play).state;
+    }
+
+    expect(state.turn).toBe('N');
+    expect(legalPlays(state).map((play) => `${play.suit}${play.rank}`)).toContain('ST');
+    expect(() => apply(state, { seat: 'N', suit: 'S', rank: 'T' })).not.toThrow();
+  });
+
+  it('falls back to a legal discard when no designated threats remain', () => {
+    let state = init(sureTricksDemo);
+    const seq = ['CT', 'CA', 'CQ', 'CK', 'CJ', 'ST', 'S2', 'SA', 'HA', 'S3'];
+    for (const cardId of seq) {
+      const legal = legalPlays(state).map((play) => `${play.suit}${play.rank}`);
+      expect(legal).toContain(cardId);
+      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+    }
+
+    expect(state.turn).toBe('N');
+    expect(legalPlays(state).map((play) => `${play.suit}${play.rank}`)).toEqual(['HT']);
+    const result = apply(state, { seat: 'N', suit: 'H', rank: 'T' });
+    expect(result.events.some((event) => event.type === 'illegal')).toBe(false);
+    expect(result.events.some((event) => event.type === 'autoplay' && event.play.seat === 'E' && event.play.suit === 'D' && event.play.rank === 'K')).toBe(true);
+  });
+
+  it('treats equivalence-class peers of the preferred card as A in variant arbitration', () => {
+    let state = init(sureTricksDemo);
+    const seq = ['CT', 'CA', 'CQ'];
+    for (const cardId of seq) {
+      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+    }
+
+    const result = apply(state, { seat: 'S', suit: 'C', rank: 'K' });
+    const westAuto = result.events.find((event) => event.type === 'autoplay' && event.play.seat === 'W');
+    expect(westAuto?.type).toBe('autoplay');
+    if (westAuto?.type !== 'autoplay' || !westAuto.ewVariantTrace) throw new Error('missing W variant trace');
+
+    const variantA = westAuto.ewVariantTrace.perVariant.find((variant) => variant.variantId === 'a');
+    const variantB = westAuto.ewVariantTrace.perVariant.find((variant) => variant.variantId === 'b');
+    expect(variantA?.a).toEqual(expect.arrayContaining(['SK', 'SQ', 'SJ']));
+    expect(variantA?.c).toEqual(expect.arrayContaining(['HK', 'HQ']));
+    expect(variantB?.a).toEqual(expect.arrayContaining(['HK', 'HQ', 'HJ']));
+    expect(variantB?.c).toEqual(expect.arrayContaining(['SK', 'SQ']));
   });
 });

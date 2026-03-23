@@ -66,18 +66,24 @@ function variantById(state: EwVariantState | null, variantId: string | null | un
   return state.variants.find((variant) => variant.id === variantId) ?? null;
 }
 
+function cardExistsInStateHands(hands: Record<Seat, Hand>, cardId: CardId): boolean {
+  const { suit, rank } = parseCardId(cardId);
+  return TURN_ORDER.some((seat) => hands[seat][suit].includes(rank));
+}
+
 function syncRepresentativeVariantHands(state: State): void {
   const representative = variantById(state.ewVariantState, state.ewVariantState?.representativeVariantId);
   if (!representative) return;
   state.hands.E = cloneHand(representative.hands.E);
   state.hands.W = cloneHand(representative.hands.W);
-  const threatCardIds = state.threat?.threatCardIds ?? [];
-  const resourceCardIds = state.resource?.resourceCardIds ?? [];
+  const threatCardIds = (state.threat?.threatCardIds ?? []).filter((cardId) => cardExistsInStateHands(state.hands, cardId));
+  const resourceCardIds = (state.resource?.resourceCardIds ?? []).filter((cardId) => cardExistsInStateHands(state.hands, cardId));
   if (threatCardIds.length === 0 && resourceCardIds.length === 0) return;
   const threatSymbolByCardId = Object.fromEntries(
     Object.values(state.threat?.threatsBySuit ?? {})
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       .map((entry) => [entry.threatCardId, entry.symbol])
+      .filter(([cardId]) => threatCardIds.includes(cardId as CardId))
       .filter(([, symbol]) => typeof symbol === 'string')
   ) as Partial<Record<CardId, string>>;
   const classification = initClassification(

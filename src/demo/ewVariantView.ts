@@ -1,4 +1,6 @@
-import type { CardId, EwVariantState, Rank, Seat, Suit } from '../core';
+import type { CardId, EwVariantState, Hand, Rank, Seat, State, Suit } from '../core';
+import { initClassification, parseCardId, type ThreatContext, type ResourceContext } from '../ai/threatModel';
+import { buildFeatureStateFromRuntime, getRankColorForFeatureRole, type FeatureColor } from '../ai/features';
 
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
 
@@ -13,6 +15,52 @@ function sortRanksDesc(ranks: Rank[]): Rank[] {
 function activeVariants(state: EwVariantState | null) {
   if (!state) return [];
   return state.variants.filter((variant) => state.activeVariantIds.includes(variant.id));
+}
+
+function cloneHand(hand: Hand): Hand {
+  return { S: [...hand.S], H: [...hand.H], D: [...hand.D], C: [...hand.C] };
+}
+
+function combinedHands(
+  state: Pick<State, 'hands'>,
+  variant: NonNullable<EwVariantState['variants']>[number]
+): Record<Seat, Hand> {
+  return {
+    N: cloneHand(state.hands.N),
+    E: cloneHand(variant.hands.E),
+    S: cloneHand(state.hands.S),
+    W: cloneHand(variant.hands.W)
+  };
+}
+
+function cardExistsInHands(hands: Record<Seat, Hand>, cardId: CardId): boolean {
+  const { suit, rank } = parseCardId(cardId);
+  return (['N', 'E', 'S', 'W'] as const).some((seat) => hands[seat][suit].includes(rank));
+}
+
+function classifyWorldForVariant(
+  view: Pick<State, 'hands' | 'threat' | 'resource' | 'goalStatus'>,
+  hands: Record<Seat, Hand>
+): { threat: ThreatContext | null; resource: ResourceContext | null; cardRoles: Partial<Record<CardId, any>>; threatLabels: State['threatLabels'] } {
+  const threatCardIds = (view.threat?.threatCardIds ?? []).filter((cardId) => cardExistsInHands(hands, cardId));
+  const resourceCardIds = (view.resource?.resourceCardIds ?? []).filter((cardId) => cardExistsInHands(hands, cardId));
+  if (threatCardIds.length === 0 && resourceCardIds.length === 0) {
+    return { threat: null, resource: null, cardRoles: {}, threatLabels: null };
+  }
+  const threatSymbolByCardId = Object.fromEntries(
+    Object.values(view.threat?.threatsBySuit ?? {})
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+      .map((entry) => [entry.threatCardId, entry.symbol])
+      .filter(([cardId]) => threatCardIds.includes(cardId as CardId))
+      .filter(([, symbol]) => typeof symbol === 'string')
+  ) as Partial<Record<CardId, string>>;
+  const classification = initClassification({ hands }, threatCardIds, resourceCardIds, undefined, threatSymbolByCardId);
+  return {
+    threat: classification.threat,
+    resource: classification.resource,
+    cardRoles: classification.perCardRole,
+    threatLabels: classification.labels
+  };
 }
 
 export function fixedRanksForSeatSuit(state: EwVariantState | null, seat: 'E' | 'W', suit: Suit): Rank[] {
@@ -52,4 +100,28 @@ export function unresolvedEwCardsBySuit(state: EwVariantState | null): Record<Su
       .sort((a, b) => rankOrderValue(a.slice(1) as Rank) - rankOrderValue(b.slice(1) as Rank));
   }
   return out;
+}
+
+export function fixedCardVariantColors(
+  view: Pick<State, 'hands' | 'ewVariantState' | 'threat' | 'resource' | 'goalStatus'>,
+  seat: 'E' | 'W',
+  cardId: CardId,
+  teachingMode: boolean
+): FeatureColor[] {
+  const variants = activeVariants(view.ewVariantState);
+  if (variants.length === 0) return ['black'];
+  const colors: FeatureColor[] = [];
+  for (const variant of variants) {
+    const hands = combinedHands(view, variant);
+    const world = classifyWorldForVariant(view, hands);
+    const features = buildFeatureStateFromRuntime({
+      threat: world.threat,
+      threatLabels: world.threatLabels,
+      cardRoles: world.cardRoles,
+      goalStatus: view.goalStatus
+    });
+    const color = getRankColorForFeatureRole(features.cardRoleById[cardId] ?? 'default', teachingMode);
+    if (!colors.includes(color)) colors.push(color);
+  }
+  return colors.length > 0 ? colors : ['black'];
 }

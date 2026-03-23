@@ -193,6 +193,7 @@ export type EngineEvent =
           chosenCardId: CardId | null;
           a: CardId[];
           b: CardId[];
+          bBuckets: string[];
           c: CardId[];
           d: CardId[];
         }>;
