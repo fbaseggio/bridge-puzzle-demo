@@ -61,24 +61,24 @@ export const gorillas02 = makeGorillaProblem('gorillas_02', {
 
 export const gorillas03 = makeGorillaProblem('gorillas_03', {
   N: { S: ['A', '2'], H: ['A', '3', '2'], D: [], C: ['2'] },
-  E: { S: ['K', 'Q'], H: ['K', 'Q', '8'], D: ['A'], C: [] },
+  E: { S: ['K', 'Q'], H: ['Q', '8', '7'], D: ['A'], C: [] },
   S: { S: ['3'], H: ['K', '4'], D: ['2'], C: ['A', 'K'] },
   W: { S: ['J', 'T', '9'], H: ['J', 'T', '9'], D: [], C: [] }
-}, { threatCardIds: ['S2', 'D2'] });
+}, { threatCardIds: ['S2', 'H3', 'D2'] });
 
 export const gorillas04 = makeGorillaProblem('gorillas_04', {
   N: { S: ['A', '3', '2'], H: ['A', '3', '2'], D: [], C: ['2'] },
-  E: { S: ['K', 'Q'], H: ['K', 'Q', '8'], D: ['K', 'Q'], C: [] },
+  E: { S: ['K', 'Q'], H: ['Q', '8', '7'], D: ['K', 'Q'], C: [] },
   S: { S: ['4'], H: ['K', '4'], D: ['A', '2'], C: ['A', 'K'] },
   W: { S: ['J', 'T', '9', '8'], H: ['J', 'T', '9'], D: [], C: [] }
-}, { threatCardIds: ['S3', 'D2'] });
+}, { threatCardIds: ['S3', 'H3', 'D2'] });
 
 export const gorillas05 = makeGorillaProblem('gorillas_05', {
   N: { S: ['A', '2'], H: ['A', '2'], D: ['2'], C: ['3', '2'] },
   E: { S: ['K', 'Q'], H: ['K', 'Q'], D: ['Q', 'J', 'T'], C: [] },
   S: { S: ['3'], H: ['3'], D: ['A', 'K', '3'], C: ['A', 'K'] },
   W: { S: ['J', 'T', '9', '8'], H: ['J', 'T', '9'], D: [], C: [] }
-}, { threatCardIds: ['S2', 'H2'] });
+}, { threatCardIds: ['S2', 'H2', 'D3'] });
 
 export const gorillasFullDeal = makeGorillaProblem(
   'gorillas_full_deal',
@@ -97,7 +97,7 @@ export const gorillas06 = makeGorillaProblem(
     N: { S: ['A', '8'], H: ['A', '8'], D: ['A', '3', '2'], C: [] },
     E: { S: ['J', 'T', '9'], H: ['J', 'T', '9'], D: [], C: ['2'] },
     S: { S: ['4', '3'], H: ['4', '3'], D: [], C: ['A', 'K', 'Q'] },
-    W: { S: ['K', 'Q'], H: ['K', 'Q', 'J'], D: ['K', 'Q', 'J'], C: [] }
+    W: { S: ['K', 'Q'], H: ['K', 'Q'], D: ['K', 'Q', 'J'], C: [] }
   },
   { strain: 'C', threatCardIds: ['S8', 'H8', 'D3'] }
 );
@@ -107,35 +107,35 @@ export const gorillas07 = makeGorillaProblem('gorillas_07', {
   E: { S: ['J', 'T', '9'], H: ['9', '8', '7'], D: ['J'], C: [] },
   S: { S: ['3'], H: ['K', '4', '3'], D: ['A'], C: ['A', 'K'] },
   W: { S: ['K', 'Q'], H: ['Q', 'J', 'T'], D: ['K', 'Q'], C: [] }
-}, { threatCardIds: ['S2', 'H4'] });
+}, { threatCardIds: ['S2', 'H4', 'D3'] });
 
 export const gorillas08 = makeGorillaProblem('gorillas_08', {
   N: { S: ['A', '2'], H: ['A', '2'], D: ['3', '2'], C: ['3', '2'] },
   E: { S: ['J', 'T', '9', '8'], H: ['7', '6', '5'], D: ['J'], C: [] },
   S: { S: ['3'], H: ['K', 'Q', '4', '3'], D: ['A'], C: ['A', 'K'] },
   W: { S: ['K', 'Q'], H: ['J', 'T', '9', '8'], D: ['K', 'Q'], C: [] }
-}, { threatCardIds: ['S2', 'D3'] });
+}, { threatCardIds: ['S2', 'H4', 'D3'] });
 
 export const gorillas09 = makeGorillaProblem('gorillas_09', {
   N: { S: ['K', '4', '3'], H: ['A', '2'], D: ['2'], C: ['2'] },
   E: { S: ['9', '8', '7'], H: ['9', '8', '7'], D: [], C: ['3'] },
-  S: { S: ['A', '2'], H: ['K', '4', '3'], D: ['2'], C: ['A', 'K'] },
+  S: { S: ['A', '2'], H: ['K', '4', '3'], D: [], C: ['A', 'K'] },
   W: { S: ['Q', 'J', 'T'], H: ['Q', 'J', 'T'], D: ['A'], C: [] }
-}, { threatCardIds: ['S4', 'H4'] });
+}, { threatCardIds: ['S4', 'H4', 'D2'] });
 
 export const gorillas10 = makeGorillaProblem('gorillas_10', {
   N: { S: ['A', '2'], H: ['3'], D: ['A', '3', '2'], C: ['2'] },
   E: { S: ['J', 'T', '9'], H: ['J', 'T', '9', '8'], D: [], C: [] },
   S: { S: ['3'], H: ['A', '2'], D: ['K', '4'], C: ['A', 'K'] },
   W: { S: ['K', 'Q'], H: ['K', 'Q'], D: ['Q', 'J', 'T'], C: [] }
-}, { threatCardIds: ['S2', 'H2', 'D4'] });
+}, { threatCardIds: ['S2', 'H2', 'D3'] });
 
 export const gorillas11 = makeGorillaProblem('gorillas_11', {
   N: { S: ['A', '2'], H: ['A', '2'], D: ['A', '2'], C: ['2'] },
   E: { S: ['J', 'T', '9'], H: ['9', '8', '7', '6'], D: [], C: [] },
   S: { S: ['4', '3'], H: ['K', '4', '3'], D: [], C: ['A', 'K'] },
   W: { S: ['K', 'Q'], H: ['Q', 'J', 'T'], D: ['K', 'Q'], C: [] }
-}, { threatCardIds: ['S4', 'D2'] });
+}, { threatCardIds: ['S4', 'H4', 'D2'] });
 
 export const gorillas12a = makeGorillaProblem('gorillas_12a', {
   N: { S: ['A', '2'], H: ['3'], D: ['2'], C: ['3', '2'] },
@@ -149,7 +149,7 @@ export const gorillas12b = makeGorillaProblem('gorillas_12b', {
   E: { S: ['K', 'Q'], H: ['Q', 'J', 'T'], D: ['A'], C: [] },
   S: { S: ['A', '2'], H: ['3'], D: ['2'], C: ['A', 'K'] },
   W: { S: ['J', 'T', '9'], H: ['9', '8', '7'], D: [], C: [] }
-}, { threatCardIds: ['S2', 'D2'] });
+}, { threatCardIds: ['S2', 'H2', 'D2'] });
 
 export const gorillasProblems: Problem[] = [
   gorillas01,

@@ -10,6 +10,7 @@
     "policy:cli": "vite-node src/cli/policy_cli.ts",
     "policy:serve": "vite-node src/cli/policy_server.ts",
     "threat:serve": "vite-node src/cli/threat_state_server.ts",
+    "puzzles:validate": "vite-node tools/validate-puzzles.ts",
     "dd:refresh-all": "python3 tools/dd_maintenance.py refresh",
     "dd:refresh-profile-p007": "python3 tools/dd_maintenance.py refresh --problem-id p007 --profile",
     "dd:verify-all": "python3 tools/dd_maintenance.py verify",
