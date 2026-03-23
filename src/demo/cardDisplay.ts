@@ -1,5 +1,5 @@
-import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/features';
-import type { GoalStatus, State } from '../core';
+import { buildFeatureStateFromRuntime, getRankColorForFeatureRole, type FeatureColor } from '../ai/features';
+import type { GoalStatus, Seat, State, Suit } from '../core';
 import type { CardId, DefenderLabels, ThreatContext } from '../ai/threatModel';
 
 // Architecture guard rails:
@@ -15,6 +15,20 @@ export type RankColorVisual =
   | { kind: 'solid'; colorClass: RankColorClass }
   | { kind: 'split'; colors: RankColorClass[] }
   | { kind: 'stripes'; colors: RankColorClass[] };
+
+export type RegularCardDisplayProjection = {
+  colorClass: RankColorClass;
+  visual: RankColorVisual;
+};
+
+export type CardStatusSnapshotEntry = {
+  color: FeatureColor;
+  role: string;
+  seat: Seat;
+};
+
+const DISPLAY_SEATS: Seat[] = ['N', 'E', 'S', 'W'];
+const DISPLAY_SUITS: Suit[] = ['S', 'H', 'D', 'C'];
 
 function toRankColorClass(color: string): RankColorClass {
   if (color === 'purple') return 'rank--purple';
@@ -40,6 +54,46 @@ export function buildRegularRankColorClass(
     goalStatus
   });
   return toRankColorClass(getRankColorForFeatureRole(features.cardRoleById[cardId] ?? 'default', teachingMode));
+}
+
+export function buildRegularCardDisplayProjection(
+  cardId: CardId,
+  featureSource: Pick<State, 'cardRoles' | 'threat' | 'threatLabels'>,
+  goalStatus: GoalStatus,
+  teachingMode: boolean,
+  coloringEnabled: boolean
+): RegularCardDisplayProjection {
+  const colorClass = buildRegularRankColorClass(cardId, featureSource, goalStatus, teachingMode, coloringEnabled);
+  return {
+    colorClass,
+    visual: buildRankColorVisual([colorClass])
+  };
+}
+
+export function buildCardStatusSnapshot(
+  state: Pick<State, 'hands' | 'cardRoles' | 'threat' | 'threatLabels' | 'goalStatus'>,
+  teachingMode: boolean
+): Map<CardId, CardStatusSnapshotEntry> {
+  const snapshot = new Map<CardId, CardStatusSnapshotEntry>();
+  const features = buildFeatureStateFromRuntime({
+    threat: (state.threat as ThreatContext | null) ?? null,
+    threatLabels: state.threatLabels as DefenderLabels | null,
+    cardRoles: state.cardRoles,
+    goalStatus: state.goalStatus
+  });
+  for (const seat of DISPLAY_SEATS) {
+    for (const suit of DISPLAY_SUITS) {
+      for (const rank of state.hands[seat][suit]) {
+        const cardId = `${suit}${rank}` as CardId;
+        snapshot.set(cardId, {
+          color: getRankColorForFeatureRole(features.cardRoleById[cardId] ?? 'default', teachingMode),
+          role: state.cardRoles[cardId] ?? 'default',
+          seat
+        });
+      }
+    }
+  }
+  return snapshot;
 }
 
 export function buildRankColorVisual(colorClasses: RankColorClass[]): RankColorVisual {

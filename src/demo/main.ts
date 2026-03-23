@@ -39,11 +39,17 @@ import {
   type ThreatContext,
 } from '../ai/threatModel';
 import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock, formatInitBlock } from '../ai/threatModelVerbose';
-import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/features';
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
 import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem } from './problems';
 import { buildPracticeQueue, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
-import { buildRankColorVisual, buildRegularRankColorClass, type RankColorVisual } from './cardDisplay';
+import {
+  buildCardStatusSnapshot,
+  buildRankColorVisual,
+  buildRegularCardDisplayProjection,
+  buildRegularRankColorClass,
+  type CardStatusSnapshotEntry,
+  type RankColorVisual
+} from './cardDisplay';
 import { cardVariantColors, fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from './ewVariantView';
 import { buildTeachingDisplayEntries } from './teachingDisplay';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
@@ -1275,8 +1281,14 @@ function formatHandInitSummary(s: State, seat: Seat): string {
   return `${seat}: ${suitParts.join('/')}`;
 }
 
-function rankColorClass(cardId: CardId, featureSource: Pick<State, 'cardRoles' | 'threat' | 'threatLabels'> = state): string {
-  return buildRegularRankColorClass(cardId, featureSource, state.goalStatus, teachingMode, cardColoringEnabled);
+function rankColorClass(cardId: CardId, view: Pick<State, 'cardRoles' | 'threat' | 'threatLabels' | 'goalStatus'> = state): string {
+  return buildRegularCardDisplayProjection(
+    cardId,
+    view,
+    view.goalStatus,
+    teachingMode,
+    cardColoringEnabled
+  ).colorClass;
 }
 
 function rankPalette(colorClass: string): { text: string; background: string } {
@@ -1294,7 +1306,13 @@ function rankColorVisualForCard(
   cardId: CardId
 ): RankColorVisual {
   if (!versionUnknownModeEnabled()) {
-    return buildRankColorVisual([rankColorClass(cardId, view) as any]);
+    return buildRegularCardDisplayProjection(
+      cardId,
+      view,
+      view.goalStatus,
+      teachingMode,
+      cardColoringEnabled
+    ).visual;
   }
   const replayData = unknownModeVariantReplayData ?? unknownModeVariantReplayMap();
   const colors = replayData && replayData.size > 1
@@ -2398,33 +2416,16 @@ function cardStatusSnapshot(
   s: State,
   ctx: ThreatContext | null,
   labels: DefenderLabels | null
-): Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black' | 'grey'; role: string; seat: Seat }> {
+): Map<CardId, CardStatusSnapshotEntry> {
   void ctx;
   void labels;
-  const snap = new Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black' | 'grey'; role: string; seat: Seat }>();
-  const features = buildFeatureStateFromRuntime({
-    threat: (s.threat as ThreatContext | null) ?? null,
-    threatLabels: s.threatLabels,
-    cardRoles: s.cardRoles,
-    goalStatus: s.goalStatus
-  });
-  for (const seat of seatOrder) {
-    for (const suit of suitOrder) {
-      for (const rank of s.hands[seat][suit]) {
-        const cardId = toCardId(suit, rank) as CardId;
-        const color = getRankColorForFeatureRole(features.cardRoleById[cardId] ?? 'default', teachingMode);
-        const role = s.cardRoles[cardId] ?? 'default';
-        snap.set(cardId, { color, role, seat });
-      }
-    }
-  }
-  return snap;
+  return buildCardStatusSnapshot(s, teachingMode);
 }
 
 function maybeEmitTeachingRecolorEvents(
   triggerCardId: CardId,
-  beforeSnap: Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black' | 'grey'; role: string; seat: Seat }>,
-  afterSnap: Map<CardId, { color: 'green' | 'blue' | 'purple' | 'black' | 'grey'; role: string; seat: Seat }>
+  beforeSnap: Map<CardId, CardStatusSnapshotEntry>,
+  afterSnap: Map<CardId, CardStatusSnapshotEntry>
 ): void {
   const changes: string[] = [];
   const prettyCard = (cardId: CardId): string => `${cardId[0]}${displayRank(cardId.slice(1) as Rank)}`;
