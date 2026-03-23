@@ -43,6 +43,7 @@ import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
 import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem } from './problems';
 import { buildPracticeQueue, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
+import { buildRankColorVisual, buildRegularRankColorClass, type RankColorVisual } from './cardDisplay';
 import { cardVariantColors, fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from './ewVariantView';
 import { buildTeachingDisplayEntries } from './teachingDisplay';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
@@ -1275,31 +1276,8 @@ function formatHandInitSummary(s: State, seat: Seat): string {
 }
 
 function rankColorClass(cardId: CardId, featureSource: Pick<State, 'cardRoles' | 'threat' | 'threatLabels'> = state): string {
-  if (!cardColoringEnabled) return 'rank--black';
-  const features = buildFeatureStateFromRuntime({
-    threat: (featureSource.threat as ThreatContext | null) ?? null,
-    threatLabels: featureSource.threatLabels,
-    cardRoles: featureSource.cardRoles,
-    goalStatus: state.goalStatus
-  });
-  const color = getRankColorForFeatureRole(features.cardRoleById[cardId] ?? 'default', teachingMode);
-  return color === 'purple'
-    ? 'rank--purple'
-    : color === 'green'
-      ? 'rank--green'
-      : color === 'blue'
-        ? 'rank--blue'
-        : color === 'amber'
-          ? 'rank--amber'
-        : color === 'grey'
-          ? 'rank--grey'
-          : 'rank--black';
+  return buildRegularRankColorClass(cardId, featureSource, state.goalStatus, teachingMode, cardColoringEnabled);
 }
-
-type RankColorVisual =
-  | { kind: 'solid'; colorClass: string }
-  | { kind: 'split'; colors: string[] }
-  | { kind: 'stripes'; colors: string[] };
 
 function rankPalette(colorClass: string): { text: string; background: string } {
   if (colorClass === 'rank--purple') return { text: '#7e22ce', background: 'rgba(126, 34, 206, 0.16)' };
@@ -1316,39 +1294,41 @@ function rankColorVisualForCard(
   cardId: CardId
 ): RankColorVisual {
   if (!versionUnknownModeEnabled()) {
-    return { kind: 'solid', colorClass: rankColorClass(cardId, view) };
+    return buildRankColorVisual([rankColorClass(cardId, view) as any]);
   }
   const replayData = unknownModeVariantReplayData ?? unknownModeVariantReplayMap();
   const colors = replayData && replayData.size > 1
     ? [...replayData.values()]
       .map((variant) => {
-        const features = buildFeatureStateFromRuntime({
-          threat: variant.state.threat as any,
-          threatLabels: variant.state.threatLabels as any,
-          cardRoles: variant.state.cardRoles as any,
-          goalStatus: variant.state.goalStatus
-        });
-        return getRankColorForFeatureRole(features.cardRoleById[cardId] ?? 'default', teachingMode);
+        return buildRegularRankColorClass(
+          cardId,
+          {
+            threat: variant.state.threat as any,
+            threatLabels: variant.state.threatLabels as any,
+            cardRoles: variant.state.cardRoles as any
+          },
+          variant.state.goalStatus,
+          teachingMode,
+          cardColoringEnabled
+        );
       })
-      .filter((color, index, arr) => arr.indexOf(color) === index)
+      .filter((color, index, arr) => arr.indexOf(color) === index) as any
     : cardVariantColors(view, seat, cardId, teachingMode)
       .filter((color, index, arr) => arr.indexOf(color) === index);
-  const colorClasses = colors
-    .map((color) => color === 'purple'
-      ? 'rank--purple'
-      : color === 'green'
-        ? 'rank--green'
-        : color === 'blue'
-          ? 'rank--blue'
-          : color === 'amber'
-            ? 'rank--amber'
-            : color === 'grey'
-              ? 'rank--grey'
-              : 'rank--black')
-      .filter((color, index, arr) => arr.indexOf(color) === index);
-  if (colorClasses.length <= 1) return { kind: 'solid', colorClass: colorClasses[0] ?? 'rank--black' };
-  if (colorClasses.length === 2) return { kind: 'split', colors: colorClasses };
-  return { kind: 'stripes', colors: colorClasses };
+  const colorClasses = Array.isArray(colors) && typeof colors[0] === 'string' && colors[0].startsWith('rank--')
+    ? colors as any
+    : (colors as string[]).map((color) => color === 'purple'
+        ? 'rank--purple'
+        : color === 'green'
+          ? 'rank--green'
+          : color === 'blue'
+            ? 'rank--blue'
+            : color === 'amber'
+              ? 'rank--amber'
+              : color === 'grey'
+                ? 'rank--grey'
+                : 'rank--black') as any;
+  return buildRankColorVisual(colorClasses);
 }
 
 function applyRankVisual(target: HTMLElement, visual: RankColorVisual): void {
