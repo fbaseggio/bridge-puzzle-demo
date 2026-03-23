@@ -218,9 +218,9 @@ semanticCollector.attachReducer(semanticReducer);
 let logs: string[] = [];
 let deferredLogLines: string[] = [];
 let verboseLog = false;
-let showLog = true;
+let showLog = false;
 let showGuides = false;
-let showDebugSection = true;
+let showDebugSection = false;
 let teachingMode = true;
 let autoplaySingletons = false;
 let alwaysHint = displayMode === 'widget';
@@ -3340,11 +3340,6 @@ function renderControlsBanner(): HTMLElement {
 
   const currentEntry = demoProblems.find((p) => p.id === currentProblemId);
   const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
-  const practiceLink = document.createElement('a');
-  practiceLink.href = `${base}practice/`;
-  practiceLink.className = 'controls-link';
-  practiceLink.textContent = 'Practice mode';
-  row.appendChild(practiceLink);
 
   if (currentEntry?.articlePath) {
     const articleLink = document.createElement('a');
