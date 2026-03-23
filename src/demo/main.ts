@@ -44,6 +44,7 @@ import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } 
 import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem } from './problems';
 import { buildPracticeQueue, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
 import { cardVariantColors, fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from './ewVariantView';
+import { buildTeachingDisplayEntries } from './teachingDisplay';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -4678,6 +4679,8 @@ function renderBoardNavigationArea(view: State): HTMLElement {
 }
 
 function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTMLElement {
+  // Guard rail: this renderer should consume semantic display projections only.
+  // Do not add new semantic derivation from raw state/hands here without asking first.
   const pane = document.createElement('aside');
   pane.className = mode === 'widget' ? 'teaching-pane widget-mirror-pane' : 'teaching-pane';
 
@@ -4691,7 +4694,7 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
   const snapshot = teachingReducer.snapshot() as {
     entries: Array<{ seq: number; seat: string; card: string; summary: string; reasons: string[]; effects: string[] }>;
   };
-  const entries: TeachingEntryView[] = unknownEntries ?? (mode === 'widget'
+  const semanticEntries: TeachingEntryView[] = unknownEntries ?? (mode === 'widget'
     ? widgetNarrationEntries.map((entry) => ({
         seq: entry.seq,
         seat: entry.seat ?? '-',
@@ -4701,8 +4704,9 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
         effects: []
       }))
     : (snapshot.entries ?? []));
+  const displayEntries = buildTeachingDisplayEntries(semanticEntries, verboseDetailEnabled());
 
-  if (entries.length === 0) {
+  if (displayEntries.length === 0) {
     const row = document.createElement('div');
     row.className = 'teaching-event teaching-info';
 
@@ -4712,24 +4716,10 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
     row.appendChild(text);
     list.appendChild(row);
   } else {
-    const parseDdReason = (reason: string): { short: string; full: string } | null => {
-      if (!reason.startsWith('DD:')) return null;
-      const full = reason.slice(3);
-      const short = full.split('; alternatives')[0] ?? full;
-      return { short: short.trim(), full: full.trim() };
-    };
-    const splitDdErrorSummary = (summary: string): { summary: string; ddError: string | null } => {
-      const marker = ' DD Error.';
-      if (!summary.endsWith(marker)) return { summary, ddError: null };
-      return {
-        summary: summary.slice(0, -marker.length).trimEnd(),
-        ddError: 'DD Error.'
-      };
-    };
     const isIdleTransitionEffect = (effect: string): boolean =>
       effect.includes('becomes idle.') || effect.includes('becomes idle');
 
-    for (const [idx, entry] of entries.entries()) {
+    for (const [idx, entry] of displayEntries.entries()) {
       const row = document.createElement('div');
       row.className = 'teaching-event teaching-info';
 
@@ -4741,43 +4731,28 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
         list.appendChild(row);
         continue;
       }
-
       const marker = document.createElement('span');
       marker.className = 'teaching-at';
       marker.textContent = `#${entry.seq} ${entry.seat}`;
       row.appendChild(marker);
 
-      if (entry.variantGroups && entry.variantGroups.length > 0) {
+      if (entry.variantLines.length > 0) {
         text.classList.add('teaching-text-variants');
-        for (const group of entry.variantGroups) {
-          const parsed = splitDdErrorSummary(group.summary);
+        for (const group of entry.variantLines) {
           const line = document.createElement('div');
           line.className = 'teaching-variant-line';
-          line.textContent = `${group.labels.join('/')}: ${parsed.summary}`;
+          line.textContent = `${group.labels.join('/')}: ${group.summary}`;
           text.appendChild(line);
         }
         row.appendChild(text);
       } else {
-        const ddReasons = (entry.reasons ?? [])
-          .map(parseDdReason)
-          .filter((item): item is { short: string; full: string } => Boolean(item));
-        const nonDdReasons = (entry.reasons ?? []).filter((reason) => !reason.startsWith('DD:'));
-        const bracketParts: string[] = [];
-        if (ddReasons.length > 0) {
-          bracketParts.push(...ddReasons.map((item) => (verboseDetailEnabled() ? item.full : item.short)));
-        }
-        if (verboseDetailEnabled() && nonDdReasons.length > 0) {
-          bracketParts.push(...nonDdReasons);
-        }
-        const parsed = splitDdErrorSummary(entry.summary);
-        text.textContent = bracketParts.length > 0 ? `${parsed.summary} [${bracketParts.join('; ')}]` : parsed.summary;
+        text.textContent = entry.bracketText ? `${entry.summary} [${entry.bracketText}]` : entry.summary;
         row.appendChild(text);
       }
 
-      if (entry.variantGroups && entry.variantGroups.length > 0) {
-        const ddErrorGroups = entry.variantGroups
-          .map((group) => ({ labels: group.labels, ddError: splitDdErrorSummary(group.summary).ddError }))
-          .filter((group): group is { labels: string[]; ddError: string } => Boolean(group.ddError));
+      if (entry.variantLines.length > 0) {
+        const ddErrorGroups = entry.variantLines
+          .filter((group): group is { labels: string[]; summary: string; ddError: string } => Boolean(group.ddError));
         for (const group of ddErrorGroups) {
           const ddsLine = document.createElement('div');
           ddsLine.className = 'teaching-dds';
@@ -4785,7 +4760,7 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
           row.appendChild(ddsLine);
         }
       } else {
-        const ddError = splitDdErrorSummary(entry.summary).ddError;
+        const ddError = entry.ddError;
         if (ddError) {
           const ddsLine = document.createElement('div');
           ddsLine.className = 'teaching-dds';
@@ -4794,9 +4769,9 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
         }
       }
 
-      const shownEffects = entry.variantGroups && entry.variantGroups.length > 0
+      const shownEffects = entry.variantLines.length > 0
         ? []
-        : (entry.effects ?? []).filter((effect) => verboseDetailEnabled() || !isIdleTransitionEffect(effect));
+        : entry.effects.filter((effect) => verboseDetailEnabled() || !isIdleTransitionEffect(effect));
       if (shownEffects.length > 0) {
         const detail = document.createElement('pre');
         detail.className = 'teaching-detail';
