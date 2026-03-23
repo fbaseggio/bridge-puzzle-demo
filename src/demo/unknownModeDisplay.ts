@@ -1,29 +1,11 @@
+import type { UnknownModeVariantReplay, UnknownModeTeachingEntry } from './unknownModeReplay';
+
 // Architecture guard rails:
 // - Approved dependency direction for unknown-mode display is:
 //   per-variant regular/semantic display entries -> unknown-mode merged display entries.
 // - Unapproved dependency direction is renderer code regrouping variant entries inline.
 // - If future unknown-mode rendering needs new merge semantics, add them here rather
 //   than rebuilding them inside main.ts.
-
-export type UnknownModeTeachingEntry = {
-  seq: number;
-  seat: string;
-  card: string;
-  summary: string;
-  reasons: string[];
-  effects: string[];
-  variantGroups?: Array<{
-    labels: string[];
-    summary: string;
-    reasons: string[];
-    effects: string[];
-  }>;
-};
-
-export type UnknownModeVariantReplay = {
-  entries: UnknownModeTeachingEntry[];
-  ddsSummaries: string[];
-};
 
 export function mergeUnknownTeachingEntries(
   perVariant: Map<string, UnknownModeVariantReplay>,

@@ -51,8 +51,14 @@ import {
 } from './cardDisplay';
 import { buildUnknownMergedRankColorVisual, fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from './ewVariantView';
 import { buildRegularPlayedCardDisplay, buildRegularSuitCardDisplays } from './regularDisplayView';
-import { buildTeachingDisplayEntries } from './teachingDisplay';
+import { buildTeachingDisplayEntries, buildWidgetNarrationEntries } from './teachingDisplay';
 import { mergeUnknownDdsSummaries, mergeUnknownTeachingEntries } from './unknownModeDisplay';
+import {
+  buildUnknownModePlayedEvents,
+  buildUnknownModeVariantReplayData as buildUnknownModeVariantReplayDataShared,
+  type UnknownModeTeachingEntry,
+  type UnknownModeVariantReplay
+} from './unknownModeReplay';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -339,7 +345,7 @@ function applyWidgetProblemDefaults(): void {
 type WidgetStatusType = 'hint' | 'narration' | 'message' | 'default';
 type WidgetStatus = { type: WidgetStatusType; text: string };
 let widgetStatus: WidgetStatus = { type: 'default', text: '' };
-type WidgetNarrationEntry = { text: string; seat: Seat | null; seq: number };
+type WidgetNarrationEntry = { text: string; lines: string[]; seat: Seat | null; seq: number };
 let widgetNarrationEntries: WidgetNarrationEntry[] = [];
 let widgetNarrationLatest: WidgetNarrationEntry | null = null;
 let widgetNarrationBySeat: Partial<Record<Seat, WidgetNarrationEntry>> = {};
@@ -423,47 +429,7 @@ type TeachingEventKind = 'threatSummary' | 'recolor' | 'info';
 type TeachingEvent = { id: number; kind: TeachingEventKind; label: string; detail?: string; at?: string };
 let teachingEvents: TeachingEvent[] = [];
 let nextTeachingEventId = 1;
-type TeachingEntryView = {
-  seq: number;
-  seat: string;
-  card: string;
-  summary: string;
-  reasons: string[];
-  effects: string[];
-  variantGroups?: Array<{
-    labels: string[];
-    summary: string;
-    reasons: string[];
-    effects: string[];
-  }>;
-};
-type UnknownModePlayedEvent = {
-  seat: Seat;
-  card: CardId;
-  source?: string;
-  ddError?: boolean;
-  chosenBucket?: string;
-  bucketCards?: CardId[];
-  policyClassByCard?: Record<string, string>;
-  ddPolicy?: {
-    mode: 'strict';
-    source: 'runtime';
-    problemId: string;
-    signature: string;
-    baseCandidates: CardId[];
-    allowedCandidates: CardId[];
-    optimalMoves: CardId[];
-    bound: boolean;
-    fallback: boolean;
-    path: 'intersection' | 'dd-fallback' | 'base-fallback';
-  };
-  legalCount?: number;
-};
-type UnknownModeVariantReplay = {
-  state: State;
-  entries: TeachingEntryView[];
-  ddsSummaries: string[];
-};
+type TeachingEntryView = UnknownModeTeachingEntry;
 let pulseUntilByCardKey = new Map<string, number>();
 let pulseTimer: ReturnType<typeof setTimeout> | null = null;
 const PULSE_MS = 360;
@@ -600,15 +566,6 @@ function resetSemanticStreams(): void {
   teachingReducer.reset();
 }
 
-function summarizeForNarration(summary: string): string {
-  const trimmed = summary.replace(/^\s*#\d+\s*/, '').trim();
-  return trimmed.replace(/\b([SHDC])(10|[AKQJT2-9])\b/g, (_m, suit: string, rank: string) => {
-    const sym = suit === 'S' ? '♠' : suit === 'H' ? '♥' : suit === 'D' ? '♦' : '♣';
-    const r = rank === '10' ? '10' : rank;
-    return `${sym}${r}`;
-  });
-}
-
 function variantLabelPrefix(variantId: string): string {
   return variantId.trim().toUpperCase();
 }
@@ -707,142 +664,13 @@ function buildUnknownModeVariantReplayData(
 ): Map<string, UnknownModeVariantReplay> | null {
   if (activeVariantIds.length <= 1) return null;
   const rawEvents = (rawSemanticReducer.snapshot() as { events: Array<{ type: string; seat?: Seat; card?: CardId; details?: Record<string, unknown> }> }).events;
-  const pendingByCardKey = new Map<string, {
-    source?: string;
-    ddError?: boolean;
-    chosenBucket?: string;
-    bucketCards?: CardId[];
-    policyClassByCard?: Record<string, string>;
-    ddPolicy?: {
-      mode: 'strict';
-      source: 'runtime';
-      problemId: string;
-      signature: string;
-      baseCandidates: CardId[];
-      allowedCandidates: CardId[];
-      optimalMoves: CardId[];
-      bound: boolean;
-      fallback: boolean;
-      path: 'intersection' | 'dd-fallback' | 'base-fallback';
-    };
-    legalCount?: number;
-  }>();
-  const decisionStartBySeat = new Map<Seat, { legalCount?: number }>();
-  const decisionEvalBySeat = new Map<Seat, { chosenBucket?: string; bucketCards?: CardId[]; policyClassByCard?: Record<string, string> }>();
-  const playedEvents: Array<{
-    seat: Seat;
-    card: CardId;
-    source?: string;
-    ddError?: boolean;
-    chosenBucket?: string;
-    bucketCards?: CardId[];
-    policyClassByCard?: Record<string, string>;
-    ddPolicy?: {
-      mode: 'strict';
-      source: 'runtime';
-      problemId: string;
-      signature: string;
-      baseCandidates: CardId[];
-      allowedCandidates: CardId[];
-      optimalMoves: CardId[];
-      bound: boolean;
-      fallback: boolean;
-      path: 'intersection' | 'dd-fallback' | 'base-fallback';
-    };
-    legalCount?: number;
-  }> = [];
-  for (const event of rawEvents) {
-    if (event.type === 'decision-start' && event.seat) {
-      decisionStartBySeat.set(event.seat, { legalCount: typeof event.details?.legalCount === 'number' ? event.details.legalCount : undefined });
-      continue;
-    }
-    if (event.type === 'decision-evaluated' && event.seat) {
-      const policyClassByCardRaw = event.details?.policyClassByCard;
-      const policyClassByCard =
-        policyClassByCardRaw && typeof policyClassByCardRaw === 'object'
-          ? Object.fromEntries(
-              Object.entries(policyClassByCardRaw as Record<string, unknown>).filter(
-                (entry): entry is [string, string] => typeof entry[1] === 'string'
-              )
-            )
-          : undefined;
-      decisionEvalBySeat.set(event.seat, {
-        chosenBucket: typeof event.details?.chosenBucket === 'string' ? event.details.chosenBucket : undefined,
-        bucketCards: Array.isArray(event.details?.bucketCards) ? event.details.bucketCards.filter((x): x is CardId => typeof x === 'string') : undefined,
-        policyClassByCard
-      });
-      continue;
-    }
-    if (event.type === 'decision-chosen' && event.seat && event.card) {
-      pendingByCardKey.set(`${event.seat}:${event.card}`, {
-        source: typeof event.details?.source === 'string' ? event.details.source : undefined,
-        ddError: event.details?.ddError === true,
-        chosenBucket: typeof event.details?.chosenBucket === 'string' ? event.details.chosenBucket : decisionEvalBySeat.get(event.seat)?.chosenBucket,
-        bucketCards: decisionEvalBySeat.get(event.seat)?.bucketCards,
-        policyClassByCard: decisionEvalBySeat.get(event.seat)?.policyClassByCard,
-        ddPolicy: event.details?.ddPolicy as any,
-        legalCount: decisionStartBySeat.get(event.seat)?.legalCount
-      });
-      decisionStartBySeat.delete(event.seat);
-      decisionEvalBySeat.delete(event.seat);
-      continue;
-    }
-    if (event.type === 'card-played' && event.seat && event.card) {
-      const key = `${event.seat}:${event.card}`;
-      const pending = pendingByCardKey.get(key);
-      pendingByCardKey.delete(key);
-      playedEvents.push({ seat: event.seat, card: event.card, ...pending });
-    }
-  }
-  const perVariant = new Map<string, TeachingEntryView[]>();
-
-  for (const variantId of activeVariantIds) {
-    const concrete = resolveProblemById(currentProblemId, variantId);
-    const replayProblem: ProblemWithThreats = { ...concrete, userControls: ['N', 'E', 'S', 'W'] };
-    let replayState = init(replayProblem);
-    const ddsSummaries: string[] = [];
-    const replayedCardIds: string[] = [];
-    const reducer = new TeachingReducer();
-    reducer.setTrumpSuit(replayState.trumpSuit);
-    const collector = new InMemorySemanticEventCollector();
-    collector.attachReducer(reducer);
-    let failed = false;
-
-    for (const [eventIndex, event] of playedEvents.entries()) {
-      const play = { seat: event.seat, suit: event.card[0] as Suit, rank: event.card.slice(1) as Rank };
-      const result = apply(replayState, play, {
-        eventCollector: collector,
-        userDdError: event.source === 'user'
-          ? classifyDdErrorForReplay(replayState, replayProblem, play, replayedCardIds)
-          : undefined,
-        manualDecision: event.source && event.source !== 'user'
-          ? {
-              source: event.source,
-              chosenBucket: event.chosenBucket,
-              bucketCards: event.bucketCards,
-              policyClassByCard: event.policyClassByCard,
-              ddPolicy: event.ddPolicy,
-              legalCount: event.legalCount
-            }
-          : undefined
-      });
-      if (result.events.some((e) => e.type === 'illegal')) {
-        failed = true;
-        break;
-      }
-      replayedCardIds.push(event.card);
-      replayState = result.state;
-    }
-    if (!failed) {
-      perVariant.set(variantId, {
-        state: replayState,
-        entries: (reducer.snapshot() as { entries: TeachingEntryView[] }).entries,
-        ddsSummaries
-      });
-    }
-  }
-
-  return perVariant.size > 1 ? perVariant : null;
+  const playedEvents = buildUnknownModePlayedEvents(rawEvents);
+  return buildUnknownModeVariantReplayDataShared(
+    activeVariantIds,
+    playedEvents,
+    (variantId) => resolveProblemById(currentProblemId, variantId),
+    classifyDdErrorForReplay
+  );
 }
 
 function unknownModeVariantReplayMap(): Map<string, UnknownModeVariantReplay> | null {
@@ -869,20 +697,24 @@ function ddsTeachingSummariesForUnknownMode(): Array<string | { labels: string[]
 
 function syncWidgetNarrationFeedFromTeaching(): void {
   if (!isWidgetShellMode) return;
+  const unknownEntries = teachingEntriesForUnknownMode();
   const snapshot = teachingReducer.snapshot() as {
-    entries: Array<{ seq: number; seat: string; summary: string }>;
+    entries: Array<{ seq: number; seat: string; card: string; summary: string; reasons: string[]; effects: string[] }>;
   };
-  const entries = snapshot.entries ?? [];
+  const semanticEntries: TeachingEntryView[] = unknownEntries ?? (snapshot.entries ?? []);
+  const displayEntries = buildTeachingDisplayEntries(semanticEntries, verboseDetailEnabled());
+  const entries = buildWidgetNarrationEntries(displayEntries).map((entry) => ({
+    ...entry,
+    seat: seatOrder.includes(entry.seat as Seat) ? (entry.seat as Seat) : null,
+    seq: entry.seq ?? 0
+  }));
   for (const entry of entries) {
     if (entry.seq <= lastNarratedSeq) continue;
-    const line = summarizeForNarration(entry.summary ?? '');
-    if (!line) continue;
-    const seat = seatOrder.includes(entry.seat as Seat) ? (entry.seat as Seat) : null;
-    const narr: WidgetNarrationEntry = { text: line, seat, seq: entry.seq };
+    const narr: WidgetNarrationEntry = entry;
     widgetNarrationEntries.push(narr);
     if (widgetNarrationEntries.length > 500) widgetNarrationEntries = widgetNarrationEntries.slice(-500);
     widgetNarrationLatest = narr;
-    if (seat) widgetNarrationBySeat[seat] = narr;
+    if (entry.seat) widgetNarrationBySeat[entry.seat] = narr;
     lastNarratedSeq = entry.seq;
   }
   if (narrate && !activeHint && widgetNarrationLatest) {
@@ -3815,7 +3647,7 @@ function renderSuitRow(
   const cards = document.createElement('div');
   cards.className = 'cards';
 
-  const regularDisplays = !versionUnknownModeEnabled() || (seat !== 'E' && seat !== 'W')
+  const regularDisplays = !versionUnknownModeEnabled()
     ? buildRegularSuitCardDisplays(view, seat, suit, teachingMode, cardColoringEnabled)
     : null;
   const ranks = regularDisplays ? regularDisplays.map((item) => item.rank) : [...displayRanks];
@@ -4690,6 +4522,10 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
 
 function render(): void {
   renderingNow = true;
+  // Unknown-mode card visuals and teaching display must read the same replay snapshot.
+  // Reset here so early render consumers do not reuse stale per-variant replay data
+  // from the previous frame.
+  unknownModeVariantReplayData = null;
   hintDiag(`render with activeHint=${activeHint ? 'yes' : 'no'}`);
   syncWidgetNarrationFeedFromTeaching();
   if (ddErrorVisual && !trickFrozen && state.turn === ddErrorVisual.seat) {

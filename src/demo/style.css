@@ -209,7 +209,7 @@ html.mode-widget {
   color: #1f2937;
   font-size: 11px;
   line-height: 1.25;
-  white-space: normal;
+  white-space: pre-line;
   word-break: keep-all;
   overflow-wrap: break-word;
   box-shadow: 0 1px 5px rgba(15, 23, 42, 0.08);
@@ -1242,6 +1242,7 @@ html.mode-widget {
   border: 1px solid transparent;
   background: transparent;
   color: #526174;
+  white-space: pre-line;
 }
 
 .mode-widget .outcome-module.neutral,

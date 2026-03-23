@@ -40,6 +40,13 @@ export type TeachingDisplayListEntry = TeachingDisplayEntry & {
   seat?: string;
 };
 
+export type WidgetNarrationDisplayEntry = {
+  text: string;
+  lines: string[];
+  seq?: number;
+  seat?: string;
+};
+
 export function splitDdErrorSummary(summary: string): { summary: string; ddError: string | null } {
   const marker = ' DD Error.';
   if (!summary.endsWith(marker)) return { summary, ddError: null };
@@ -110,5 +117,37 @@ export function buildTeachingDisplayEntries<T extends TeachingDisplayEntryInput 
       seq: entry.seq,
       seat: entry.seat
     };
+  });
+}
+
+function summarizeForNarration(summary: string): string {
+  const trimmed = summary.replace(/^\s*#\d+\s*/, '').trim();
+  return trimmed.replace(/\b([SHDC])(10|[AKQJT2-9])\b/g, (_m, suit: string, rank: string) => {
+    const sym = suit === 'S' ? '♠' : suit === 'H' ? '♥' : suit === 'D' ? '♦' : '♣';
+    const r = rank === '10' ? '10' : rank;
+    return `${sym}${r}`;
+  });
+}
+
+export function buildWidgetNarrationEntries(
+  displayEntries: TeachingDisplayListEntry[]
+): WidgetNarrationDisplayEntry[] {
+  return displayEntries.flatMap((entry) => {
+    const lines = entry.variantLines.length > 0
+      ? entry.variantLines.slice(0, 2)
+        .map((group) => {
+          const summary = summarizeForNarration(group.summary);
+          const ddError = group.ddError && !summary.endsWith(group.ddError) ? ` ${group.ddError}` : '';
+          return `${group.labels.join('/')}: ${summary}${ddError}`.trim();
+        })
+        .filter((line) => line.length > 0)
+      : [summarizeForNarration(entry.summary + (entry.ddError && !entry.summary.endsWith(entry.ddError) ? ` ${entry.ddError}` : ''))].filter((line) => line.length > 0);
+    if (lines.length === 0) return [];
+    return [{
+      text: lines.join('\n'),
+      lines,
+      seq: entry.seq,
+      seat: entry.seat
+    }];
   });
 }

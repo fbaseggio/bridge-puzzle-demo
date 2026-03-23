@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildTeachingDisplayEntries, buildTeachingDisplayEntry, splitDdErrorSummary } from '../../src/demo/teachingDisplay';
+import {
+  buildTeachingDisplayEntries,
+  buildTeachingDisplayEntry,
+  buildWidgetNarrationEntries,
+  splitDdErrorSummary
+} from '../../src/demo/teachingDisplay';
 
 describe('teaching display projection', () => {
   it('splits DD Error from a regular semantic summary', () => {
@@ -69,6 +74,32 @@ describe('teaching display projection', () => {
         ddError: 'DD Error.',
         variantLines: [],
         effects: []
+      }
+    ]);
+  });
+
+  it('builds widget narration lines from the same display entries, including variant splits', () => {
+    const narration = buildWidgetNarrationEntries([
+      {
+        seq: 9,
+        seat: 'W',
+        summary: '',
+        bracketText: null,
+        ddError: null,
+        variantLines: [
+          { labels: ['A'], summary: 'West discards busy SQ.', ddError: null },
+          { labels: ['B'], summary: 'West discards busy SQ. DD Error.', ddError: 'DD Error.' }
+        ],
+        effects: []
+      }
+    ]);
+
+    expect(narration).toEqual([
+      {
+        seq: 9,
+        seat: 'W',
+        lines: ['A: West discards busy ♠Q.', 'B: West discards busy ♠Q. DD Error.'],
+        text: 'A: West discards busy ♠Q.\nB: West discards busy ♠Q. DD Error.'
       }
     ]);
   });
