@@ -1,6 +1,7 @@
 import type { CardId, EwVariantState, Hand, Rank, Seat, State, Suit } from '../core';
 import { initClassification, parseCardId, type ThreatContext, type ResourceContext } from '../ai/threatModel';
 import { buildFeatureStateFromRuntime, getRankColorForFeatureRole, type FeatureColor } from '../ai/features';
+import { buildRankColorVisual, buildRegularRankColorClass, type RankColorClass, type RankColorVisual } from './cardDisplay';
 
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
 
@@ -124,4 +125,31 @@ export function cardVariantColors(
     if (!colors.includes(color)) colors.push(color);
   }
   return colors.length > 0 ? colors : ['black'];
+}
+
+function toRankColorClass(color: FeatureColor): RankColorClass {
+  if (color === 'purple') return 'rank--purple';
+  if (color === 'green') return 'rank--green';
+  if (color === 'blue') return 'rank--blue';
+  if (color === 'amber') return 'rank--amber';
+  if (color === 'grey') return 'rank--grey';
+  return 'rank--black';
+}
+
+export function buildUnknownMergedRankColorVisual(
+  view: Pick<State, 'hands' | 'ewVariantState' | 'threat' | 'resource' | 'goalStatus'>,
+  seat: Seat,
+  cardId: CardId,
+  teachingMode: boolean,
+  coloringEnabled: boolean,
+  variantStates?: Array<Pick<State, 'cardRoles' | 'threat' | 'threatLabels' | 'goalStatus'>>
+): RankColorVisual {
+  if (variantStates && variantStates.length > 0) {
+    const colorClasses = variantStates
+      .map((variantState) => buildRegularRankColorClass(cardId, variantState, variantState.goalStatus, teachingMode, coloringEnabled))
+      .filter((color, index, arr) => arr.indexOf(color) === index);
+    return buildRankColorVisual(colorClasses);
+  }
+  const colors = cardVariantColors(view, seat, cardId, teachingMode);
+  return buildRankColorVisual(colors.map(toRankColorClass));
 }

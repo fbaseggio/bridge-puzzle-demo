@@ -44,14 +44,15 @@ import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem } from 
 import { buildPracticeQueue, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
 import {
   buildCardStatusSnapshot,
-  buildRankColorVisual,
   buildRegularCardDisplayProjection,
   buildRegularRankColorClass,
   type CardStatusSnapshotEntry,
   type RankColorVisual
 } from './cardDisplay';
-import { cardVariantColors, fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from './ewVariantView';
+import { buildUnknownMergedRankColorVisual, fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from './ewVariantView';
+import { buildRegularPlayedCardDisplay, buildRegularSuitCardDisplays } from './regularDisplayView';
 import { buildTeachingDisplayEntries } from './teachingDisplay';
+import { mergeUnknownDdsSummaries, mergeUnknownTeachingEntries } from './unknownModeDisplay';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -857,66 +858,13 @@ function unknownModeVariantReplayMap(): Map<string, UnknownModeVariantReplay> | 
 function teachingEntriesForUnknownMode(): TeachingEntryView[] | null {
   const perVariant = unknownModeVariantReplayMap();
   if (!perVariant || perVariant.size <= 1) return null;
-
-  const maxEntries = Math.max(...[...perVariant.values()].map((variant) => variant.entries.length), 0);
-  const merged: TeachingEntryView[] = [];
-  for (let i = 0; i < maxEntries; i += 1) {
-    const present = [...perVariant.entries()]
-      .map(([variantId, replay]) => ({ variantId, entry: replay.entries[i] }))
-      .filter((item): item is { variantId: string; entry: TeachingEntryView } => Boolean(item.entry));
-    if (present.length === 0) continue;
-
-    const base = present[0].entry;
-    const groups = new Map<string, NonNullable<TeachingEntryView['variantGroups']>[number]>();
-    for (const { variantId, entry } of present) {
-      const key = JSON.stringify([entry.summary, entry.reasons, entry.effects]);
-      const existing = groups.get(key);
-      if (existing) {
-        existing.labels.push(variantLabelPrefix(variantId));
-      } else {
-        groups.set(key, {
-          labels: [variantLabelPrefix(variantId)],
-          summary: entry.summary,
-          reasons: [...entry.reasons],
-          effects: [...entry.effects]
-        });
-      }
-    }
-
-    const variantGroups = [...groups.values()];
-    merged.push(variantGroups.length === 1 ? { ...base } : { ...base, variantGroups });
-  }
-
-  return merged;
+  return mergeUnknownTeachingEntries(perVariant as any, variantLabelPrefix) as TeachingEntryView[];
 }
 
 function ddsTeachingSummariesForUnknownMode(): Array<string | { labels: string[]; text: string }[]> | null {
   const perVariant = unknownModeVariantReplayMap();
   if (!perVariant || perVariant.size <= 1) return null;
-
-  const maxEntries = Math.max(...[...perVariant.values()].map((variant) => variant.ddsSummaries.length), 0);
-  const merged: Array<string | { labels: string[]; text: string }[]> = [];
-  for (let i = 0; i < maxEntries; i += 1) {
-    const present = [...perVariant.entries()]
-      .map(([variantId, replay]) => ({ variantId, text: replay.ddsSummaries[i] }))
-      .filter((item): item is { variantId: string; text: string } => typeof item.text === 'string' && item.text.length > 0);
-    if (present.length === 0) {
-      merged.push('');
-      continue;
-    }
-    const groups = new Map<string, { labels: string[]; text: string }>();
-    for (const { variantId, text } of present) {
-      const existing = groups.get(text);
-      if (existing) {
-        existing.labels.push(variantLabelPrefix(variantId));
-      } else {
-        groups.set(text, { labels: [variantLabelPrefix(variantId)], text });
-      }
-    }
-    const grouped = [...groups.values()];
-    merged.push(grouped.length === 1 ? grouped[0].text : grouped);
-  }
-  return merged;
+  return mergeUnknownDdsSummaries(perVariant as any, variantLabelPrefix);
 }
 
 function syncWidgetNarrationFeedFromTeaching(): void {
@@ -1281,16 +1229,6 @@ function formatHandInitSummary(s: State, seat: Seat): string {
   return `${seat}: ${suitParts.join('/')}`;
 }
 
-function rankColorClass(cardId: CardId, view: Pick<State, 'cardRoles' | 'threat' | 'threatLabels' | 'goalStatus'> = state): string {
-  return buildRegularCardDisplayProjection(
-    cardId,
-    view,
-    view.goalStatus,
-    teachingMode,
-    cardColoringEnabled
-  ).colorClass;
-}
-
 function rankPalette(colorClass: string): { text: string; background: string } {
   if (colorClass === 'rank--purple') return { text: '#7e22ce', background: 'rgba(126, 34, 206, 0.16)' };
   if (colorClass === 'rank--green') return { text: '#15803d', background: 'rgba(21, 128, 61, 0.16)' };
@@ -1315,38 +1253,21 @@ function rankColorVisualForCard(
     ).visual;
   }
   const replayData = unknownModeVariantReplayData ?? unknownModeVariantReplayMap();
-  const colors = replayData && replayData.size > 1
-    ? [...replayData.values()]
-      .map((variant) => {
-        return buildRegularRankColorClass(
-          cardId,
-          {
-            threat: variant.state.threat as any,
-            threatLabels: variant.state.threatLabels as any,
-            cardRoles: variant.state.cardRoles as any
-          },
-          variant.state.goalStatus,
-          teachingMode,
-          cardColoringEnabled
-        );
-      })
-      .filter((color, index, arr) => arr.indexOf(color) === index) as any
-    : cardVariantColors(view, seat, cardId, teachingMode)
-      .filter((color, index, arr) => arr.indexOf(color) === index);
-  const colorClasses = Array.isArray(colors) && typeof colors[0] === 'string' && colors[0].startsWith('rank--')
-    ? colors as any
-    : (colors as string[]).map((color) => color === 'purple'
-        ? 'rank--purple'
-        : color === 'green'
-          ? 'rank--green'
-          : color === 'blue'
-            ? 'rank--blue'
-            : color === 'amber'
-              ? 'rank--amber'
-              : color === 'grey'
-                ? 'rank--grey'
-                : 'rank--black') as any;
-  return buildRankColorVisual(colorClasses);
+  return buildUnknownMergedRankColorVisual(
+    view,
+    seat,
+    cardId,
+    teachingMode,
+    cardColoringEnabled,
+    replayData && replayData.size > 1
+      ? [...replayData.values()].map((variant) => ({
+          threat: variant.state.threat as any,
+          threatLabels: variant.state.threatLabels as any,
+          cardRoles: variant.state.cardRoles as any,
+          goalStatus: variant.state.goalStatus
+        }))
+      : undefined
+  );
 }
 
 function applyRankVisual(target: HTMLElement, visual: RankColorVisual): void {
@@ -3894,15 +3815,10 @@ function renderSuitRow(
   const cards = document.createElement('div');
   cards.className = 'cards';
 
-  const ranks = [...displayRanks];
-  const equivalentRanks = new Set<Rank>();
-  if (teachingMode) {
-    for (const cls of getSuitEquivalenceClasses(view, seat, suit)) {
-      if (cls.length > 1) {
-        for (const rank of cls) equivalentRanks.add(rank);
-      }
-    }
-  }
+  const regularDisplays = !versionUnknownModeEnabled() || (seat !== 'E' && seat !== 'W')
+    ? buildRegularSuitCardDisplays(view, seat, suit, teachingMode, cardColoringEnabled)
+    : null;
+  const ranks = regularDisplays ? regularDisplays.map((item) => item.rank) : [...displayRanks];
   if (ranks.length > 0) {
     const hideSeatCards = hideEastWest && (seat === 'E' || seat === 'W');
     for (const rank of ranks) {
@@ -3915,30 +3831,31 @@ function renderSuitRow(
       }
       const key = `${suit}${rank}`;
       const isLegal = canAct && legalSet.has(key);
-      const isEquivalent = equivalentRanks.has(rank);
+      const cardId = toCardId(suit, rank) as CardId;
+      const regularDisplay = regularDisplays?.find((item) => item.cardId === cardId) ?? null;
+      const isEquivalent = regularDisplay?.isEquivalent ?? false;
+      const colorVisual = regularDisplay?.visual ?? rankColorVisualForCard(view, seat, cardId);
 
       if (isLegal) {
         const rankBtn = document.createElement('button');
         rankBtn.type = 'button';
         rankBtn.className = 'rank-text legal';
-        const cardId = toCardId(suit, rank) as CardId;
         if (hintBestSet.has(cardId)) rankBtn.classList.add('hint-best');
         if (ddErrorGoodSet.has(cardId)) rankBtn.classList.add('dd-error-good');
         if ((pulseUntilByCardKey.get(cardPulseKey(seat, cardId)) ?? 0) > Date.now()) {
           rankBtn.classList.add('card-pulse');
         }
-        appendRankContent(rankBtn, rank, rankColorVisualForCard(view, seat, cardId), isEquivalent);
+        appendRankContent(rankBtn, rank, colorVisual, isEquivalent);
         rankBtn.onclick = () => runTurn({ seat, suit, rank });
         cards.appendChild(rankBtn);
       } else {
         const rankEl = document.createElement('span');
         rankEl.className = 'rank-text muted';
-        const cardId = toCardId(suit, rank) as CardId;
         if (ddErrorGoodSet.has(cardId)) rankEl.classList.add('dd-error-good');
         if ((pulseUntilByCardKey.get(cardPulseKey(seat, cardId)) ?? 0) > Date.now()) {
           rankEl.classList.add('card-pulse');
         }
-        appendRankContent(rankEl, rank, rankColorVisualForCard(view, seat, cardId), isEquivalent);
+        appendRankContent(rankEl, rank, colorVisual, isEquivalent);
         cards.appendChild(rankEl);
       }
     }
@@ -4073,14 +3990,15 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
     if (play) {
       const text = document.createElement('span');
       text.className = 'played-text';
-      const cardId = toCardId(play.suit, play.rank) as CardId;
+      const regularDisplay = buildRegularPlayedCardDisplay(view, play, teachingMode, cardColoringEnabled);
+      const cardId = regularDisplay.cardId;
       if (ddErrorVisual && ddErrorVisual.badCard === cardId) text.classList.add('dd-error-bad');
       const suitEl = document.createElement('span');
       suitEl.className = `played-suit suit-${play.suit}`;
       suitEl.textContent = suitSymbol[play.suit];
       const rankEl = document.createElement('span');
       rankEl.className = 'played-rank';
-      appendRankContent(rankEl, play.rank, { kind: 'solid', colorClass: rankColorClass(cardId, view) });
+      appendRankContent(rankEl, regularDisplay.rank, regularDisplay.visual);
       text.append(suitEl, rankEl);
       slot.appendChild(text);
     }

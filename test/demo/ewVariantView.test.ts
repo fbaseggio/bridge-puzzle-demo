@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { apply, init } from '../../src/core';
 import { sureTricksDemo } from '../../src/puzzles/sure_tricks_demo';
-import { cardVariantColors, fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from '../../src/demo/ewVariantView';
+import {
+  buildUnknownMergedRankColorVisual,
+  cardVariantColors,
+  fixedRanksForSeatSuit,
+  unresolvedEwCardsBySuit
+} from '../../src/demo/ewVariantView';
 
 describe('multi-EW version-unknown view', () => {
   it('shows only seat-fixed E/W cards and isolates unresolved cards to the slash line', () => {
@@ -43,5 +48,35 @@ describe('multi-EW version-unknown view', () => {
 
     expect(cardVariantColors(state, 'N', 'ST', true)).toEqual(['green']);
     expect(state.cardRoles.ST).toBe('threat');
+  });
+
+  it('builds merged unknown visuals from per-variant regular views when provided', () => {
+    const state = init(sureTricksDemo);
+    expect(
+      buildUnknownMergedRankColorVisual(
+        state,
+        'N',
+        'ST',
+        true,
+        true,
+        [
+          {
+            threat: state.threat as any,
+            threatLabels: state.threatLabels as any,
+            cardRoles: { ...state.cardRoles, ST: 'threat' },
+            goalStatus: state.goalStatus
+          },
+          {
+            threat: state.threat as any,
+            threatLabels: state.threatLabels as any,
+            cardRoles: { ...state.cardRoles, ST: 'promotedWinner' },
+            goalStatus: state.goalStatus
+          }
+        ]
+      )
+    ).toEqual({
+      kind: 'split',
+      colors: ['rank--green', 'rank--purple']
+    });
   });
 });
