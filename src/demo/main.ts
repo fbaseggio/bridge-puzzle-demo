@@ -77,6 +77,28 @@ const busyBranchingLabel: Record<'strict' | 'sameLevel' | 'allBusy', string> = {
   sameLevel: 'Same level',
   allBusy: 'All busy'
 };
+type PuzzleModeId = 'standard' | 'multi-ew';
+type AssistLevelId = 'puzzle' | 'light' | 'guided' | 'strong' | 'solution';
+const PUZZLE_MODE_LABEL: Record<PuzzleModeId, string> = {
+  standard: 'Standard',
+  'multi-ew': 'Multi-EW'
+};
+const ASSIST_LEVELS_BY_MODE: Record<PuzzleModeId, Array<{ id: AssistLevelId; label: string }>> = {
+  standard: [
+    { id: 'puzzle', label: 'Puzzle' },
+    { id: 'light', label: 'Light' },
+    { id: 'guided', label: 'Guided' },
+    { id: 'strong', label: 'Strong' },
+    { id: 'solution', label: 'Solution' }
+  ],
+  'multi-ew': [
+    { id: 'puzzle', label: 'Puzzle' },
+    { id: 'light', label: 'Light' },
+    { id: 'guided', label: 'Guided' },
+    { id: 'strong', label: 'Strong' },
+    { id: 'solution', label: 'Solution' }
+  ]
+};
 type LogChannelId =
   | 'play'
   | 'threat'
@@ -311,6 +333,10 @@ let teachingMode = true;
 let autoplaySingletons = false;
 let autoplayEw = true;
 let unknownModeVariantReplayData: Map<string, UnknownModeVariantReplay> | null = null;
+let assistLevelByMode: Record<PuzzleModeId, AssistLevelId> = {
+  standard: 'guided',
+  'multi-ew': 'guided'
+};
 let alwaysHint = displayMode === 'widget';
 let cardColoringEnabled = true;
 let narrate = displayMode === 'widget';
@@ -568,6 +594,109 @@ function resetSemanticStreams(): void {
 
 function variantLabelPrefix(variantId: string): string {
   return variantId.trim().toUpperCase();
+}
+
+function currentPuzzleModeId(problemId = currentProblemId): PuzzleModeId {
+  const entry = demoProblems.find((problem) => problem.id === problemId);
+  return entry?.variants && entry.variants.length > 0 ? 'multi-ew' : 'standard';
+}
+
+function currentAssistOptions(problemId = currentProblemId): Array<{ id: AssistLevelId; label: string }> {
+  return ASSIST_LEVELS_BY_MODE[currentPuzzleModeId(problemId)];
+}
+
+function currentAssistLevel(problemId = currentProblemId): AssistLevelId {
+  const puzzleMode = currentPuzzleModeId(problemId);
+  const configured = assistLevelByMode[puzzleMode];
+  return currentAssistOptions(problemId).some((option) => option.id === configured)
+    ? configured
+    : currentAssistOptions(problemId)[0]?.id ?? 'guided';
+}
+
+function setAssistLevel(level: AssistLevelId, problemId = currentProblemId): void {
+  const puzzleMode = currentPuzzleModeId(problemId);
+  if (!currentAssistOptions(problemId).some((option) => option.id === level)) return;
+  assistLevelByMode = { ...assistLevelByMode, [puzzleMode]: level };
+  render();
+}
+
+function renderAssistLevelControl(context: 'analysis' | 'practice' | 'widget'): HTMLElement {
+  const puzzleMode = currentPuzzleModeId();
+  const options = currentAssistOptions();
+  const currentLevel = currentAssistLevel();
+  const currentIndex = Math.max(0, options.findIndex((option) => option.id === currentLevel));
+
+  const wrap = document.createElement('section');
+  wrap.className = `assist-level-control assist-context-${context}`;
+
+  const meta = document.createElement('div');
+  meta.className = 'assist-meta';
+
+  const modeLine = document.createElement('span');
+  modeLine.className = 'assist-mode';
+  modeLine.textContent = `Puzzle Mode: ${PUZZLE_MODE_LABEL[puzzleMode]}`;
+  meta.appendChild(modeLine);
+
+  const levelLine = document.createElement('strong');
+  levelLine.className = 'assist-current';
+  levelLine.textContent = `Assist: ${options[currentIndex]?.label ?? ''}`;
+  meta.appendChild(levelLine);
+  wrap.appendChild(meta);
+
+  const controls = document.createElement('div');
+  controls.className = 'assist-controls';
+
+  const minusBtn = document.createElement('button');
+  minusBtn.type = 'button';
+  minusBtn.className = 'assist-step-btn';
+  minusBtn.textContent = '–';
+  minusBtn.disabled = currentIndex <= 0;
+  minusBtn.onclick = () => {
+    const next = options[currentIndex - 1];
+    if (next) setAssistLevel(next.id);
+  };
+  controls.appendChild(minusBtn);
+
+  const sliderWrap = document.createElement('div');
+  sliderWrap.className = 'assist-slider-wrap';
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.className = 'assist-slider';
+  slider.min = '0';
+  slider.max = String(Math.max(0, options.length - 1));
+  slider.step = '1';
+  slider.value = String(currentIndex);
+  slider.setAttribute('aria-label', 'Assist Level');
+  slider.oninput = () => {
+    const next = options[Math.max(0, Math.min(options.length - 1, Number(slider.value)))];
+    if (next) setAssistLevel(next.id);
+  };
+  sliderWrap.appendChild(slider);
+
+  const ticks = document.createElement('div');
+  ticks.className = 'assist-ticks';
+  for (const option of options) {
+    const tick = document.createElement('span');
+    tick.className = `assist-tick${option.id === currentLevel ? ' active' : ''}`;
+    tick.textContent = option.label;
+    ticks.appendChild(tick);
+  }
+  sliderWrap.appendChild(ticks);
+  controls.appendChild(sliderWrap);
+
+  const plusBtn = document.createElement('button');
+  plusBtn.type = 'button';
+  plusBtn.className = 'assist-step-btn';
+  plusBtn.textContent = '+';
+  plusBtn.disabled = currentIndex >= options.length - 1;
+  plusBtn.onclick = () => {
+    const next = options[currentIndex + 1];
+    if (next) setAssistLevel(next.id);
+  };
+  controls.appendChild(plusBtn);
+
+  wrap.appendChild(controls);
+  return wrap;
 }
 
 function cloneHandForVariantSync(hand: Hand): Hand {
@@ -4016,6 +4145,8 @@ function renderControlsBanner(): HTMLElement {
   autoplayEwLabel.append(autoplayEwBox, ' Autoplay E/W');
   row.appendChild(autoplayEwLabel);
 
+  row.appendChild(renderAssistLevelControl('analysis'));
+
   bar.appendChild(row);
   return bar;
 }
@@ -4055,6 +4186,7 @@ function renderPracticeHeader(view: State): HTMLElement {
   const undoCount = practiceSession.perPuzzleUndoCount[currentProblemId] ?? practiceSession.currentUndoCount;
   summary.textContent = ` Practice Mode · Puzzle ${indexLabel} · Solved ${practiceSession.solved}/${practiceSession.attempted} · Perfect ${practiceSession.perfect} · Undo ${undoCount}`;
   header.appendChild(summary);
+  header.appendChild(renderAssistLevelControl('practice'));
   return header;
 }
 
@@ -4155,6 +4287,10 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     outcome.textContent = canonicalStatus;
   }
   section.appendChild(outcome);
+
+  if (isWidgetShellMode) {
+    section.appendChild(renderAssistLevelControl('widget'));
+  }
 
   const transport = document.createElement('div');
   transport.className = `transport-bar mode-${displayMode}`;
@@ -4425,16 +4561,7 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
   const snapshot = teachingReducer.snapshot() as {
     entries: Array<{ seq: number; seat: string; card: string; summary: string; reasons: string[]; effects: string[] }>;
   };
-  const semanticEntries: TeachingEntryView[] = unknownEntries ?? (mode === 'widget'
-    ? widgetNarrationEntries.map((entry) => ({
-        seq: entry.seq,
-        seat: entry.seat ?? '-',
-        card: '',
-        summary: entry.text,
-        reasons: [],
-        effects: []
-      }))
-    : (snapshot.entries ?? []));
+  const semanticEntries: TeachingEntryView[] = unknownEntries ?? (snapshot.entries ?? []);
   const displayEntries = buildTeachingDisplayEntries(semanticEntries, verboseDetailEnabled());
 
   if (displayEntries.length === 0) {
@@ -4457,7 +4584,9 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
       const text = document.createElement('span');
       text.className = 'teaching-text';
       if (mode === 'widget') {
-        text.textContent = entry.summary;
+        text.textContent = entry.variantLines.length > 0
+          ? entry.variantLines.slice(0, 2).map((group) => `${group.labels.join('/')}: ${group.summary}${group.ddError ? ` ${group.ddError}` : ''}`).join('\n')
+          : `${entry.summary}${entry.ddError ? ` ${entry.ddError}` : ''}`;
         row.appendChild(text);
         list.appendChild(row);
         continue;

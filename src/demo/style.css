@@ -826,6 +826,91 @@ html.mode-widget {
   background: #f3f6fa;
 }
 
+.assist-level-control {
+  display: inline-grid;
+  gap: 4px;
+  min-width: 220px;
+  padding: 4px 6px;
+  border: 1px solid #d6dee9;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #334155;
+}
+
+.assist-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 8px;
+}
+
+.assist-mode {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.assist-current {
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.assist-controls {
+  display: grid;
+  grid-template-columns: auto minmax(140px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.assist-step-btn {
+  border: 1px solid #9aa5b5;
+  background: #fff;
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  color: #334155;
+}
+
+.assist-step-btn:hover:not(:disabled) {
+  background: #f3f6fa;
+}
+
+.assist-step-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.assist-slider-wrap {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.assist-slider {
+  width: 100%;
+  margin: 0;
+}
+
+.assist-ticks {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.assist-tick {
+  font-size: 10px;
+  line-height: 1.15;
+  text-align: center;
+  color: #64748b;
+}
+
+.assist-tick.active {
+  color: #0b4da3;
+  font-weight: 700;
+}
+
 .status-facts {
   display: grid;
   gap: 3px;
@@ -1253,6 +1338,16 @@ html.mode-widget {
 
 .mode-widget .transport-bar {
   gap: 4px;
+}
+
+.mode-widget .assist-level-control {
+  width: 100%;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.mode-widget .assist-controls {
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .mode-widget .transport-bar button,
