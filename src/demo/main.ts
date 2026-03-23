@@ -381,7 +381,7 @@ if (displayMode === 'widget' && (widgetUiMode === 'dd-puzzle' || widgetUiMode ==
   alwaysHint = false;
   cardColoringEnabled = false;
   narrate = widgetUiMode === 'dd-puzzle';
-  hintsEnabled = false;
+  hintsEnabled = true;
   hideEastWest = widgetUiMode === 'sd-puzzle';
 }
 applyWidgetProblemDefaults();
@@ -1076,6 +1076,52 @@ function classifyDdErrorForReplay(
   }
 }
 
+function classifyHintForReplay(
+  replayState: State,
+  replayProblem: ProblemWithThreats,
+  playedCardIds: string[]
+): HintState | null {
+  const legal = legalPlays(replayState).filter((candidate) => candidate.seat === replayState.turn);
+  if (legal.length === 0) return null;
+  const legalCardIds = legal.map((candidate) => toCardId(candidate.suit, candidate.rank) as CardId);
+  const dds = queryDdsNextPlays({
+    openingLeader: replayProblem.leader,
+    initialHands: replayProblem.hands,
+    contract: replayState.contract,
+    playedCardIds
+  });
+  if (!dds.ok) return {
+    bestCards: [],
+    badCards: [],
+    textLine: 'BEST: (DDS unavailable)'
+  };
+  const scoreByCard = buildDdsScoreByCard(dds.result.plays);
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const cardId of legalCardIds) {
+    const score = scoreByCard.get(cardId);
+    if (typeof score === 'number' && score > bestScore) bestScore = score;
+  }
+  if (!Number.isFinite(bestScore)) {
+    return {
+      bestCards: [],
+      badCards: [],
+      textLine: 'BEST: (DDS unavailable)'
+    };
+  }
+  const bestCards: CardId[] = [];
+  const badCards: CardId[] = [];
+  for (const cardId of legalCardIds) {
+    const score = scoreByCard.get(cardId);
+    if (typeof score === 'number' && score === bestScore) bestCards.push(cardId);
+    else badCards.push(cardId);
+  }
+  return {
+    bestCards,
+    badCards,
+    textLine: `BEST: ${bestCards.join(' ')}`
+  };
+}
+
 function buildUnknownModeVariantReplayData(
   activeVariantIds: string[]
 ): Map<string, UnknownModeVariantReplay> | null {
@@ -1288,6 +1334,44 @@ function classifyHintForCurrentPosition(): HintState | null {
   const legal = legalPlays(state).filter((p) => p.seat === state.turn);
   const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
   hintDiag(`dds query start legal=${legalCardIds.join(' ') || '-'}`);
+  if (versionUnknownModeEnabled() && state.ewVariantState) {
+    const activeVariantIds = state.ewVariantState.activeVariantIds;
+    if (activeVariantIds.length > 0) {
+      const replayMap = unknownModeVariantReplayMap();
+      const hintSets: CardId[][] = [];
+      for (const variantId of activeVariantIds) {
+        const replayProblem = resolveProblemById(currentProblemId, variantId);
+        const replayState = replayMap?.get(variantId)?.state ?? state;
+        const hint = classifyHintForReplay(replayState, replayProblem, ddsPlayHistory);
+        if (!hint || hint.textLine === 'BEST: (DDS unavailable)') {
+          hintDiag(`dds query result variant=${variantId} ok=no reason=runtime-unavailable`);
+          return {
+            bestCards: [],
+            badCards: [],
+            textLine: 'BEST: (DDS unavailable)'
+          };
+        }
+        hintDiag(`dds query result variant=${variantId} ok=yes best=${hint.bestCards.join(' ') || '-'}`);
+        hintSets.push(hint.bestCards);
+      }
+      const commonBestCards = legalCardIds.filter((cardId) => hintSets.every((cards) => cards.includes(cardId)));
+      if (commonBestCards.length === 0) {
+        hintDiag(`classify result ST commonBest=- legal=${legalCardIds.join(' ') || '-'}`);
+        return {
+          bestCards: [],
+          badCards: [...legalCardIds],
+          textLine: 'BEST: (no common DDS move)'
+        };
+      }
+      const badCards = legalCardIds.filter((cardId) => !commonBestCards.includes(cardId));
+      hintDiag(`classify result ST BEST=${commonBestCards.join(' ') || '-'} BAD=${badCards.join(' ') || '-'}`);
+      return {
+        bestCards: commonBestCards,
+        badCards,
+        textLine: `BEST: ${commonBestCards.join(' ')}`
+      };
+    }
+  }
   try {
     const dds = queryDdsNextPlays({
       openingLeader: currentProblem.leader,
