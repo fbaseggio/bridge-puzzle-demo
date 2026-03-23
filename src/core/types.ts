@@ -184,6 +184,23 @@ export type EngineEvent =
         fallback: boolean;
         path: 'intersection' | 'dd-fallback' | 'base-fallback';
       };
+      ewVariantTrace?: {
+        activeVariantIds: string[];
+        perVariant: Array<{
+          variantId: string;
+          chosenBucket?: string;
+          playable: CardId[];
+          chosenCardId: CardId | null;
+          a: CardId[];
+          b: CardId[];
+          c: CardId[];
+          d: CardId[];
+        }>;
+        intersection: CardId[];
+        arbitration: 'single-variant' | 'intersection' | 'eliminate';
+        chosenVariantId?: string;
+        chosenCardId: CardId | null;
+      };
       decisionSig?: string;
       replay?: {
         action: 'forced' | 'disabled';

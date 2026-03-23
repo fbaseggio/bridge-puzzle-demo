@@ -105,6 +105,23 @@ export type EvaluatePolicyOutput = {
   discardTiers?: DiscardTiers;
   ddPolicy?: DdPolicyTrace;
   ddTrace?: DdDecisionTrace;
+  ewVariantTrace?: {
+    activeVariantIds: string[];
+    perVariant: Array<{
+      variantId: string;
+      chosenBucket?: string;
+      playable: CardId[];
+      chosenCardId: CardId | null;
+      a: CardId[];
+      b: CardId[];
+      c: CardId[];
+      d: CardId[];
+    }>;
+    intersection: CardId[];
+    arbitration: 'single-variant' | 'intersection' | 'eliminate';
+    chosenVariantId?: string;
+    chosenCardId: CardId | null;
+  };
   ewVariantState?: EwVariantState | null;
   rngBefore: RngState;
   rngAfter: RngState;
@@ -183,8 +200,53 @@ function classifyWorld(input: EvaluatePolicyInput, hands: Record<Seat, Hand>): {
 }
 
 function playableCardsFromEvaluation(output: EvaluatePolicyOutput): CardId[] {
+  if (output.ddTrace) {
+    if (output.ddTrace.path !== 'disabled') {
+      if (output.ddTrace.after.length > 0) return [...output.ddTrace.after];
+    } else if (output.ddTrace.legal.length > 0) {
+      return [...output.ddTrace.legal];
+    }
+  }
+  if (output.discardTiers?.legal && output.discardTiers.legal.length > 0) {
+    return [...output.discardTiers.legal];
+  }
   if (output.bucketCards && output.bucketCards.length > 0) return [...output.bucketCards];
   return output.chosenCardId ? [output.chosenCardId] : [];
+}
+
+function legalUniverseFromEvaluation(output: EvaluatePolicyOutput): CardId[] {
+  if (output.ddTrace?.legal && output.ddTrace.legal.length > 0) return [...output.ddTrace.legal];
+  if (output.discardTiers?.legal && output.discardTiers.legal.length > 0) return [...output.discardTiers.legal];
+  if (output.bucketCards && output.bucketCards.length > 0) return [...output.bucketCards];
+  return output.chosenCardId ? [output.chosenCardId] : [];
+}
+
+type VariantCardLabel = 'A' | 'B' | 'C' | 'D';
+
+function classifyVariantCard(
+  card: CardId,
+  output: EvaluatePolicyOutput
+): VariantCardLabel {
+  const legalUniverse = new Set(legalUniverseFromEvaluation(output));
+  const playable = new Set(playableCardsFromEvaluation(output));
+  const bucket = new Set(output.bucketCards ?? []);
+  if (!legalUniverse.has(card)) return 'D';
+  if (!playable.has(card)) return 'D';
+  if (output.chosenCardId === card) return 'A';
+  if (bucket.has(card)) return 'B';
+  return 'C';
+}
+
+function labelRank(label: VariantCardLabel): number {
+  return ({ A: 0, B: 1, C: 2, D: 3 } as const)[label];
+}
+
+function compareLabelVectors(left: VariantCardLabel[], right: VariantCardLabel[]): number {
+  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+    const diff = labelRank(left[i] ?? 'D') - labelRank(right[i] ?? 'D');
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 function pickSeededCard(cards: CardId[], rng: RngState): [CardId | null, RngState] {
@@ -625,6 +687,26 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     });
     return {
       ...output,
+      ewVariantTrace: {
+        activeVariantIds: [onlyVariant.id],
+        perVariant: [
+          {
+            variantId: onlyVariant.id,
+            chosenBucket: output.chosenBucket,
+            playable: playableCardsFromEvaluation(output),
+            chosenCardId: output.chosenCardId
+            ,
+            a: output.chosenCardId ? [output.chosenCardId] : [],
+            b: (output.bucketCards ?? []).filter((card) => card !== output.chosenCardId),
+            c: playableCardsFromEvaluation(output).filter((card) => !(output.bucketCards ?? []).includes(card)),
+            d: []
+          }
+        ],
+        intersection: playableCardsFromEvaluation(output),
+        arbitration: 'single-variant',
+        chosenVariantId: onlyVariant.id,
+        chosenCardId: output.chosenCardId
+      },
       ewVariantState: {
         variants: cloneEwVariantState(variantState)?.variants ?? [],
         activeVariantIds: [onlyVariant.id],
@@ -659,42 +741,74 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     output,
     playable: playableCardsFromEvaluation(output)
   }));
+  const candidateCards = [...new Set(playableByVariant.flatMap(({ output }) => legalUniverseFromEvaluation(output)))];
+  const cardScores = candidateCards.map((card) => {
+    const labels = playableByVariant.map(({ output }) => classifyVariantCard(card, output));
+    const dCount = labels.filter((label) => label === 'D').length;
+    const cCount = labels.filter((label) => label === 'C').length;
+    const aCount = labels.filter((label) => label === 'A').length;
+    return { card, labels, dCount, cCount, aCount };
+  });
+  cardScores.sort((left, right) => {
+    if (left.dCount !== right.dCount) return left.dCount - right.dCount;
+    if (left.cCount !== right.cCount) return left.cCount - right.cCount;
+    if (left.aCount !== right.aCount) return right.aCount - left.aCount;
+    const variantOrderDiff = compareLabelVectors(left.labels, right.labels);
+    if (variantOrderDiff !== 0) return variantOrderDiff;
+    return left.card.localeCompare(right.card);
+  });
+  const chosenCardId = cardScores[0]?.card ?? null;
+  const chosenLabels = cardScores[0]?.labels ?? [];
+  const survivingVariantIds = playableByVariant
+    .filter((_, index) => chosenLabels[index] !== 'D')
+    .map(({ variant }) => variant.id);
+  const survivingVariants = playableByVariant.filter(({ variant }) => survivingVariantIds.includes(variant.id));
+  const representativeVariantId =
+    variantState.representativeVariantId && survivingVariantIds.includes(variantState.representativeVariantId)
+      ? variantState.representativeVariantId
+      : survivingVariantIds[0] ?? variantState.representativeVariantId;
+  const chosenRepresentative = survivingVariants.find(({ variant }) => variant.id === representativeVariantId) ?? survivingVariants[0];
   const commonPlayable = playableByVariant.reduce<CardId[]>(
     (shared, current) => shared.filter((card) => current.playable.includes(card)),
     [...playableByVariant[0].playable]
   );
 
-  if (commonPlayable.length > 0) {
-    const [chosenCardId, nextRng] = pickSeededCard(commonPlayable, rngAfter);
-    rngAfter = nextRng;
-    return {
-      chosenCardId,
-      chosenBucket: 'variant:intersection',
-      bucketCards: [...commonPlayable],
-      policyClassByCard: Object.fromEntries(commonPlayable.map((card) => [card, 'variant:common'])),
-      rngBefore,
-      rngAfter,
-      ewVariantState: cloneEwVariantState(variantState)
-    };
-  }
-
-  const [variantIndex, afterVariantPick] = pickRandomIndex(playableByVariant.length, rngAfter);
-  rngAfter = afterVariantPick;
-  const chosenVariantEval = playableByVariant[variantIndex] ?? playableByVariant[0];
-  const [chosenCardId, afterCardPick] = pickSeededCard(chosenVariantEval.playable, rngAfter);
-  rngAfter = afterCardPick;
-
   return {
-    ...chosenVariantEval.output,
+    ...(chosenRepresentative?.output ?? playableByVariant[0].output),
     chosenCardId,
-    bucketCards: [...chosenVariantEval.playable],
+    chosenBucket: 'variant:score',
+    bucketCards: chosenCardId ? [chosenCardId] : [],
+    ewVariantTrace: {
+      activeVariantIds: activeVariants.map((variant) => variant.id),
+      perVariant: playableByVariant.map(({ variant, output, playable }) => {
+        const a = output.chosenCardId ? [output.chosenCardId] : [];
+        const b = (output.bucketCards ?? []).filter((card) => card !== output.chosenCardId);
+        const c = playable.filter((card) => !(output.bucketCards ?? []).includes(card));
+        const legalUniverse = legalUniverseFromEvaluation(output);
+        const d = legalUniverse.filter((card) => !playable.includes(card));
+        return {
+          variantId: variant.id,
+          chosenBucket: output.chosenBucket,
+          playable,
+          chosenCardId: output.chosenCardId,
+          a,
+          b,
+          c,
+          d
+        };
+      }),
+      intersection: [...commonPlayable],
+      arbitration: survivingVariantIds.length === activeVariants.length ? 'intersection' : 'eliminate',
+      chosenVariantId: survivingVariantIds.length === 1 ? survivingVariantIds[0] : undefined,
+      chosenCardId
+    },
     rngBefore,
     rngAfter,
     ewVariantState: {
       variants: cloneEwVariantState(variantState)?.variants ?? [],
-      activeVariantIds: [chosenVariantEval.variant.id],
-      committedVariantId: chosenVariantEval.variant.id,
-      representativeVariantId: chosenVariantEval.variant.id
+      activeVariantIds: survivingVariantIds,
+      committedVariantId: survivingVariantIds.length === 1 ? survivingVariantIds[0] : null,
+      representativeVariantId
     }
   };
 }

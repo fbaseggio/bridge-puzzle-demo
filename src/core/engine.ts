@@ -311,6 +311,23 @@ type AutoChoice = {
     fallback: boolean;
     path: 'intersection' | 'dd-fallback' | 'base-fallback';
   };
+  ewVariantTrace?: {
+    activeVariantIds: string[];
+    perVariant: Array<{
+      variantId: string;
+      chosenBucket?: string;
+      playable: CardId[];
+      chosenCardId: CardId | null;
+      a: CardId[];
+      b: CardId[];
+      c: CardId[];
+      d: CardId[];
+    }>;
+    intersection: CardId[];
+    arbitration: 'single-variant' | 'intersection' | 'eliminate';
+    chosenVariantId?: string;
+    chosenCardId: CardId | null;
+  };
   decisionSig?: string;
   replay?: {
     action: 'forced' | 'disabled';
@@ -422,6 +439,7 @@ function advanceAutoplayLoop(next: State, events: EngineEvent[], collector: Sema
         auto.policyClassByCard,
         auto.tierBuckets,
         auto.ddPolicy,
+        auto.ewVariantTrace,
         auto.decisionSig,
         auto.replay,
         auto.browserDdBackstop
@@ -670,6 +688,7 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
       bucketCards: evaluated.bucketCards ?? legal.map((p) => toCardId(p.suit, p.rank)),
       policyClassByCard: evaluated.policyClassByCard,
       ddPolicy: evaluated.ddPolicy,
+      ewVariantTrace: evaluated.ewVariantTrace,
       ewVariantState: cloneEwVariantState(state.ewVariantState),
       decisionSig,
       replay: replayNote
@@ -708,6 +727,7 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
     policyClassByCard: evaluated.policyClassByCard,
     tierBuckets: evaluated.tierBuckets,
     ddPolicy: evaluated.ddPolicy,
+    ewVariantTrace: evaluated.ewVariantTrace,
     ewVariantState: cloneEwVariantState(state.ewVariantState),
     decisionSig,
     replay: replayNote
@@ -737,6 +757,7 @@ function applyOnePlay(
     fallback: boolean;
     path: 'intersection' | 'dd-fallback' | 'base-fallback';
   },
+  ewVariantTrace?: AutoChoice['ewVariantTrace'],
   decisionSig?: string,
   replay?: {
     action: 'forced' | 'disabled';
@@ -787,6 +808,7 @@ function applyOnePlay(
       policyClassByCard,
       tierBuckets,
       ddPolicy,
+      ewVariantTrace,
       decisionSig,
       replay,
       browserDdBackstop

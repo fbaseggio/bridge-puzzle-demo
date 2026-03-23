@@ -2075,6 +2075,22 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
           );
         }
       }
+      if (event.ewVariantTrace) {
+        const trace = event.ewVariantTrace;
+        lines.push(
+          `[EW-VARIANTS] active={${trace.activeVariantIds.join(',') || '-'}} arbitration=${trace.arbitration} intersection={${trace.intersection.join(',') || '-'}} chosenVariant=${trace.chosenVariantId ?? '-'} chosenCard=${trace.chosenCardId ?? '-'}`
+        );
+        for (const variant of trace.perVariant) {
+          lines.push(
+            `[EW-VARIANT:${variant.variantId}] bucket=${variant.chosenBucket ?? '-'} preferred=${variant.chosenCardId ?? '-'} A={${variant.a.join(',') || '-'}} B={${variant.b.join(',') || '-'}} C={${variant.c.join(',') || '-'}} D={${variant.d.join(',') || '-'}} playable={${variant.playable.join(',') || '-'}}`
+          );
+        }
+        if (trace.arbitration === 'eliminate') {
+          lines.push(`[EW-VARIANTS] no common playable card; eliminating all but ${trace.chosenVariantId ?? '-'}`);
+        } else if (trace.arbitration === 'intersection') {
+          lines.push(`[EW-VARIANTS] common playable set used; seeded choice=${trace.chosenCardId ?? '-'}`);
+        }
+      }
       if (threatDetail) {
         const leadSuit = shadow.trick[0]?.suit ?? 'none';
         const legalCount = legalPlays(shadow).length;

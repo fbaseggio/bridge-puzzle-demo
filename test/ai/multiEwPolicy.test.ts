@@ -20,9 +20,13 @@ describe('multi-EW defender policy arbitration', () => {
       rng: state.rng
     });
 
-    expect(result.bucketCards).toEqual(expect.arrayContaining(['SK', 'SQ', 'HK', 'HQ', 'H9']));
+    expect(result.bucketCards).toEqual([result.chosenCardId]);
     expect(result.ewVariantState?.activeVariantIds).toEqual(['a', 'b']);
     expect(result.ewVariantState?.committedVariantId).toBeNull();
+    expect(result.ewVariantTrace?.arbitration).toBe('intersection');
+    expect(result.ewVariantTrace?.intersection).toEqual(expect.arrayContaining(['SK', 'SQ', 'HK', 'HQ', 'H9']));
+    expect(result.ewVariantTrace?.perVariant.map((variant) => variant.variantId)).toEqual(['a', 'b']);
+    expect(result.ewVariantTrace?.perVariant.every((variant) => variant.a.includes(variant.chosenCardId!))).toBe(true);
     expect(result.chosenCardId).toBeTruthy();
   });
 
@@ -45,6 +49,9 @@ describe('multi-EW defender policy arbitration', () => {
     expect(result.ewVariantState?.activeVariantIds.length).toBe(1);
     expect(result.ewVariantState?.committedVariantId).toBe(result.ewVariantState?.activeVariantIds[0]);
     expect(result.ewVariantState?.representativeVariantId).toBe(result.ewVariantState?.activeVariantIds[0]);
+    expect(result.ewVariantTrace?.arbitration).toBe('eliminate');
+    expect(result.ewVariantTrace?.intersection).toEqual([]);
+    expect(result.ewVariantTrace?.chosenVariantId).toBe(result.ewVariantState?.activeVariantIds[0]);
     expect(result.chosenCardId).toBeTruthy();
   });
 });
