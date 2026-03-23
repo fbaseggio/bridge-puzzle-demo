@@ -24,7 +24,7 @@ import {
   type Suit
 } from '../core';
 import { computeDiscardTiers, getIdleThreatThresholdRank } from '../ai/defenderDiscard';
-import { queryDdsNextPlays, warmDdsRuntime } from '../ai/ddsBrowser';
+import { ensureDdsRuntime, getDdsRuntimeStatus, queryDdsNextPlays, warmDdsRuntime } from '../ai/ddsBrowser';
 import { buildDdsScoreByCard } from '../ai/ddsCardScores';
 import { evaluatePolicy } from '../ai/evaluatePolicy';
 import {
@@ -394,6 +394,7 @@ let ddsTeachingSummaries: string[] = [];
 let activeHint: HintState | null = null;
 let activeHintKey: string | null = null;
 let hintLoading = false;
+let ddsLoadingForHint = false;
 let hintRequestSeq = 0;
 let ddErrorVisual: DdErrorVisualState | null = null;
 function applyWidgetProblemDefaults(): void {
@@ -609,6 +610,7 @@ function clearHint(): void {
   activeHint = null;
   activeHintKey = null;
   hintLoading = false;
+  ddsLoadingForHint = false;
   if (widgetStatus.type === 'hint') widgetStatus = { type: 'default', text: '' };
 }
 
@@ -1389,32 +1391,58 @@ function requestHint(): void {
   if (!hintsEnabled) return;
   hintDiag('requestHint start');
   const reqSeq = ++hintRequestSeq;
-  hintLoading = true;
-  render();
-  setTimeout(() => {
-    if (reqSeq !== hintRequestSeq) return;
-    const key = hintPositionKey();
-    const hint = classifyHintForCurrentPosition();
-    hintLoading = false;
-    if (!hint) {
-      hintDiag('classify null');
-      activeHint = {
-        bestCards: [],
-        badCards: [],
-        textLine: 'BEST: (hint available on your turn)'
-      };
-      widgetStatus = { type: 'hint', text: activeHint.textLine };
-      hintDiag('activeHint set (fallback)');
-      render();
-      return;
-    }
-    hintDiag(`classify ok BEST=${hint.bestCards.join(' ') || '-'} BAD=${hint.badCards.join(' ') || '-'}`);
-    activeHint = hint;
-    activeHintKey = key;
-    widgetStatus = { type: 'hint', text: hint.textLine };
-    hintDiag(`activeHint set best=${hint.bestCards.join(' ')} bad=${hint.badCards.join(' ') || '-'}`);
+  const continueWithHint = (): void => {
+    hintLoading = true;
     render();
-  }, 0);
+    setTimeout(() => {
+      if (reqSeq !== hintRequestSeq) return;
+      const key = hintPositionKey();
+      const hint = classifyHintForCurrentPosition();
+      hintLoading = false;
+      if (!hint) {
+        hintDiag('classify null');
+        activeHint = {
+          bestCards: [],
+          badCards: [],
+          textLine: 'BEST: (hint available on your turn)'
+        };
+        widgetStatus = { type: 'hint', text: activeHint.textLine };
+        hintDiag('activeHint set (fallback)');
+        render();
+        return;
+      }
+      hintDiag(`classify ok BEST=${hint.bestCards.join(' ') || '-'} BAD=${hint.badCards.join(' ') || '-'}`);
+      activeHint = hint;
+      activeHintKey = key;
+      widgetStatus = { type: 'hint', text: hint.textLine };
+      hintDiag(`activeHint set best=${hint.bestCards.join(' ')} bad=${hint.badCards.join(' ') || '-'}`);
+      render();
+    }, 0);
+  };
+
+  if (getDdsRuntimeStatus() !== 'ready') {
+    ddsLoadingForHint = true;
+    hintLoading = false;
+    render();
+    void ensureDdsRuntime().then((ready) => {
+      if (reqSeq !== hintRequestSeq) return;
+      ddsLoadingForHint = false;
+      if (!ready) {
+        activeHint = {
+          bestCards: [],
+          badCards: [],
+          textLine: 'BEST: (DDS unavailable)'
+        };
+        widgetStatus = { type: 'hint', text: activeHint.textLine };
+        render();
+        return;
+      }
+      continueWithHint();
+    });
+    return;
+  }
+
+  continueWithHint();
 }
 
 function syncAlwaysHint(): void {
@@ -4488,6 +4516,17 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   const terminalCanonical = runStatus === 'success' || runStatus === 'failure';
   if (isWidgetShellMode && terminalCanonical) {
     outcome.textContent = canonicalStatus;
+  } else if (ddsLoadingForHint) {
+    outcome.classList.add('dds-loading');
+    const label = document.createElement('span');
+    label.className = 'dds-loading-label';
+    label.textContent = 'Loading DDS';
+    const meter = document.createElement('span');
+    meter.className = 'dds-loading-meter';
+    const fill = document.createElement('span');
+    fill.className = 'dds-loading-fill';
+    meter.appendChild(fill);
+    outcome.append(label, meter);
   } else if (activeHint) {
     outcome.classList.add('hint-active');
     const prefix = document.createElement('span');

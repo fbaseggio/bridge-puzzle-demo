@@ -1371,6 +1371,42 @@ html.mode-widget {
   gap: 8px;
 }
 
+.outcome-module.dds-loading {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dds-loading-label {
+  color: #334155;
+}
+
+.dds-loading-meter {
+  position: relative;
+  width: 52px;
+  height: 7px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e2e8f0;
+}
+
+.dds-loading-fill {
+  position: absolute;
+  inset: 0 auto 0 -45%;
+  width: 45%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7aa2d8 0%, #2563eb 100%);
+  animation: dds-thermometer 1.1s ease-in-out infinite;
+}
+
+@keyframes dds-thermometer {
+  0% { left: -45%; }
+  100% { left: 100%; }
+}
+
 .hint-prefix {
   color: #111827;
 }
@@ -1491,7 +1527,8 @@ html.mode-widget {
 }
 
 .mode-widget .outcome-module.neutral,
-.mode-widget .outcome-module.hint-active {
+.mode-widget .outcome-module.hint-active,
+.mode-widget .outcome-module.dds-loading {
   border-color: transparent;
   background: transparent;
 }

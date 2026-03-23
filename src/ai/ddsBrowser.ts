@@ -28,6 +28,8 @@ const RANK_ORDER = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', 
 
 let loadAttempted = false;
 const scriptLoadBySrc = new Map<string, Promise<void>>();
+let ddsRuntimeStatus: 'idle' | 'loading' | 'ready' | 'failed' = 'idle';
+let ddsRuntimePromise: Promise<boolean> | null = null;
 
 function rotateSeatsFromLeader(leader: Seat): Seat[] {
   const idx = SEAT_ORDER.indexOf(leader);
@@ -54,9 +56,12 @@ function toDdsPlay(cardId: string): string {
   return `${rank}${suit}`;
 }
 
-export function warmDdsRuntime(): void {
-  if (typeof window === 'undefined' || loadAttempted) return;
+function startDdsRuntimeLoad(): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(false);
+  if (ddsRuntimeStatus === 'ready') return Promise.resolve(true);
+  if (ddsRuntimePromise) return ddsRuntimePromise;
   loadAttempted = true;
+  ddsRuntimeStatus = 'loading';
   const base = (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
   const outSrc = `${base}dds/out.js`;
   const ddsSrc = `${base}dds/dds.js`;
@@ -102,7 +107,7 @@ export function warmDdsRuntime(): void {
     return promise;
   };
 
-  void loadScript(outSrc)
+  ddsRuntimePromise = loadScript(outSrc)
     .then(() => {
       if (window.e && typeof window.e === 'object') {
         window.Module = window.e;
@@ -116,10 +121,28 @@ export function warmDdsRuntime(): void {
       console.info(
         `[DDS-LOAD] ready typeof nextPlays=${typeof window.nextPlays} module=${window.Module ? 'yes' : 'no'}`
       );
+      ddsRuntimeStatus = typeof window.nextPlays === 'function' ? 'ready' : 'failed';
+      return ddsRuntimeStatus === 'ready';
     })
     .catch(() => {
       console.info('[DDS-LOAD] optional runtime unavailable');
+      ddsRuntimeStatus = 'failed';
+      return false;
     });
+  return ddsRuntimePromise;
+}
+
+export function warmDdsRuntime(): void {
+  if (typeof window === 'undefined') return;
+  void startDdsRuntimeLoad();
+}
+
+export function ensureDdsRuntime(): Promise<boolean> {
+  return startDdsRuntimeLoad();
+}
+
+export function getDdsRuntimeStatus(): 'idle' | 'loading' | 'ready' | 'failed' {
+  return ddsRuntimeStatus;
 }
 
 export type DdsQueryInput = {
