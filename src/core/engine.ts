@@ -357,6 +357,14 @@ type AutoChoice = {
 type ApplyOptions = {
   eventCollector?: SemanticEventCollector;
   userDdError?: boolean;
+  manualDecision?: {
+    source: string;
+    chosenBucket?: string;
+    bucketCards?: CardId[];
+    policyClassByCard?: Record<string, string>;
+    ddPolicy?: AutoChoice['ddPolicy'];
+    legalCount?: number;
+  };
   autoplayBackstop?: (input: {
     state: State;
     policy: Policy;
@@ -427,6 +435,7 @@ function advanceAutoplayLoop(next: State, events: EngineEvent[], collector: Sema
       rank: auto.play.rank,
       tags: semanticTagsForBucket(auto.chosenBucket),
       details: {
+        source: 'autoplay',
         chosenBucket: auto.chosenBucket,
         ddPolicy: auto.ddPolicy,
         decisionSig: auto.decisionSig
@@ -1104,14 +1113,50 @@ export function apply(state: State, play: Play, options?: ApplyOptions): { state
     return { state: next, events };
   }
 
-  emitSemantic(collector, {
-    type: 'decision-chosen',
-    seat: play.seat,
-    card: toCardId(play.suit, play.rank) as CardId,
-    suit: play.suit,
-    rank: play.rank,
-    details: { source: 'user', ddError: options?.userDdError === true }
-  });
+  if (options?.manualDecision) {
+    emitSemantic(collector, {
+      type: 'decision-start',
+      seat: play.seat,
+      details: {
+        policyKind: next.policies[play.seat]?.kind ?? 'manual',
+        legalCount: options.manualDecision.legalCount ?? legal.length
+      }
+    });
+    emitSemantic(collector, {
+      type: 'decision-evaluated',
+      seat: play.seat,
+      card: toCardId(play.suit, play.rank) as CardId,
+      tags: semanticTagsForBucket(options.manualDecision.chosenBucket),
+      details: {
+        chosenBucket: options.manualDecision.chosenBucket,
+        bucketCards: options.manualDecision.bucketCards,
+        policyClassByCard: options.manualDecision.policyClassByCard
+      }
+    });
+    emitSemantic(collector, {
+      type: 'decision-chosen',
+      seat: play.seat,
+      card: toCardId(play.suit, play.rank) as CardId,
+      suit: play.suit,
+      rank: play.rank,
+      tags: semanticTagsForBucket(options.manualDecision.chosenBucket),
+      details: {
+        source: options.manualDecision.source,
+        chosenBucket: options.manualDecision.chosenBucket,
+        ddPolicy: options.manualDecision.ddPolicy,
+        ddError: options?.userDdError === true
+      }
+    });
+  } else {
+    emitSemantic(collector, {
+      type: 'decision-chosen',
+      seat: play.seat,
+      card: toCardId(play.suit, play.rank) as CardId,
+      suit: play.suit,
+      rank: play.rank,
+      details: { source: 'user', ddError: options?.userDdError === true }
+    });
+  }
   events.push(...applyOnePlay(next, play, collector, 'played'));
 
   advanceAutoplayLoop(next, events, collector, options);

@@ -112,6 +112,46 @@ function validateVariantCardSet(entry: DemoProblem, problem: Problem): Issue[] {
   return issues;
 }
 
+function combinedVariantProblemCardIds(problem: Problem, variant: NonNullable<Problem['ewVariants']>[number]): Set<CardId> {
+  const cards = new Set<CardId>();
+  for (const seat of ['N', 'S'] as const) {
+    for (const suit of SUITS) {
+      for (const rank of problem.hands[seat][suit]) cards.add(cardId(suit, rank));
+    }
+  }
+  for (const seat of ['E', 'W'] as const) {
+    for (const suit of SUITS) {
+      for (const rank of variant.hands[seat][suit]) cards.add(cardId(suit, rank));
+    }
+  }
+  return cards;
+}
+
+function validateVariantThreatSet(problem: Problem): Issue[] {
+  const variants = problem.ewVariants;
+  const threats = problem.threatCardIds ?? [];
+  if (!variants || variants.length <= 1 || threats.length === 0) return [];
+
+  const issues: Issue[] = [];
+  const baseline = combinedVariantProblemCardIds(problem, variants[0]);
+  const baselineThreats = threats.filter((card) => baseline.has(card)).sort();
+
+  for (const variant of variants) {
+    const cards = combinedVariantProblemCardIds(problem, variant);
+    const variantThreats = threats.filter((card) => cards.has(card)).sort();
+    if (variantThreats.join(',') !== baselineThreats.join(',')) {
+      issues.push({
+        level: 'ERROR',
+        message:
+          `Variant threat-set mismatch [${variant.id}] expected=[${baselineThreats.join(',') || '-'}] ` +
+          `actual=[${variantThreats.join(',') || '-'}] baseline=[${variants[0]?.id ?? '-'}]`
+      });
+    }
+  }
+
+  return issues;
+}
+
 function pushDeclaredVsInferredIssue(
   issues: Issue[],
   problem: Problem,
@@ -165,6 +205,7 @@ function validateProblem(problem: Problem, entry?: DemoProblem): Issue[] {
   if (entry) {
     issues.push(...validateVariantCardSet(entry, problem));
   }
+  issues.push(...validateVariantThreatSet(problem));
 
   // 1) Structural integrity + equal hand sizes.
   const seen = new Set<string>();

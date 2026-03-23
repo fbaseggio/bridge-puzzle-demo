@@ -105,4 +105,36 @@ describe('multi-EW defender policy arbitration', () => {
     expect(variantB?.a).toEqual(expect.arrayContaining(['HK', 'HQ', 'HJ']));
     expect(variantB?.c).toEqual(expect.arrayContaining(['SK', 'SQ']));
   });
+
+  it('demotes plays that resolve an ambiguous designated threat into uniform promotion', () => {
+    const problem = { ...sureTricksDemo, userControls: ['N', 'E', 'S', 'W'] as const };
+    let state = init(problem);
+    const seq = ['CT', 'H9', 'CA', 'C4', 'CQ', 'C3', 'CK', 'HK', 'CJ'];
+    for (const cardId of seq) {
+      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+    }
+
+    expect(state.turn).toBe('W');
+    const result = evaluatePolicy({
+      policy: { kind: 'threatAware' },
+      seat: 'W',
+      problemId: state.id,
+      contractStrain: state.contract.strain,
+      hands: state.hands,
+      trick: state.trick,
+      threat: state.threat as any,
+      resource: state.resource as any,
+      threatLabels: state.threatLabels as any,
+      ewVariantState: state.ewVariantState,
+      rng: state.rng
+    });
+
+    expect(result.chosenCardId).not.toBe('HQ');
+    const variantA = result.ewVariantTrace?.perVariant.find((variant) => variant.variantId === 'a');
+    const variantB = result.ewVariantTrace?.perVariant.find((variant) => variant.variantId === 'b');
+    expect(variantA?.c).toContain('HQ');
+    expect(variantB?.c).toEqual(expect.arrayContaining(['HQ', 'HJ']));
+    expect(variantA?.b).not.toContain('HQ');
+    expect(variantB?.b).not.toContain('HQ');
+  });
 });

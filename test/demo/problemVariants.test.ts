@@ -55,4 +55,15 @@ describe('demo problem variants', () => {
 
     expect(ewCards('a')).toEqual(ewCards('b'));
   });
+
+  it('keeps the designated threat set fixed across sure_tricks_demo variants', () => {
+    const entry = demoProblems.find((problem) => problem.id === 'sure_tricks_demo');
+    expect(entry).toBeTruthy();
+    if (!entry) return;
+
+    const threats = resolveDemoProblem(entry).threatCardIds?.slice().sort();
+    expect(threats).toEqual(['HT', 'ST']);
+    expect(resolveDemoProblem(entry, 'a').threatCardIds?.slice().sort()).toEqual(threats);
+    expect(resolveDemoProblem(entry, 'b').threatCardIds?.slice().sort()).toEqual(threats);
+  });
 });

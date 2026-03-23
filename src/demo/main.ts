@@ -26,6 +26,7 @@ import {
 import { computeDiscardTiers, getIdleThreatThresholdRank } from '../ai/defenderDiscard';
 import { queryDdsNextPlays, warmDdsRuntime } from '../ai/ddsBrowser';
 import { buildDdsScoreByCard } from '../ai/ddsCardScores';
+import { evaluatePolicy } from '../ai/evaluatePolicy';
 import {
   toCardId,
   updateClassificationAfterPlay,
@@ -39,7 +40,7 @@ import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
 import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem } from './problems';
 import { buildPracticeQueue, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
-import { fixedCardVariantColors, fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from './ewVariantView';
+import { cardVariantColors, fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from './ewVariantView';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -291,6 +292,7 @@ let enabledLogChannels = new Set<LogChannelId>(['play', 'threat', 'dds', 'varian
 let teachingMode = true;
 let autoplaySingletons = false;
 let autoplayEw = true;
+let unknownModeVariantReplayData: Map<string, UnknownModeVariantReplay> | null = null;
 let alwaysHint = displayMode === 'widget';
 let cardColoringEnabled = true;
 let narrate = displayMode === 'widget';
@@ -412,6 +414,31 @@ type TeachingEntryView = {
     reasons: string[];
     effects: string[];
   }>;
+};
+type UnknownModePlayedEvent = {
+  seat: Seat;
+  card: CardId;
+  source?: string;
+  chosenBucket?: string;
+  bucketCards?: CardId[];
+  policyClassByCard?: Record<string, string>;
+  ddPolicy?: {
+    mode: 'strict';
+    source: 'runtime';
+    problemId: string;
+    signature: string;
+    baseCandidates: CardId[];
+    allowedCandidates: CardId[];
+    optimalMoves: CardId[];
+    bound: boolean;
+    fallback: boolean;
+    path: 'intersection' | 'dd-fallback' | 'base-fallback';
+  };
+  legalCount?: number;
+};
+type UnknownModeVariantReplay = {
+  state: State;
+  entries: TeachingEntryView[];
 };
 let pulseUntilByCardKey = new Map<string, number>();
 let pulseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -562,34 +589,100 @@ function variantLabelPrefix(variantId: string): string {
   return variantId.trim().toUpperCase();
 }
 
-function teachingEntriesForUnknownMode(): TeachingEntryView[] | null {
-  if (!versionUnknownModeEnabled()) return null;
-  const view = currentViewState();
-  const activeVariantIds = view.ewVariantState?.activeVariantIds ?? [];
+function buildUnknownModeVariantReplayData(
+  activeVariantIds: string[]
+): Map<string, UnknownModeVariantReplay> | null {
   if (activeVariantIds.length <= 1) return null;
-
   const rawEvents = (rawSemanticReducer.snapshot() as { events: Array<{ type: string; seat?: Seat; card?: CardId; details?: Record<string, unknown> }> }).events;
-  const pendingSourceByCardKey = new Map<string, string | undefined>();
-  const userPlayedEvents: Array<{ seat: Seat; card: CardId }> = [];
+  const pendingByCardKey = new Map<string, {
+    source?: string;
+    chosenBucket?: string;
+    bucketCards?: CardId[];
+    policyClassByCard?: Record<string, string>;
+    ddPolicy?: {
+      mode: 'strict';
+      source: 'runtime';
+      problemId: string;
+      signature: string;
+      baseCandidates: CardId[];
+      allowedCandidates: CardId[];
+      optimalMoves: CardId[];
+      bound: boolean;
+      fallback: boolean;
+      path: 'intersection' | 'dd-fallback' | 'base-fallback';
+    };
+    legalCount?: number;
+  }>();
+  const decisionStartBySeat = new Map<Seat, { legalCount?: number }>();
+  const decisionEvalBySeat = new Map<Seat, { chosenBucket?: string; bucketCards?: CardId[]; policyClassByCard?: Record<string, string> }>();
+  const playedEvents: Array<{
+    seat: Seat;
+    card: CardId;
+    source?: string;
+    chosenBucket?: string;
+    bucketCards?: CardId[];
+    policyClassByCard?: Record<string, string>;
+    ddPolicy?: {
+      mode: 'strict';
+      source: 'runtime';
+      problemId: string;
+      signature: string;
+      baseCandidates: CardId[];
+      allowedCandidates: CardId[];
+      optimalMoves: CardId[];
+      bound: boolean;
+      fallback: boolean;
+      path: 'intersection' | 'dd-fallback' | 'base-fallback';
+    };
+    legalCount?: number;
+  }> = [];
   for (const event of rawEvents) {
+    if (event.type === 'decision-start' && event.seat) {
+      decisionStartBySeat.set(event.seat, { legalCount: typeof event.details?.legalCount === 'number' ? event.details.legalCount : undefined });
+      continue;
+    }
+    if (event.type === 'decision-evaluated' && event.seat) {
+      const policyClassByCardRaw = event.details?.policyClassByCard;
+      const policyClassByCard =
+        policyClassByCardRaw && typeof policyClassByCardRaw === 'object'
+          ? Object.fromEntries(
+              Object.entries(policyClassByCardRaw as Record<string, unknown>).filter(
+                (entry): entry is [string, string] => typeof entry[1] === 'string'
+              )
+            )
+          : undefined;
+      decisionEvalBySeat.set(event.seat, {
+        chosenBucket: typeof event.details?.chosenBucket === 'string' ? event.details.chosenBucket : undefined,
+        bucketCards: Array.isArray(event.details?.bucketCards) ? event.details.bucketCards.filter((x): x is CardId => typeof x === 'string') : undefined,
+        policyClassByCard
+      });
+      continue;
+    }
     if (event.type === 'decision-chosen' && event.seat && event.card) {
-      pendingSourceByCardKey.set(`${event.seat}:${event.card}`, typeof event.details?.source === 'string' ? event.details.source : undefined);
+      pendingByCardKey.set(`${event.seat}:${event.card}`, {
+        source: typeof event.details?.source === 'string' ? event.details.source : undefined,
+        chosenBucket: typeof event.details?.chosenBucket === 'string' ? event.details.chosenBucket : decisionEvalBySeat.get(event.seat)?.chosenBucket,
+        bucketCards: decisionEvalBySeat.get(event.seat)?.bucketCards,
+        policyClassByCard: decisionEvalBySeat.get(event.seat)?.policyClassByCard,
+        ddPolicy: event.details?.ddPolicy as any,
+        legalCount: decisionStartBySeat.get(event.seat)?.legalCount
+      });
+      decisionStartBySeat.delete(event.seat);
+      decisionEvalBySeat.delete(event.seat);
       continue;
     }
     if (event.type === 'card-played' && event.seat && event.card) {
       const key = `${event.seat}:${event.card}`;
-      const source = pendingSourceByCardKey.get(key);
-      pendingSourceByCardKey.delete(key);
-      if (source === 'user') {
-        userPlayedEvents.push({ seat: event.seat, card: event.card });
-      }
+      const pending = pendingByCardKey.get(key);
+      pendingByCardKey.delete(key);
+      playedEvents.push({ seat: event.seat, card: event.card, ...pending });
     }
   }
   const perVariant = new Map<string, TeachingEntryView[]>();
 
   for (const variantId of activeVariantIds) {
     const concrete = resolveProblemById(currentProblemId, variantId);
-    const replayProblem: ProblemWithThreats = { ...concrete };
+    const replayProblem: ProblemWithThreats = { ...concrete, userControls: ['N', 'E', 'S', 'W'] };
     let replayState = init(replayProblem);
     const reducer = new TeachingReducer();
     reducer.setTrumpSuit(replayState.trumpSuit);
@@ -597,9 +690,21 @@ function teachingEntriesForUnknownMode(): TeachingEntryView[] | null {
     collector.attachReducer(reducer);
     let failed = false;
 
-    for (const event of userPlayedEvents) {
+    for (const event of playedEvents) {
       const play = { seat: event.seat, suit: event.card[0] as Suit, rank: event.card.slice(1) as Rank };
-      const result = apply(replayState, play, { eventCollector: collector });
+      const result = apply(replayState, play, {
+        eventCollector: collector,
+        manualDecision: event.source && event.source !== 'user'
+          ? {
+              source: event.source,
+              chosenBucket: event.chosenBucket,
+              bucketCards: event.bucketCards,
+              policyClassByCard: event.policyClassByCard,
+              ddPolicy: event.ddPolicy,
+              legalCount: event.legalCount
+            }
+          : undefined
+      });
       if (result.events.some((e) => e.type === 'illegal')) {
         failed = true;
         break;
@@ -607,16 +712,35 @@ function teachingEntriesForUnknownMode(): TeachingEntryView[] | null {
       replayState = result.state;
     }
     if (!failed) {
-      perVariant.set(variantId, (reducer.snapshot() as { entries: TeachingEntryView[] }).entries);
+      perVariant.set(variantId, {
+        state: replayState,
+        entries: (reducer.snapshot() as { entries: TeachingEntryView[] }).entries
+      });
     }
   }
 
-  if (perVariant.size <= 1) return null;
-  const maxEntries = Math.max(...[...perVariant.values()].map((entries) => entries.length), 0);
+  return perVariant.size > 1 ? perVariant : null;
+}
+
+function unknownModeVariantReplayMap(): Map<string, UnknownModeVariantReplay> | null {
+  if (!versionUnknownModeEnabled()) {
+    unknownModeVariantReplayData = null;
+    return null;
+  }
+  const activeVariantIds = currentViewState().ewVariantState?.activeVariantIds ?? [];
+  unknownModeVariantReplayData = buildUnknownModeVariantReplayData(activeVariantIds);
+  return unknownModeVariantReplayData;
+}
+
+function teachingEntriesForUnknownMode(): TeachingEntryView[] | null {
+  const perVariant = unknownModeVariantReplayMap();
+  if (!perVariant || perVariant.size <= 1) return null;
+
+  const maxEntries = Math.max(...[...perVariant.values()].map((variant) => variant.entries.length), 0);
   const merged: TeachingEntryView[] = [];
   for (let i = 0; i < maxEntries; i += 1) {
     const present = [...perVariant.entries()]
-      .map(([variantId, entries]) => ({ variantId, entry: entries[i] }))
+      .map(([variantId, replay]) => ({ variantId, entry: replay.entries[i] }))
       .filter((item): item is { variantId: string; entry: TeachingEntryView } => Boolean(item.entry));
     if (present.length === 0) continue;
 
@@ -1047,10 +1171,25 @@ function rankColorVisualForCard(
   seat: Seat,
   cardId: CardId
 ): RankColorVisual {
-  if (!versionUnknownModeEnabled() || (seat !== 'E' && seat !== 'W')) {
+  if (!versionUnknownModeEnabled()) {
     return { kind: 'solid', colorClass: rankColorClass(cardId, view) };
   }
-  const colors = fixedCardVariantColors(view, seat, cardId, teachingMode)
+  const replayData = unknownModeVariantReplayData ?? unknownModeVariantReplayMap();
+  const colors = replayData && replayData.size > 1
+    ? [...replayData.values()]
+      .map((variant) => {
+        const features = buildFeatureStateFromRuntime({
+          threat: variant.state.threat as any,
+          threatLabels: variant.state.threatLabels as any,
+          cardRoles: variant.state.cardRoles as any,
+          goalStatus: variant.state.goalStatus
+        });
+        return getRankColorForFeatureRole(features.cardRoleById[cardId] ?? 'default', teachingMode);
+      })
+      .filter((color, index, arr) => arr.indexOf(color) === index)
+    : cardVariantColors(view, seat, cardId, teachingMode)
+      .filter((color, index, arr) => arr.indexOf(color) === index);
+  const colorClasses = colors
     .map((color) => color === 'purple'
       ? 'rank--purple'
       : color === 'green'
@@ -1062,10 +1201,10 @@ function rankColorVisualForCard(
             : color === 'grey'
               ? 'rank--grey'
               : 'rank--black')
-    .filter((color, index, arr) => arr.indexOf(color) === index);
-  if (colors.length <= 1) return { kind: 'solid', colorClass: colors[0] ?? 'rank--black' };
-  if (colors.length === 2) return { kind: 'split', colors };
-  return { kind: 'stripes', colors };
+      .filter((color, index, arr) => arr.indexOf(color) === index);
+  if (colorClasses.length <= 1) return { kind: 'solid', colorClass: colorClasses[0] ?? 'rank--black' };
+  if (colorClasses.length === 2) return { kind: 'split', colors: colorClasses };
+  return { kind: 'stripes', colors: colorClasses };
 }
 
 function applyRankVisual(target: HTMLElement, visual: RankColorVisual): void {
@@ -1933,6 +2072,94 @@ function computeEqByTierSummary(shadow: State, event: Extract<EngineEvent, { typ
   else out.push('idle:None');
   for (const [k, tiers] of [...busy, ...others]) out.push(renderEq(k, tiers));
   return out.join(', ');
+}
+
+function policyClassForTier(shadow: State, seat: 'E' | 'W', card: CardId, tier: string): string {
+  if (tier.startsWith('tier1') || tier === 'follow:idle-cheap-win') return 'idle:tier1';
+  if (tier === 'tier2' || tier === 'tier2a' || tier === 'tier2b') return `semiIdle:${card[0]}`;
+  if (tier.startsWith('tier3') || tier.startsWith('tier4') || tier === 'follow:busy-protect-threat') return `busy:${card[0]}`;
+  return classInfoForCard(shadow, seat, card).classId;
+}
+
+function manualDefenderDecisionContext(shadow: State, play: Play): {
+  source: string;
+  chosenBucket?: string;
+  bucketCards?: CardId[];
+  policyClassByCard?: Record<string, string>;
+  ddPolicy?: {
+    mode: 'strict';
+    source: 'runtime';
+    problemId: string;
+    signature: string;
+    baseCandidates: CardId[];
+    allowedCandidates: CardId[];
+    optimalMoves: CardId[];
+    bound: boolean;
+    fallback: boolean;
+    path: 'intersection' | 'dd-fallback' | 'base-fallback';
+  };
+  legalCount?: number;
+} | undefined {
+  if ((play.seat !== 'E' && play.seat !== 'W') || autoplayEw) return undefined;
+  const policy = shadow.policies[play.seat];
+  if (!policy) return undefined;
+
+  const legal = legalPlays(shadow).filter((candidate) => candidate.seat === play.seat);
+  const chosenCardId = toCardId(play.suit, play.rank) as CardId;
+  if (policy.kind === 'threatAware' || policy.kind === 'randomLegal') {
+    const evaluated = evaluatePolicy({
+      policy,
+      seat: play.seat,
+      problemId: shadow.id,
+      contractStrain: shadow.contract.strain,
+      hands: shadow.hands,
+      trick: shadow.trick,
+      threat: shadow.threat as any,
+      resource: shadow.resource as any,
+      threatLabels: shadow.threatLabels as any,
+      ewVariantState: shadow.ewVariantState,
+      rng: shadow.rng
+    });
+    const fabricatedEvent: Extract<EngineEvent, { type: 'autoplay' }> = {
+      type: 'autoplay',
+      play,
+      chosenBucket: evaluated.chosenBucket,
+      bucketCards: evaluated.bucketCards,
+      policyClassByCard: evaluated.policyClassByCard,
+      tierBuckets: evaluated.tierBuckets,
+      ddPolicy: evaluated.ddPolicy,
+      ewVariantTrace: evaluated.ewVariantTrace
+    };
+    const tierByCard = computeTierByCardForDecision(shadow, fabricatedEvent);
+    const chosenTier = tierByCard.get(chosenCardId) ?? evaluated.chosenBucket ?? 'manual';
+    const bucketCards = [...tierByCard.entries()]
+      .filter(([, tier]) => tier === chosenTier)
+      .map(([card]) => card);
+    const policyClassByCard: Record<string, string> = { ...(evaluated.policyClassByCard ?? {}) };
+    for (const card of bucketCards) {
+      if (!policyClassByCard[card]) {
+        policyClassByCard[card] = policyClassForTier(shadow, play.seat, card, chosenTier);
+      }
+    }
+    if (!policyClassByCard[chosenCardId]) {
+      policyClassByCard[chosenCardId] = policyClassForTier(shadow, play.seat, chosenCardId, chosenTier);
+    }
+    return {
+      source: 'manual-ew',
+      chosenBucket: chosenTier,
+      bucketCards,
+      policyClassByCard,
+      ddPolicy: evaluated.ddPolicy,
+      legalCount: legal.length
+    };
+  }
+  return {
+    source: 'manual-ew',
+    chosenBucket: 'manual',
+    bucketCards: [chosenCardId],
+    policyClassByCard: { [chosenCardId]: classInfoForCard(shadow, play.seat, chosenCardId).classId },
+    legalCount: legal.length
+  };
 }
 
 function isBelowThreshold(cardId: CardId, threshold: Rank): boolean {
@@ -3016,6 +3243,7 @@ function runTurn(play: Play): void {
   const before = state;
   const ddsHistoryForTurn = [...ddsPlayHistory];
   const backstopHistoryForTurn = [...ddsHistoryForTurn, `${play.suit}${play.rank}`];
+  const manualDecision = manualDefenderDecisionContext(state, play);
   const userDdError = (play.seat === 'N' || play.seat === 'S')
     ? classifyDdErrorForUserPlay(play, ddsHistoryForTurn)
     : undefined;
@@ -3033,6 +3261,7 @@ function runTurn(play: Play): void {
   const result = apply(state, play, {
     eventCollector: semanticCollector,
     userDdError: userDdError?.ddError,
+    manualDecision,
     autoplayBackstop: buildBrowserDdsBackstop(backstopHistoryForTurn)
   });
   state = result.state;

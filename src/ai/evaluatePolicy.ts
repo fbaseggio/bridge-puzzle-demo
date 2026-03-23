@@ -1,6 +1,18 @@
 import type { EwVariantState, Hand, Play, Policy, Rank, RngState, Seat, State, Suit } from '../core';
 import { computeDiscardTiers, type DiscardTiers, getIdleThreatThresholdRank } from './defenderDiscard';
-import { initClassification, parseCardId, toCardId, type CardId, type DefenderLabels, type ResourceContext, type ThreatContext } from './threatModel';
+import {
+  initClassification,
+  parseCardId,
+  toCardId,
+  updateClassificationAfterPlay,
+  type CardId,
+  type CardRole,
+  type ClassificationState,
+  type ClassificationTrigger,
+  type DefenderLabels,
+  type ResourceContext,
+  type ThreatContext
+} from './threatModel';
 import { classInfoForCard } from '../core/equivalence';
 import { buildCanonicalPositionSignature, type DdPolicyTrace } from './ddPolicy';
 
@@ -175,11 +187,12 @@ function classifyWorld(input: EvaluatePolicyInput, hands: Record<Seat, Hand>): {
   threat: ThreatContext | null;
   resource: ResourceContext | null;
   threatLabels: DefenderLabels | null;
+  cardRoles: Partial<Record<CardId, CardRole>>;
 } {
   const threatCardIds = (input.threat?.threatCardIds ?? []).filter((cardId) => cardExistsInHands(hands, cardId));
   const resourceCardIds = (input.resource?.resourceCardIds ?? []).filter((cardId) => cardExistsInHands(hands, cardId));
   if (threatCardIds.length === 0 && resourceCardIds.length === 0) {
-    return { threat: null, resource: null, threatLabels: null };
+    return { threat: null, resource: null, threatLabels: null, cardRoles: {} };
   }
   const threatSymbolByCardId = Object.fromEntries(
     Object.values(input.threat?.threatsBySuit ?? {})
@@ -198,7 +211,8 @@ function classifyWorld(input: EvaluatePolicyInput, hands: Record<Seat, Hand>): {
   return {
     threat: classification.threat,
     resource: classification.resource,
-    threatLabels: classification.labels
+    threatLabels: classification.labels,
+    cardRoles: classification.perCardRole
   };
 }
 
@@ -230,7 +244,8 @@ function classifyVariantCard(
   card: CardId,
   output: EvaluatePolicyOutput,
   hands: Record<Seat, Hand>,
-  seat: 'E' | 'W'
+  seat: 'E' | 'W',
+  demotedCards?: Set<CardId>
 ): VariantCardLabel {
   const legalUniverse = new Set(legalUniverseFromEvaluation(output));
   const playable = new Set(playableCardsFromEvaluation(output));
@@ -238,8 +253,8 @@ function classifyVariantCard(
   const preferred = new Set(preferredCardsForEvaluation(hands, seat, output));
   if (!legalUniverse.has(card)) return 'D';
   if (!playable.has(card)) return 'D';
-  if (preferred.has(card)) return 'A';
-  if (bucket.has(card)) return 'B';
+  if (preferred.has(card)) return demotedCards?.has(card) ? 'C' : 'A';
+  if (bucket.has(card)) return demotedCards?.has(card) ? 'C' : 'B';
   return 'C';
 }
 
@@ -298,6 +313,127 @@ function chooseUniformLegalCardId(hands: Record<Seat, Hand>, seat: Seat, leadSui
   const [idx, nextRng] = pickRandomIndex(legal.length, rng);
   const selected = legal[idx] ?? legal[0];
   return [toCardId(selected.suit, selected.rank) as CardId, nextRng];
+}
+
+function cloneHands(hands: Record<Seat, Hand>): Record<Seat, Hand> {
+  return {
+    N: cloneHand(hands.N),
+    E: cloneHand(hands.E),
+    S: cloneHand(hands.S),
+    W: cloneHand(hands.W)
+  };
+}
+
+function decisionTriggerForSeat(hands: Record<Seat, Hand>, seat: 'E' | 'W', trick: Play[]): ClassificationTrigger {
+  const leadSuit = trick[0]?.suit ?? null;
+  if (!leadSuit) return 'lead';
+  return hands[seat][leadSuit].length > 0 ? 'follow' : 'discard';
+}
+
+function simulateVariantRolesAfterPlay(
+  input: EvaluatePolicyInput,
+  worldHands: Record<Seat, Hand>,
+  world: {
+    threat: ThreatContext | null;
+    resource: ResourceContext | null;
+    threatLabels: DefenderLabels | null;
+    cardRoles: Partial<Record<CardId, CardRole>>;
+  },
+  seat: 'E' | 'W',
+  cardId: CardId
+): Partial<Record<CardId, CardRole>> {
+  if (!world.threat || !world.threatLabels) return {};
+  const nextHands = cloneHands(worldHands);
+  const { suit, rank } = parseCardId(cardId);
+  const idx = nextHands[seat][suit].indexOf(rank);
+  if (idx < 0) return world.cardRoles;
+  nextHands[seat][suit].splice(idx, 1);
+  const trigger = decisionTriggerForSeat(worldHands, seat, input.trick);
+  const play = { seat, suit, rank };
+  const runtime = {
+    trick: [...input.trick, play],
+    trumpSuit: input.contractStrain === 'NT' ? null : input.contractStrain ?? null,
+    goalStatus: null
+  };
+  let updated = updateClassificationAfterPlay(
+    {
+      threat: world.threat,
+      resource: world.resource ?? { resourceCardIds: [], resourcesBySuit: {} },
+      labels: world.threatLabels,
+      perCardRole: world.cardRoles
+    } as ClassificationState,
+    { hands: nextHands },
+    cardId,
+    runtime,
+    trigger,
+    'immediate'
+  );
+  if (trigger === 'discard') {
+    updated = updateClassificationAfterPlay(updated, { hands: nextHands }, cardId, runtime, trigger, 'deferred');
+  }
+  return updated.perCardRole;
+}
+
+function cardEqualsInLegalUniverse(
+  hands: Record<Seat, Hand>,
+  seat: 'E' | 'W',
+  cardId: CardId,
+  legalUniverse: CardId[]
+): CardId[] {
+  const legalSet = new Set(legalUniverse);
+  const members = classInfoForCard({ hands } as unknown as State, seat, cardId).members
+    .filter((member): member is CardId => legalSet.has(member as CardId));
+  return members.length > 0 ? members : legalSet.has(cardId) ? [cardId] : [];
+}
+
+function ambiguousThreatDemotions(
+  input: EvaluatePolicyInput,
+  evaluations: Array<{
+    variant: NonNullable<EwVariantState['variants']>[number];
+    worldHands: Record<Seat, Hand>;
+    world: {
+      threat: ThreatContext | null;
+      resource: ResourceContext | null;
+      threatLabels: DefenderLabels | null;
+      cardRoles: Partial<Record<CardId, CardRole>>;
+    };
+    output: EvaluatePolicyOutput;
+  }>
+): Map<string, Set<CardId>> {
+  const demotedByVariant = new Map<string, Set<CardId>>();
+  const designatedThreats = (input.threat?.threatCardIds ?? []).filter((cardId) =>
+    evaluations.every(({ worldHands }) => cardExistsInHands(worldHands, cardId))
+  );
+  if (designatedThreats.length === 0) return demotedByVariant;
+
+  const candidateCards = [...new Set(evaluations.flatMap(({ output }) => legalUniverseFromEvaluation(output)))];
+  for (const candidate of candidateCards) {
+    const labels = evaluations.map(({ output, worldHands }) => classifyVariantCard(candidate, output, worldHands, input.seat));
+    if (labels.some((label) => label === 'D')) continue;
+
+    const afterRolesByVariant = evaluations.map(({ worldHands, world }) =>
+      simulateVariantRolesAfterPlay(input, worldHands, world, input.seat, candidate)
+    );
+    const resolvesAmbiguity = designatedThreats.some((threatCardId) => {
+      const beforeRoles = evaluations.map(({ world }) => world.cardRoles[threatCardId] ?? 'default');
+      const wasAmbiguous = beforeRoles.some((role) => role !== beforeRoles[0]);
+      if (!wasAmbiguous) return false;
+      const afterRoles = afterRolesByVariant.map((roles) => roles[threatCardId] ?? 'default');
+      return afterRoles.every((role) => role === 'promotedWinner');
+    });
+    if (!resolvesAmbiguity) continue;
+
+    evaluations.forEach(({ variant, worldHands, output }) => {
+      const legalUniverse = legalUniverseFromEvaluation(output);
+      const equals = cardEqualsInLegalUniverse(worldHands, input.seat, candidate, legalUniverse);
+      if (equals.length === 0) return;
+      const bucket = demotedByVariant.get(variant.id) ?? new Set<CardId>();
+      equals.forEach((equalCard) => bucket.add(equalCard));
+      demotedByVariant.set(variant.id, bucket);
+    });
+  }
+
+  return demotedByVariant;
 }
 
 function buildPolicyClassByCard(
@@ -765,6 +901,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     return {
       variant,
       worldHands,
+      world,
       output: evaluatePolicySingleWorld({
         ...input,
         hands: worldHands,
@@ -781,9 +918,12 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     output,
     playable: playableCardsFromEvaluation(output)
   }));
+  const demotedByVariant = ambiguousThreatDemotions(input, evaluations);
   const candidateCards = [...new Set(playableByVariant.flatMap(({ output }) => legalUniverseFromEvaluation(output)))];
   const cardScores = candidateCards.map((card) => {
-    const labels = evaluations.map(({ output, worldHands }) => classifyVariantCard(card, output, worldHands, input.seat));
+    const labels = evaluations.map(({ variant, output, worldHands }) =>
+      classifyVariantCard(card, output, worldHands, input.seat, demotedByVariant.get(variant.id))
+    );
     const dCount = labels.filter((label) => label === 'D').length;
     const cCount = labels.filter((label) => label === 'C').length;
     const aCount = labels.filter((label) => label === 'A').length;
@@ -822,8 +962,10 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
       activeVariantIds: activeVariants.map((variant) => variant.id),
       perVariant: evaluations.map(({ variant, output, worldHands }) => {
         const playable = playableCardsFromEvaluation(output);
-        const a = preferredCardsForEvaluation(worldHands, input.seat, output);
-        const b = (output.bucketCards ?? []).filter((card) => !a.includes(card));
+        const demoted = demotedByVariant.get(variant.id) ?? new Set<CardId>();
+        const preferred = preferredCardsForEvaluation(worldHands, input.seat, output);
+        const a = preferred.filter((card) => !demoted.has(card));
+        const b = (output.bucketCards ?? []).filter((card) => !preferred.includes(card) && !demoted.has(card));
         const c = playable.filter((card) => !a.includes(card) && !b.includes(card));
         const legalUniverse = legalUniverseFromEvaluation(output);
         const d = legalUniverse.filter((card) => !playable.includes(card));

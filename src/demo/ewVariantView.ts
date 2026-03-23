@@ -102,9 +102,9 @@ export function unresolvedEwCardsBySuit(state: EwVariantState | null): Record<Su
   return out;
 }
 
-export function fixedCardVariantColors(
+export function cardVariantColors(
   view: Pick<State, 'hands' | 'ewVariantState' | 'threat' | 'resource' | 'goalStatus'>,
-  seat: 'E' | 'W',
+  seat: Seat,
   cardId: CardId,
   teachingMode: boolean
 ): FeatureColor[] {
