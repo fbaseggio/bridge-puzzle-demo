@@ -351,7 +351,8 @@ if (displayMode === 'widget' && (widgetUiMode === 'dd-puzzle' || widgetUiMode ==
 }
 applyWidgetProblemDefaults();
 let showWidgetTeachingPane = false;
-let advancedPanelOpen = false;
+let settingsPanelContext: 'analysis' | 'practice' | 'widget' | null = null;
+let settingsNestedOptionsOpen = false;
 let ddsPlayHistory: string[] = [];
 let ddsTeachingSummaries: string[] = [];
 let activeHint: HintState | null = null;
@@ -376,6 +377,7 @@ let widgetNarrationEntries: WidgetNarrationEntry[] = [];
 let widgetNarrationLatest: WidgetNarrationEntry | null = null;
 let widgetNarrationBySeat: Partial<Record<Seat, WidgetNarrationEntry>> = {};
 let lastNarratedSeq = 0;
+let settingsOutsideDismissBound = false;
 let inversePrimaryBySuit: Partial<Record<Suit, 'N' | 'S'>> = {};
 let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
@@ -625,6 +627,7 @@ function renderAssistLevelControl(context: 'analysis' | 'practice' | 'widget'): 
   const options = currentAssistOptions();
   const currentLevel = currentAssistLevel();
   const currentIndex = Math.max(0, options.findIndex((option) => option.id === currentLevel));
+  const compact = context === 'widget';
 
   const wrap = document.createElement('section');
   wrap.className = `assist-level-control assist-context-${context}`;
@@ -632,10 +635,12 @@ function renderAssistLevelControl(context: 'analysis' | 'practice' | 'widget'): 
   const meta = document.createElement('div');
   meta.className = 'assist-meta';
 
-  const modeLine = document.createElement('span');
-  modeLine.className = 'assist-mode';
-  modeLine.textContent = `Puzzle Mode: ${PUZZLE_MODE_LABEL[puzzleMode]}`;
-  meta.appendChild(modeLine);
+  if (!compact) {
+    const modeLine = document.createElement('span');
+    modeLine.className = 'assist-mode';
+    modeLine.textContent = `Puzzle Mode: ${PUZZLE_MODE_LABEL[puzzleMode]}`;
+    meta.appendChild(modeLine);
+  }
 
   const levelLine = document.createElement('strong');
   levelLine.className = 'assist-current';
@@ -678,7 +683,9 @@ function renderAssistLevelControl(context: 'analysis' | 'practice' | 'widget'): 
   for (const option of options) {
     const tick = document.createElement('span');
     tick.className = `assist-tick${option.id === currentLevel ? ' active' : ''}`;
-    tick.textContent = option.label;
+    tick.textContent = compact ? '•' : option.label;
+    tick.title = option.label;
+    tick.setAttribute('aria-label', option.label);
     ticks.appendChild(tick);
   }
   sliderWrap.appendChild(ticks);
@@ -696,6 +703,164 @@ function renderAssistLevelControl(context: 'analysis' | 'practice' | 'widget'): 
   controls.appendChild(plusBtn);
 
   wrap.appendChild(controls);
+  return wrap;
+}
+
+function toggleSettingsPanel(context: 'analysis' | 'practice' | 'widget'): void {
+  if (settingsPanelContext === context) {
+    settingsPanelContext = null;
+    settingsNestedOptionsOpen = false;
+  } else {
+    settingsPanelContext = context;
+    settingsNestedOptionsOpen = false;
+  }
+  render();
+}
+
+function ensureSettingsOutsideDismiss(): void {
+  if (settingsOutsideDismissBound || typeof document === 'undefined') return;
+  settingsOutsideDismissBound = true;
+  document.addEventListener('pointerdown', (event) => {
+    if (!settingsPanelContext) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('.settings-wrap')) return;
+    settingsPanelContext = null;
+    settingsNestedOptionsOpen = false;
+    render();
+  });
+}
+
+function renderSettingsToggle(label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement {
+  const row = document.createElement('label');
+  row.className = 'advanced-toggle';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = checked;
+  box.onchange = () => onChange(box.checked);
+  const text = document.createElement('span');
+  text.textContent = label;
+  row.append(box, text);
+  return row;
+}
+
+function renderSettingsToggles(context: 'analysis' | 'practice' | 'widget'): HTMLElement {
+  const body = document.createElement('div');
+  body.className = 'advanced-body';
+
+  if (context !== 'widget') {
+    body.appendChild(
+      renderSettingsToggle('Teaching mode', teachingMode, (checked) => {
+        teachingMode = checked;
+        render();
+      })
+    );
+  }
+  body.appendChild(
+    renderSettingsToggle('Autoplay singletons', autoplaySingletons, (checked) => {
+      autoplaySingletons = checked;
+      syncSingletonAutoplay();
+      render();
+    })
+  );
+  body.appendChild(
+    renderSettingsToggle('Autoplay E/W', autoplayEw, (checked) => {
+      autoplayEw = checked;
+      syncConfiguredUserControls();
+      if (autoplayEw && !trickFrozen && state.phase !== 'end' && !state.userControls.includes(state.turn)) {
+        advanceAutoplayFromCurrentState();
+      }
+      syncSingletonAutoplay();
+      render();
+    })
+  );
+
+  if (context === 'widget') {
+    body.appendChild(
+      renderSettingsToggle('Always hint', alwaysHint, (checked) => {
+        alwaysHint = checked;
+        if (!checked) clearHint();
+        render();
+      })
+    );
+    body.appendChild(
+      renderSettingsToggle('Card coloring', cardColoringEnabled, (checked) => {
+        cardColoringEnabled = checked;
+        render();
+      })
+    );
+    body.appendChild(
+      renderSettingsToggle('Hide E/W', hideEastWest, (checked) => {
+        hideEastWest = checked;
+        render();
+      })
+    );
+    body.appendChild(
+      renderSettingsToggle('Narrate', narrate, (checked) => {
+        narrate = checked;
+        if (!checked) {
+          clearNarration();
+        } else {
+          syncWidgetNarrationFeedFromTeaching();
+        }
+        render();
+      })
+    );
+    body.appendChild(
+      renderSettingsToggle('Show teaching pane', showWidgetTeachingPane, (checked) => {
+        showWidgetTeachingPane = checked;
+        render();
+      })
+    );
+  }
+
+  return body;
+}
+
+function renderSettingsButton(context: 'analysis' | 'practice' | 'widget'): HTMLElement {
+  ensureSettingsOutsideDismiss();
+  const wrap = document.createElement('div');
+  wrap.className = `advanced-wrap settings-wrap context-${context}`;
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = context === 'widget' ? 'icon-btn settings-more-btn' : 'settings-more-btn';
+  button.textContent = '⋯';
+  button.title = `Assist options (${currentAssistOptions().find((option) => option.id === currentAssistLevel())?.label ?? ''})`;
+  button.setAttribute('aria-label', 'Assist and display options');
+  button.onclick = () => toggleSettingsPanel(context);
+  wrap.appendChild(button);
+
+  if (settingsPanelContext === context) {
+    const panel = document.createElement('section');
+    panel.className = `advanced-panel settings-panel settings-primary-panel settings-panel-${context}`;
+
+    panel.appendChild(renderAssistLevelControl(context));
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button';
+    moreBtn.className = 'settings-more-row';
+    moreBtn.textContent = settingsNestedOptionsOpen ? 'More options…' : 'More options…';
+    moreBtn.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      settingsNestedOptionsOpen = !settingsNestedOptionsOpen;
+      render();
+    };
+    panel.appendChild(moreBtn);
+
+    if (settingsNestedOptionsOpen) {
+      const secondary = document.createElement('section');
+      secondary.className = `advanced-panel settings-panel settings-secondary-panel settings-panel-${context}`;
+      const secondaryTitle = document.createElement('strong');
+      secondaryTitle.className = 'settings-secondary-title';
+      secondaryTitle.textContent = 'Advanced settings';
+      secondary.appendChild(secondaryTitle);
+      secondary.appendChild(renderSettingsToggles(context));
+      panel.appendChild(secondary);
+    }
+    wrap.appendChild(panel);
+  }
+
   return wrap;
 }
 
@@ -4106,46 +4271,7 @@ function renderControlsBanner(): HTMLElement {
     row.appendChild(articleLink);
   }
 
-  const teachLabel = document.createElement('label');
-  const teachBox = document.createElement('input');
-  teachBox.type = 'checkbox';
-  teachBox.checked = teachingMode;
-  teachBox.onchange = () => {
-    teachingMode = teachBox.checked;
-    render();
-  };
-  teachLabel.append(teachBox, ' Teaching mode');
-  row.appendChild(teachLabel);
-
-  const singletonLabel = document.createElement('label');
-  const singletonBox = document.createElement('input');
-  singletonBox.type = 'checkbox';
-  singletonBox.checked = autoplaySingletons;
-  singletonBox.onchange = () => {
-    autoplaySingletons = singletonBox.checked;
-    syncSingletonAutoplay();
-    render();
-  };
-  singletonLabel.append(singletonBox, ' Autoplay singletons');
-  row.appendChild(singletonLabel);
-
-  const autoplayEwLabel = document.createElement('label');
-  const autoplayEwBox = document.createElement('input');
-  autoplayEwBox.type = 'checkbox';
-  autoplayEwBox.checked = autoplayEw;
-  autoplayEwBox.onchange = () => {
-    autoplayEw = autoplayEwBox.checked;
-    syncConfiguredUserControls();
-    if (autoplayEw && !trickFrozen && state.phase !== 'end' && !state.userControls.includes(state.turn)) {
-      advanceAutoplayFromCurrentState();
-    }
-    syncSingletonAutoplay();
-    render();
-  };
-  autoplayEwLabel.append(autoplayEwBox, ' Autoplay E/W');
-  row.appendChild(autoplayEwLabel);
-
-  row.appendChild(renderAssistLevelControl('analysis'));
+  row.appendChild(renderSettingsButton('analysis'));
 
   bar.appendChild(row);
   return bar;
@@ -4186,7 +4312,7 @@ function renderPracticeHeader(view: State): HTMLElement {
   const undoCount = practiceSession.perPuzzleUndoCount[currentProblemId] ?? practiceSession.currentUndoCount;
   summary.textContent = ` Practice Mode · Puzzle ${indexLabel} · Solved ${practiceSession.solved}/${practiceSession.attempted} · Perfect ${practiceSession.perfect} · Undo ${undoCount}`;
   header.appendChild(summary);
-  header.appendChild(renderAssistLevelControl('practice'));
+  header.appendChild(renderSettingsButton('practice'));
   return header;
 }
 
@@ -4288,10 +4414,6 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   }
   section.appendChild(outcome);
 
-  if (isWidgetShellMode) {
-    section.appendChild(renderAssistLevelControl('widget'));
-  }
-
   const transport = document.createElement('div');
   transport.className = `transport-bar mode-${displayMode}`;
 
@@ -4382,111 +4504,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
       transport.appendChild(pop);
     }
 
-    const moreBtn = document.createElement('button');
-    moreBtn.type = 'button';
-    moreBtn.className = 'icon-btn';
-    moreBtn.textContent = '⋯';
-    moreBtn.title = 'Advanced options';
-    moreBtn.setAttribute('aria-label', 'More options');
-    moreBtn.onclick = () => {
-      advancedPanelOpen = !advancedPanelOpen;
-      render();
-    };
-    const moreWrap = document.createElement('div');
-    moreWrap.className = 'advanced-wrap';
-    moreWrap.appendChild(moreBtn);
-    transport.appendChild(moreWrap);
-
-    if (advancedPanelOpen) {
-      const panel = document.createElement('section');
-      panel.className = 'advanced-panel widget-advanced-panel';
-      const panelHead = document.createElement('div');
-      panelHead.className = 'advanced-panel-head';
-      const panelClose = document.createElement('button');
-      panelClose.type = 'button';
-      panelClose.className = 'advanced-close-btn';
-      panelClose.textContent = '×';
-      panelClose.title = 'Close advanced options';
-      panelClose.setAttribute('aria-label', 'Close advanced options');
-      panelClose.onclick = (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        advancedPanelOpen = false;
-        render();
-      };
-      panelHead.appendChild(panelClose);
-      panel.appendChild(panelHead);
-
-      const mkToggle = (label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement => {
-        const row = document.createElement('label');
-        row.className = 'advanced-toggle';
-        const box = document.createElement('input');
-        box.type = 'checkbox';
-        box.checked = checked;
-        box.onchange = () => onChange(box.checked);
-        const text = document.createElement('span');
-        text.textContent = label;
-        row.append(box, text);
-        return row;
-      };
-
-      panel.appendChild(
-        mkToggle('Autoplay singletons', autoplaySingletons, (checked) => {
-          autoplaySingletons = checked;
-          syncSingletonAutoplay();
-          render();
-        })
-      );
-      panel.appendChild(
-        mkToggle('Autoplay E/W', autoplayEw, (checked) => {
-          autoplayEw = checked;
-          syncConfiguredUserControls();
-          if (autoplayEw && !trickFrozen && state.phase !== 'end' && !state.userControls.includes(state.turn)) {
-            advanceAutoplayFromCurrentState();
-          }
-          syncSingletonAutoplay();
-          render();
-        })
-      );
-      panel.appendChild(
-        mkToggle('Always hint', alwaysHint, (checked) => {
-          alwaysHint = checked;
-          if (!checked) clearHint();
-          render();
-        })
-      );
-      panel.appendChild(
-        mkToggle('Card coloring', cardColoringEnabled, (checked) => {
-          cardColoringEnabled = checked;
-          render();
-        })
-      );
-      panel.appendChild(
-        mkToggle('Hide E/W', hideEastWest, (checked) => {
-          hideEastWest = checked;
-          render();
-        })
-      );
-      panel.appendChild(
-        mkToggle('Narrate', narrate, (checked) => {
-          narrate = checked;
-          if (!checked) {
-            clearNarration();
-          } else {
-            syncWidgetNarrationFeedFromTeaching();
-          }
-          render();
-        })
-      );
-      panel.appendChild(
-        mkToggle('Show teaching pane', showWidgetTeachingPane, (checked) => {
-          showWidgetTeachingPane = checked;
-          render();
-        })
-      );
-
-      section.appendChild(panel);
-    }
+    transport.appendChild(renderSettingsButton('widget'));
   }
 
   section.appendChild(transport);
