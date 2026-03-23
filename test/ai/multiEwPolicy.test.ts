@@ -182,4 +182,17 @@ describe('multi-EW defender policy arbitration', () => {
     expect(variantA?.a).toEqual([]);
     expect(variantA?.c).toEqual(expect.arrayContaining(['DA', 'DK']));
   });
+
+  it('collapses unknown mode to the surviving variant before exposing promoted threats', () => {
+    let state = init(sureTricksDemo);
+    const seq = ['CT', 'CA', 'HA', 'S2', 'CQ', 'CK', 'CJ'];
+    for (const cardId of seq) {
+      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+    }
+
+    expect(state.ewVariantState?.activeVariantIds).toEqual(['a']);
+    expect(state.ewVariantState?.representativeVariantId).toBe('a');
+    expect(state.cardRoles.ST).toBe('promotedWinner');
+    expect(state.cardRoles.HT).toBe('threat');
+  });
 });

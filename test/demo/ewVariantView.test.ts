@@ -28,4 +28,20 @@ describe('multi-EW version-unknown view', () => {
     expect(cardVariantColors(state, 'W', 'SK', true)).toEqual(['blue']);
     expect(cardVariantColors(state, 'E', 'DA', true)).toEqual(['black']);
   });
+
+  it('shows ST as ambiguous after CK and uniform threat again after S2, SA', () => {
+    let state = init(sureTricksDemo);
+    for (const cardId of ['CT', 'CA', 'CQ', 'CK']) {
+      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+    }
+
+    expect(cardVariantColors(state, 'N', 'ST', true)).toEqual(['green', 'purple']);
+
+    for (const cardId of ['S2', 'SA']) {
+      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+    }
+
+    expect(cardVariantColors(state, 'N', 'ST', true)).toEqual(['green']);
+    expect(state.cardRoles.ST).toBe('threat');
+  });
 });
