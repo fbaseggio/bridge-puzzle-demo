@@ -144,6 +144,7 @@ export function buildUnknownMergedRankColorVisual(
   coloringEnabled: boolean,
   variantStates?: Array<Pick<State, 'cardRoles' | 'threat' | 'threatLabels' | 'goalStatus'>>
 ): RankColorVisual {
+  if (!coloringEnabled) return buildRankColorVisual(['rank--black']);
   if (variantStates && variantStates.length > 0) {
     const colorClasses = variantStates
       .map((variantState) => buildRegularRankColorClass(cardId, variantState, variantState.goalStatus, teachingMode, coloringEnabled))

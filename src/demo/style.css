@@ -895,7 +895,6 @@ html.mode-widget {
 
 .assist-ticks {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 4px;
 }
 
@@ -904,6 +903,15 @@ html.mode-widget {
   line-height: 1.15;
   text-align: center;
   color: #64748b;
+  justify-self: center;
+}
+
+.assist-tick:first-child {
+  justify-self: start;
+}
+
+.assist-tick:last-child {
+  justify-self: end;
 }
 
 .assist-tick.active {
@@ -951,6 +959,11 @@ html.mode-widget {
   right: 0;
 }
 
+.settings-panel-practice {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+
 .settings-primary-panel {
   min-width: 212px;
 }
@@ -975,16 +988,37 @@ html.mode-widget {
   top: 0;
   left: calc(100% + 8px);
   min-width: 176px;
-  border-color: #cbd5e1;
-  background: #fbfdff;
+  border-color: #c3cfdf;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+  padding-top: 7px;
+}
+
+.settings-secondary-inline {
+  position: static;
+  left: auto;
+  top: auto;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+}
+
+.settings-primary-panel.inline-up-safe .settings-more-row,
+.settings-primary-panel.inline-up-overlap .settings-more-row {
+  margin-top: 4px;
+}
+
+.settings-primary-panel.inline-down-safe .settings-secondary-inline {
+  margin-top: 6px;
 }
 
 .settings-secondary-title {
   font-size: 11px;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: #64748b;
+  color: #526174;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e4ebf4;
 }
 
 .advanced-panel-head {
@@ -1016,6 +1050,17 @@ html.mode-widget {
 .advanced-body {
   display: grid;
   gap: 4px;
+}
+
+.advanced-group {
+  display: grid;
+  gap: 4px;
+}
+
+.advanced-divider {
+  height: 1px;
+  margin: 2px 0 1px;
+  background: #dbe4ef;
 }
 
 .advanced-toggle {
@@ -1575,9 +1620,21 @@ html.mode-widget {
   left: calc(100% + 10px);
   min-width: 150px;
   transform: none;
-  border-color: #c3cfdf;
-  background: #ffffff;
+  border-color: #b9c8dc;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+}
+
+.mode-widget .settings-secondary-inline {
+  left: auto;
+  top: auto;
+  min-width: 0;
+  width: 100%;
+  margin: 0 0 4px;
+}
+
+.mode-widget .settings-primary-panel.inline-down-safe .settings-secondary-inline {
+  margin: 4px 0 0;
 }
 
 .mode-widget .settings-more-row {

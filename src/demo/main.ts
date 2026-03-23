@@ -77,27 +77,60 @@ const busyBranchingLabel: Record<'strict' | 'sameLevel' | 'allBusy', string> = {
   sameLevel: 'Same level',
   allBusy: 'All busy'
 };
-type PuzzleModeId = 'standard' | 'multi-ew';
-type AssistLevelId = 'puzzle' | 'light' | 'guided' | 'strong' | 'solution';
+type PuzzleModeId = 'standard' | 'single-dummy' | 'multi-ew';
+type AssistLevelId = 'sd' | 'puzzle' | 'light' | 'guided' | 'solution';
 const PUZZLE_MODE_LABEL: Record<PuzzleModeId, string> = {
-  standard: 'Standard',
+  standard: 'Double Dummy',
+  'single-dummy': 'Single Dummy',
   'multi-ew': 'Multi-EW'
 };
 const ASSIST_LEVELS_BY_MODE: Record<PuzzleModeId, Array<{ id: AssistLevelId; label: string }>> = {
   standard: [
-    { id: 'puzzle', label: 'Puzzle' },
+    { id: 'puzzle', label: 'DD' },
     { id: 'light', label: 'Light' },
     { id: 'guided', label: 'Guided' },
-    { id: 'strong', label: 'Strong' },
+    { id: 'solution', label: 'Solution' }
+  ],
+  'single-dummy': [
+    { id: 'sd', label: 'SD' },
+    { id: 'puzzle', label: 'DD' },
+    { id: 'light', label: 'Light' },
+    { id: 'guided', label: 'Guided' },
     { id: 'solution', label: 'Solution' }
   ],
   'multi-ew': [
-    { id: 'puzzle', label: 'Puzzle' },
+    { id: 'puzzle', label: 'None' },
     { id: 'light', label: 'Light' },
     { id: 'guided', label: 'Guided' },
-    { id: 'strong', label: 'Strong' },
     { id: 'solution', label: 'Solution' }
   ]
+};
+type AssistControlPreset = {
+  showEw: boolean;
+  cardColoring: boolean;
+  alwaysHint: boolean;
+  narrate: boolean;
+};
+const ASSIST_CONTROL_PRESETS: Record<PuzzleModeId, Partial<Record<AssistLevelId, AssistControlPreset>>> = {
+  standard: {
+    puzzle: { showEw: true, cardColoring: false, alwaysHint: false, narrate: false },
+    light: { showEw: true, cardColoring: true, alwaysHint: false, narrate: false },
+    guided: { showEw: true, cardColoring: true, alwaysHint: true, narrate: false },
+    solution: { showEw: true, cardColoring: true, alwaysHint: true, narrate: true }
+  },
+  'single-dummy': {
+    sd: { showEw: false, cardColoring: false, alwaysHint: false, narrate: false },
+    puzzle: { showEw: true, cardColoring: false, alwaysHint: false, narrate: false },
+    light: { showEw: true, cardColoring: true, alwaysHint: false, narrate: false },
+    guided: { showEw: true, cardColoring: true, alwaysHint: true, narrate: false },
+    solution: { showEw: true, cardColoring: true, alwaysHint: true, narrate: true }
+  },
+  'multi-ew': {
+    puzzle: { showEw: true, cardColoring: false, alwaysHint: false, narrate: false },
+    light: { showEw: true, cardColoring: true, alwaysHint: false, narrate: false },
+    guided: { showEw: true, cardColoring: true, alwaysHint: true, narrate: false },
+    solution: { showEw: true, cardColoring: true, alwaysHint: true, narrate: true }
+  }
 };
 type LogChannelId =
   | 'play'
@@ -330,26 +363,29 @@ let showSemanticReducer = false;
 let expandedLogFamilies = new Set<LogChannelFamilyId>(['core', 'diagnostics', 'admin']);
 let enabledLogChannels = new Set<LogChannelId>(['play', 'threat', 'dds', 'variants', 'replay']);
 let teachingMode = true;
-let autoplaySingletons = false;
+let autoplaySingletons = displayMode !== 'widget';
 let autoplayEw = true;
 let unknownModeVariantReplayData: Map<string, UnknownModeVariantReplay> | null = null;
 let assistLevelByMode: Record<PuzzleModeId, AssistLevelId> = {
-  standard: 'guided',
-  'multi-ew': 'guided'
+  standard: displayMode === 'practice' ? 'puzzle' : 'solution',
+  'single-dummy': 'sd',
+  'multi-ew': 'puzzle'
 };
 let alwaysHint = displayMode === 'widget';
 let cardColoringEnabled = true;
-let narrate = displayMode === 'widget';
+let narrate = displayMode === 'analysis';
+let alertMistakes = true;
 let hintsEnabled = true;
 let hideEastWest = false;
 if (displayMode === 'widget' && (widgetUiMode === 'dd-puzzle' || widgetUiMode === 'sd-puzzle')) {
   alwaysHint = false;
   cardColoringEnabled = false;
-  narrate = false;
+  narrate = widgetUiMode === 'dd-puzzle';
   hintsEnabled = false;
   hideEastWest = widgetUiMode === 'sd-puzzle';
 }
 applyWidgetProblemDefaults();
+applyCurrentAssistLevelToControls();
 let showWidgetTeachingPane = false;
 let settingsPanelContext: 'analysis' | 'practice' | 'widget' | null = null;
 let settingsNestedOptionsOpen = false;
@@ -362,12 +398,21 @@ let hintRequestSeq = 0;
 let ddErrorVisual: DdErrorVisualState | null = null;
 function applyWidgetProblemDefaults(): void {
   if (displayMode !== 'widget') return;
-  if (widgetUiMode === 'dd-puzzle' || widgetUiMode === 'sd-puzzle') return;
+  if (widgetUiMode === 'sd-puzzle') {
+    narrate = false;
+    return;
+  }
+  if (widgetUiMode === 'dd-puzzle') {
+    narrate = true;
+    return;
+  }
   if (versionUnknownModeEnabled()) {
     alwaysHint = false;
     cardColoringEnabled = false;
-    narrate = true;
+    narrate = false;
+    return;
   }
+  narrate = true;
 }
 type WidgetStatusType = 'hint' | 'narration' | 'message' | 'default';
 type WidgetStatus = { type: WidgetStatusType; text: string };
@@ -523,6 +568,7 @@ function schedulePulseRender(): void {
 }
 
 function markCardPulse(seat: Seat, cardId: CardId): void {
+  if (!cardColoringEnabled) return;
   if (prefersReducedMotion()) return;
   pulseUntilByCardKey.set(cardPulseKey(seat, cardId), Date.now() + PULSE_MS);
   schedulePulseRender();
@@ -599,6 +645,7 @@ function variantLabelPrefix(variantId: string): string {
 }
 
 function currentPuzzleModeId(problemId = currentProblemId): PuzzleModeId {
+  if (widgetUiMode === 'sd-puzzle') return 'single-dummy';
   const entry = demoProblems.find((problem) => problem.id === problemId);
   return entry?.variants && entry.variants.length > 0 ? 'multi-ew' : 'standard';
 }
@@ -615,10 +662,36 @@ function currentAssistLevel(problemId = currentProblemId): AssistLevelId {
     : currentAssistOptions(problemId)[0]?.id ?? 'guided';
 }
 
+function applyCurrentAssistLevelToControls(problemId = currentProblemId): void {
+  const puzzleMode = currentPuzzleModeId(problemId);
+  const level = currentAssistLevel(problemId);
+  const preset = ASSIST_CONTROL_PRESETS[puzzleMode][level];
+  if (!preset) return;
+  hideEastWest = !preset.showEw;
+  cardColoringEnabled = preset.cardColoring;
+  alwaysHint = preset.alwaysHint;
+  narrate = preset.narrate;
+}
+
+function syncAssistLevelFromControls(problemId = currentProblemId): void {
+  const puzzleMode = currentPuzzleModeId(problemId);
+  const options = currentAssistOptions(problemId);
+  const nextLevel = options.find((option) => {
+    const preset = ASSIST_CONTROL_PRESETS[puzzleMode][option.id];
+    return preset
+      && hideEastWest === !preset.showEw
+      && cardColoringEnabled === preset.cardColoring
+      && alwaysHint === preset.alwaysHint
+      && narrate === preset.narrate;
+  })?.id;
+  if (nextLevel) assistLevelByMode = { ...assistLevelByMode, [puzzleMode]: nextLevel };
+}
+
 function setAssistLevel(level: AssistLevelId, problemId = currentProblemId): void {
   const puzzleMode = currentPuzzleModeId(problemId);
   if (!currentAssistOptions(problemId).some((option) => option.id === level)) return;
   assistLevelByMode = { ...assistLevelByMode, [puzzleMode]: level };
+  if (problemId === currentProblemId) applyCurrentAssistLevelToControls(problemId);
   render();
 }
 
@@ -680,6 +753,7 @@ function renderAssistLevelControl(context: 'analysis' | 'practice' | 'widget'): 
 
   const ticks = document.createElement('div');
   ticks.className = 'assist-ticks';
+  ticks.style.gridTemplateColumns = `repeat(${Math.max(1, options.length)}, minmax(0, 1fr))`;
   for (const option of options) {
     const tick = document.createElement('span');
     tick.className = `assist-tick${option.id === currentLevel ? ' active' : ''}`;
@@ -748,22 +822,69 @@ function renderSettingsToggles(context: 'analysis' | 'practice' | 'widget'): HTM
   const body = document.createElement('div');
   body.className = 'advanced-body';
 
-  if (context !== 'widget') {
-    body.appendChild(
-      renderSettingsToggle('Teaching mode', teachingMode, (checked) => {
-        teachingMode = checked;
-        render();
-      })
-    );
-  }
-  body.appendChild(
+  const assistGroup = document.createElement('div');
+  assistGroup.className = 'advanced-group assist-group';
+  assistGroup.appendChild(
+    renderSettingsToggle('Show E/W', !hideEastWest, (checked) => {
+      hideEastWest = !checked;
+      syncAssistLevelFromControls();
+      render();
+    })
+  );
+  assistGroup.appendChild(
+    renderSettingsToggle('Alert Mistakes', alertMistakes, (checked) => {
+      alertMistakes = checked;
+      if (!checked) clearDdErrorVisual();
+      render();
+    })
+  );
+  assistGroup.appendChild(
+    renderSettingsToggle('Card coloring', cardColoringEnabled, (checked) => {
+      cardColoringEnabled = checked;
+      if (!checked) {
+        clearPulseTimer();
+        pulseUntilByCardKey.clear();
+      }
+      syncAssistLevelFromControls();
+      render();
+    })
+  );
+  assistGroup.appendChild(
+    renderSettingsToggle('Always hint', alwaysHint, (checked) => {
+      alwaysHint = checked;
+      if (!checked) clearHint();
+      syncAssistLevelFromControls();
+      render();
+    })
+  );
+  assistGroup.appendChild(
+    renderSettingsToggle('Narrate', narrate, (checked) => {
+      narrate = checked;
+      if (!checked) {
+        clearNarration();
+      } else {
+        syncWidgetNarrationFeedFromTeaching();
+      }
+      syncAssistLevelFromControls();
+      render();
+    })
+  );
+  body.appendChild(assistGroup);
+
+  const divider = document.createElement('div');
+  divider.className = 'advanced-divider';
+  body.appendChild(divider);
+
+  const otherGroup = document.createElement('div');
+  otherGroup.className = 'advanced-group other-group';
+  otherGroup.appendChild(
     renderSettingsToggle('Autoplay singletons', autoplaySingletons, (checked) => {
       autoplaySingletons = checked;
       syncSingletonAutoplay();
       render();
     })
   );
-  body.appendChild(
+  otherGroup.appendChild(
     renderSettingsToggle('Autoplay E/W', autoplayEw, (checked) => {
       autoplayEw = checked;
       syncConfiguredUserControls();
@@ -774,45 +895,7 @@ function renderSettingsToggles(context: 'analysis' | 'practice' | 'widget'): HTM
       render();
     })
   );
-
-  if (context === 'widget') {
-    body.appendChild(
-      renderSettingsToggle('Always hint', alwaysHint, (checked) => {
-        alwaysHint = checked;
-        if (!checked) clearHint();
-        render();
-      })
-    );
-    body.appendChild(
-      renderSettingsToggle('Card coloring', cardColoringEnabled, (checked) => {
-        cardColoringEnabled = checked;
-        render();
-      })
-    );
-    body.appendChild(
-      renderSettingsToggle('Hide E/W', hideEastWest, (checked) => {
-        hideEastWest = checked;
-        render();
-      })
-    );
-    body.appendChild(
-      renderSettingsToggle('Narrate', narrate, (checked) => {
-        narrate = checked;
-        if (!checked) {
-          clearNarration();
-        } else {
-          syncWidgetNarrationFeedFromTeaching();
-        }
-        render();
-      })
-    );
-    body.appendChild(
-      renderSettingsToggle('Show teaching pane', showWidgetTeachingPane, (checked) => {
-        showWidgetTeachingPane = checked;
-        render();
-      })
-    );
-  }
+  body.appendChild(otherGroup);
 
   return body;
 }
@@ -839,7 +922,7 @@ function renderSettingsButton(context: 'analysis' | 'practice' | 'widget'): HTML
     const moreBtn = document.createElement('button');
     moreBtn.type = 'button';
     moreBtn.className = 'settings-more-row';
-    moreBtn.textContent = settingsNestedOptionsOpen ? 'More options…' : 'More options…';
+    moreBtn.textContent = settingsNestedOptionsOpen ? 'Hide options…' : 'More options…';
     moreBtn.onclick = (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -850,18 +933,56 @@ function renderSettingsButton(context: 'analysis' | 'practice' | 'widget'): HTML
 
     if (settingsNestedOptionsOpen) {
       const secondary = document.createElement('section');
-      secondary.className = `advanced-panel settings-panel settings-secondary-panel settings-panel-${context}`;
+      secondary.className = `advanced-panel settings-panel settings-secondary-panel settings-panel-${context}${context === 'analysis' ? '' : ' settings-secondary-inline'}`;
       const secondaryTitle = document.createElement('strong');
       secondaryTitle.className = 'settings-secondary-title';
       secondaryTitle.textContent = 'Advanced settings';
       secondary.appendChild(secondaryTitle);
       secondary.appendChild(renderSettingsToggles(context));
-      panel.appendChild(secondary);
+      if (context === 'analysis') {
+        panel.appendChild(secondary);
+      } else {
+        panel.appendChild(secondary);
+      }
     }
     wrap.appendChild(panel);
   }
 
   return wrap;
+}
+
+function applyInlineSettingsPlacement(): void {
+  if (typeof document === 'undefined' || !settingsNestedOptionsOpen) return;
+  for (const context of ['widget', 'practice'] as const) {
+    if (settingsPanelContext !== context) continue;
+    const wrap = root.querySelector<HTMLElement>(`.settings-wrap.context-${context}`);
+    const primary = wrap?.querySelector<HTMLElement>(`.settings-primary-panel.settings-panel-${context}`);
+    const secondary = wrap?.querySelector<HTMLElement>(`.settings-secondary-inline.settings-panel-${context}`);
+    const moreRow = wrap?.querySelector<HTMLElement>('.settings-more-row');
+    if (!wrap || !primary || !secondary || !moreRow) continue;
+
+    primary.classList.remove('inline-up-safe', 'inline-down-safe', 'inline-up-overlap');
+    const primaryRect = primary.getBoundingClientRect();
+    const secondaryRect = secondary.getBoundingClientRect();
+    const eastRect = root.querySelector<HTMLElement>('.seat-E')?.getBoundingClientRect() ?? null;
+    const footprintRect = root.querySelector<HTMLElement>('.board-navigation-area')?.getBoundingClientRect() ?? null;
+    const eastBottom = eastRect?.bottom ?? Number.NEGATIVE_INFINITY;
+    const footprintBottom = footprintRect?.bottom ?? window.innerHeight;
+    const expansionHeight = secondaryRect.height;
+    const canExpandUpSafely = primaryRect.top - expansionHeight >= eastBottom;
+    const canExpandDownSafely = primaryRect.bottom + expansionHeight <= footprintBottom;
+
+    if (canExpandUpSafely) {
+      primary.insertBefore(secondary, moreRow);
+      primary.classList.add('inline-up-safe');
+    } else if (canExpandDownSafely) {
+      primary.appendChild(secondary);
+      primary.classList.add('inline-down-safe');
+    } else {
+      primary.insertBefore(secondary, moreRow);
+      primary.classList.add('inline-up-overlap');
+    }
+  }
 }
 
 function cloneHandForVariantSync(hand: Hand): Hand {
@@ -1548,6 +1669,14 @@ function rebuildPracticeSession(setId: PracticeSetId): void {
 
 function applyPracticeDisplayDefaults(solutionMode: boolean): void {
   if (!practiceSession) return;
+  autoplayEw = true;
+  autoplaySingletons = true;
+  if (currentPuzzleModeId() === 'standard') {
+    assistLevelByMode = { ...assistLevelByMode, standard: solutionMode ? 'solution' : 'puzzle' };
+    applyCurrentAssistLevelToControls();
+    showWidgetTeachingPane = false;
+    return;
+  }
   if (solutionMode) {
     alwaysHint = true;
     narrate = true;
@@ -3329,6 +3458,7 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   currentProblem = resolveProblemById(problemId, currentProblemVariantId);
   currentProblemId = problemId;
   applyWidgetProblemDefaults();
+  applyCurrentAssistLevelToControls();
   currentSeed = currentProblem.rngSeed >>> 0;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
   syncConfiguredUserControls();
@@ -3438,7 +3568,7 @@ function runTurn(play: Play): void {
         ) as Record<string, boolean | undefined>
       : null;
   if (play.seat === 'N' || play.seat === 'S') {
-    if (userDdError?.ddError) {
+    if (alertMistakes && userDdError?.ddError) {
       ddErrorVisual = {
         seat: play.seat,
         goodCards: [...userDdError.goodCards],
@@ -4575,6 +4705,17 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
 
   const list = document.createElement('div');
   list.className = 'teaching-events';
+  if (!narrate) {
+    const row = document.createElement('div');
+    row.className = 'teaching-event teaching-info';
+    const text = document.createElement('span');
+    text.className = 'teaching-text';
+    text.textContent = 'Narration is off.';
+    row.appendChild(text);
+    list.appendChild(row);
+    pane.appendChild(list);
+    return pane;
+  }
   const unknownEntries = teachingEntriesForUnknownMode();
   const snapshot = teachingReducer.snapshot() as {
     entries: Array<{ seq: number; seat: string; card: string; summary: string; reasons: string[]; effects: string[] }>;
@@ -4738,6 +4879,7 @@ function render(): void {
   if (displayMode === 'analysis' && (showLog || showDebugSection)) {
     root.appendChild(renderDebugSection());
   }
+  applyInlineSettingsPlacement();
   renderingNow = false;
   syncSingletonAutoplay();
   syncAlwaysHint();
