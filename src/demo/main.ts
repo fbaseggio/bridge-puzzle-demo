@@ -58,6 +58,44 @@ const busyBranchingLabel: Record<'strict' | 'sameLevel' | 'allBusy', string> = {
   sameLevel: 'Same level',
   allBusy: 'All busy'
 };
+type LogChannelId =
+  | 'play'
+  | 'threat'
+  | 'dds'
+  | 'variants'
+  | 'replay'
+  | 'hints'
+  | 'teaching'
+  | 'eq'
+  | 'coverage'
+  | 'lifecycle'
+  | 'validation'
+  | 'verboseInternals';
+type LogChannelFamilyId = 'core' | 'diagnostics' | 'admin';
+type LogChannelDef = {
+  id: LogChannelId;
+  label: string;
+  family: LogChannelFamilyId;
+};
+const LOG_CHANNELS: LogChannelDef[] = [
+  { id: 'play', label: 'Play', family: 'core' },
+  { id: 'threat', label: 'Threat', family: 'core' },
+  { id: 'dds', label: 'DDS', family: 'core' },
+  { id: 'variants', label: 'Variants', family: 'core' },
+  { id: 'replay', label: 'Replay', family: 'core' },
+  { id: 'hints', label: 'Hints', family: 'diagnostics' },
+  { id: 'teaching', label: 'Teaching', family: 'diagnostics' },
+  { id: 'eq', label: 'Eq', family: 'diagnostics' },
+  { id: 'coverage', label: 'Coverage', family: 'diagnostics' },
+  { id: 'lifecycle', label: 'Lifecycle', family: 'admin' },
+  { id: 'validation', label: 'Validation', family: 'admin' },
+  { id: 'verboseInternals', label: 'Verbose internals', family: 'admin' }
+];
+const LOG_CHANNEL_FAMILY_LABEL: Record<LogChannelFamilyId, string> = {
+  core: 'Core',
+  diagnostics: 'Diagnostics',
+  admin: 'Admin'
+};
 type HintState = {
   bestCards: CardId[];
   badCards: CardId[];
@@ -235,10 +273,12 @@ const semanticCollector = new InMemorySemanticEventCollector();
 semanticCollector.attachReducer(semanticReducer);
 let logs: string[] = [];
 let deferredLogLines: string[] = [];
-let verboseLog = false;
 let showLog = false;
 let showGuides = false;
 let showDebugSection = false;
+let showSemanticReducer = false;
+let expandedLogFamilies = new Set<LogChannelFamilyId>(['core', 'diagnostics', 'admin']);
+let enabledLogChannels = new Set<LogChannelId>(['play', 'threat', 'dds', 'variants', 'replay']);
 let teachingMode = true;
 let autoplaySingletons = false;
 let alwaysHint = displayMode === 'widget';
@@ -524,8 +564,36 @@ function widgetReadingMode(): boolean {
 
 function hintDiag(message: string): void {
   console.info(`[HINT] ${message}`);
-  if (!verboseLog) return;
+  if (!enabledLogChannels.has('hints')) return;
   logs = [...logs, `[HINT] ${message}`].slice(-500);
+}
+
+function verboseDetailEnabled(): boolean {
+  return enabledLogChannels.has('verboseInternals');
+}
+
+function channelForLogLine(line: string): LogChannelId | null {
+  if (!line.trim()) return null;
+  if (line.startsWith('----- PLAY') || line.startsWith('play ')) return 'play';
+  if (line.startsWith('[DDS') || line.startsWith('[DD-POLICY]')) return 'dds';
+  if (line.startsWith('[EW-VARIANT')) return 'variants';
+  if (line.startsWith('[PLAYAGAIN]')) return line.includes('coverage') ? 'coverage' : 'replay';
+  if (line.startsWith('[EQ]') || line.startsWith('[EQC') || line.includes('DEFENDER EQ')) return 'eq';
+  if (line.startsWith('[THREAT')) return 'threat';
+  if (line.startsWith('[HINT]')) return 'hints';
+  if (line.startsWith('[UNDO]') || line.startsWith('[RUNSTATUS]') || line.startsWith('[GOAL]')) return 'lifecycle';
+  if (line.startsWith('[INV ') || line.startsWith('INV ')) return 'verboseInternals';
+  if (line.startsWith('[PREFDISC]') || line.startsWith('[DDS-BACKSTOP]')) return 'dds';
+  if (line.startsWith('[WARN]') || line.startsWith('[ERROR]') || line.startsWith('[VALIDATION]')) return 'validation';
+  if (line.startsWith('autoplayDecision ') || line.startsWith('snapshot=')) return 'verboseInternals';
+  return 'play';
+}
+
+function filteredLogLines(lines: string[]): string[] {
+  return lines.filter((line) => {
+    const channel = channelForLogLine(line);
+    return !channel || enabledLogChannels.has(channel);
+  });
 }
 
 function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameters<typeof apply>[2]>['autoplayBackstop'] {
@@ -916,7 +984,7 @@ function positionEncapsulationForLog(view: State): string {
 }
 
 function inverseLongDebugLines(view: State): string[] {
-  if (!(verboseLog && showDebugSection)) return [];
+  if (!(verboseDetailEnabled() && showDebugSection)) return [];
   const hands = {
     N: { S: [...view.hands.N.S], H: [...view.hands.N.H], D: [...view.hands.N.D], C: [...view.hands.N.C] },
     E: { S: [...view.hands.E.S], H: [...view.hands.E.H], D: [...view.hands.E.D], C: [...view.hands.E.C] },
@@ -1375,7 +1443,7 @@ function resetDefenderEqInitSnapshot(): void {
 }
 
 function maybeLogDefenderEqInitSnapshot(): void {
-  if (!verboseLog || defenderEqInitPrinted || defenderEqInitByKey.size === 0) return;
+  if (!enabledLogChannels.has('eq') || defenderEqInitPrinted || defenderEqInitByKey.size === 0) return;
   const entries = [...defenderEqInitByKey.values()].sort(
     (a, b) => a.idx - b.idx || (a.seat < b.seat ? -1 : a.seat > b.seat ? 1 : 0)
   );
@@ -1994,7 +2062,7 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
         ddsTeachingSummaries.push(`DDS: unavailable (${dds.reason}${dds.detail ? `: ${dds.detail}` : ''})`);
       }
 
-      if (verboseLog) {
+      if (enabledLogChannels.has('dds')) {
         const trickNo = shadow.tricksWon.NS + shadow.tricksWon.EW + 1;
         const seat = event.play.seat;
         if (dds.ok) {
@@ -2036,16 +2104,16 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
       lines.push(playLine);
     }
 
-    if (verboseLog && event.type === 'autoplay') {
-      if (event.browserDdBackstop) {
+    if (event.type === 'autoplay') {
+      if (enabledLogChannels.has('dds') && event.browserDdBackstop) {
         lines.push(
           `[DDS-BACKSTOP] legal={${event.browserDdBackstop.legalCandidates.join(',') || '-'}} policy=${event.browserDdBackstop.policyChoice} safe={${event.browserDdBackstop.safeCandidates.join(',') || '-'}} final=${event.browserDdBackstop.finalChoice} override=${event.browserDdBackstop.overridden ? 'yes' : 'no'} reason=${event.browserDdBackstop.reason}`
         );
       }
-      if (event.replay?.action === 'forced') {
+      if (enabledLogChannels.has('replay') && event.replay?.action === 'forced') {
         lines.push(`[PLAYAGAIN] forcing index=${event.replay.index ?? '?'} card=${event.replay.card ?? `${event.play.suit}${event.play.rank}`}`);
       }
-      if (event.replay?.action === 'disabled') {
+      if (enabledLogChannels.has('replay') && event.replay?.action === 'disabled') {
         if (event.replay.reason === 'class-not-legal') {
           lines.push(
             `[PLAYAGAIN] force failed idx=${event.replay.index ?? '?'} forcedClass=${event.replay.forcedClassId ?? '-'} reason=class-not-legal; continuing unforced`
@@ -2054,7 +2122,7 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
           lines.push(`[PLAYAGAIN] replay disabled due to ${event.replay.reason ?? 'mismatch'}`);
         }
       }
-      if (event.preferredDiscard) {
+      if (enabledLogChannels.has('dds') && event.preferredDiscard) {
         const pref = event.preferredDiscard;
         if (pref.applied && pref.chosen) {
           lines.push(`[PREFDISC] seat=${event.play.seat} applied preferred discard=${pref.chosen}`);
@@ -2064,7 +2132,7 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
           );
         }
       }
-      if (event.ddPolicy) {
+      if (enabledLogChannels.has('dds') && event.ddPolicy) {
         if (event.ddPolicy.bound) {
           lines.push(
             `[DD-POLICY] source=${event.ddPolicy.source} problem=${event.ddPolicy.problemId} bound=yes path=${event.ddPolicy.path} base={${event.ddPolicy.baseCandidates.join(',') || '-'}} allowed={${event.ddPolicy.allowedCandidates.join(',') || '-'}}`
@@ -2091,7 +2159,7 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
           lines.push(`[EW-VARIANTS] common playable set used; seeded choice=${trace.chosenCardId ?? '-'}`);
         }
       }
-      if (threatDetail) {
+      if (threatDetail && verboseDetailEnabled()) {
         const leadSuit = shadow.trick[0]?.suit ?? 'none';
         const legalCount = legalPlays(shadow).length;
         lines.push(`autoplayDecision seat=${shadow.turn} leadSuit=${leadSuit} legal=${legalCount} chosen=${playText(event.play)}`);
@@ -2099,6 +2167,7 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
 
       const policy = shadow.policies[shadow.turn];
       if (
+        enabledLogChannels.has('threat') &&
         policy?.kind === 'threatAware' &&
         shadow.trick.length > 0 &&
         shadow.hands[shadow.turn][shadow.trick[0].suit].length > 0
@@ -2142,7 +2211,7 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
         lines.push(
           `[THREAT] discard seat=${shadow.turn} ledSuit=${ledSuit} legal=${tiers.legal.length} chosen=${event.play.suit}${event.play.rank} bucket=${event.chosenBucket ?? '-'} tiers=${tierCounts || '-'}`
         );
-        if (threatDetail) {
+        if (threatDetail && verboseDetailEnabled()) {
           lines.push(
             formatDiscardDecisionBlock({
               defender: shadow.turn,
@@ -2171,7 +2240,7 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
       lines.push(eventText(event));
     }
 
-    if (verboseLog && threatDetail && (event.type === 'played' || event.type === 'autoplay')) {
+    if (verboseDetailEnabled() && threatDetail && (event.type === 'played' || event.type === 'autoplay')) {
       const beforeCtx = shadow.threat as ThreatContext | null;
       const beforeLabels = shadow.threatLabels as DefenderLabels | null;
       applyEventToShadow(shadow, event);
@@ -2194,7 +2263,7 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
       ddsHistory.push(toCardId(event.play.suit, event.play.rank));
     }
 
-    if (verboseLog && event.type === 'illegal') {
+    if (enabledLogChannels.has('validation') && event.type === 'illegal') {
       const leadSuit = shadow.trick[0]?.suit ?? 'none';
       const legal = legalPlays(shadow)
         .slice(0, 10)
@@ -2207,12 +2276,12 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
 
     if (event.type === 'trickComplete') {
       lines.push(`----- TRICK COMPLETE ----- winner=${event.winner} trick=${event.trick.map(playText).join(' ')}`);
-      if (verboseLog) {
+      if (verboseDetailEnabled()) {
         lines.push(`ENCAP ${positionEncapsulationForLog(shadow)}`);
         lines.push(...inverseLongDebugLines(shadow));
       }
       lines.push('');
-      if (verboseLog && threatDetail && shadow.threat && shadow.threatLabels) {
+      if (verboseDetailEnabled() && threatDetail && shadow.threat && shadow.threatLabels) {
         const trickIndex = shadow.tricksWon.NS + shadow.tricksWon.EW + 1;
         lines.push(
           formatAfterTrickBlock({
@@ -2230,7 +2299,7 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
     }
   }
 
-  if (verboseLog && threatDetail) {
+  if (verboseDetailEnabled() && threatDetail) {
     lines.push(snapshotText(after));
   }
 
@@ -2243,7 +2312,7 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
     if (event.type === 'autoplay' && (event.play.seat === 'E' || event.play.seat === 'W') && event.decisionSig) {
       invEqVersion += 1;
       const nodeKey = currentRunEqTokens.join(' > ');
-      if (verboseLog) {
+      if (enabledLogChannels.has('eq')) {
         logs = [
           ...logs,
           withRunVisit(
@@ -2305,7 +2374,7 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
         if (!classOrder.includes(chosenAltClassId)) classOrder.push(chosenAltClassId);
         representativeCardByClass[chosenAltClassId] = chosenCard;
         if (
-          verboseLog &&
+          enabledLogChannels.has('coverage') &&
           (
             (runtimeRemainingForLog && runtimeRemainingForLog.join(',') !== sourceRec.sameBucketAlternativeClassIds.join(','))
             || (!runtimeRemainingForLog && runtimeRemainingReason)
@@ -2335,7 +2404,7 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
         const mapped = toDecisionClass(card);
         return mapped === chosenAltClassId;
       });
-      if (verboseLog) {
+      if (enabledLogChannels.has('eq')) {
         logs = [
           ...logs,
           withRunVisit(
@@ -2537,7 +2606,7 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
   threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
   if (clearLogs) clearTeachingEvents();
   if (rawThreats.length === 0) {
-    if (verboseLog) {
+    if (enabledLogChannels.has('threat') || enabledLogChannels.has('eq') || verboseDetailEnabled()) {
       if (!skipNextThreatInitRunIncrement) startNewLogRun();
       skipNextThreatInitRunIncrement = false;
       logs = [
@@ -2554,7 +2623,7 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
     addInitialThreatTeachingSummary(state);
   }
 
-  if (verboseLog) {
+  if (enabledLogChannels.has('threat') || enabledLogChannels.has('eq') || verboseDetailEnabled()) {
     if (!skipNextThreatInitRunIncrement) startNewLogRun();
     skipNextThreatInitRunIncrement = false;
     if (threatDetail) {
@@ -2705,7 +2774,7 @@ function runTurn(play: Play): void {
         ...logs,
         `[PLAYAGAIN] user diverged at decisionIdx=${divergedAt} expectedClass=${expected.playClassId} actualClass=${actualClass}; continuing without forcing further decisions`
       ].slice(-500);
-    } else if (verboseLog) {
+    } else if (enabledLogChannels.has('eq')) {
       const classId = getImmutableUserEqClass(play.seat, playId);
       const rep = getImmutableUserEqRep(classId, playId);
       logs = [...logs, `[EQ] seat=${play.seat} played=${playId} class=${classId} rep=${rep}`].slice(-500);
@@ -2834,7 +2903,7 @@ function runTurn(play: Play): void {
   }
   if (complete?.type === 'handComplete') {
     const nextStatus: RunStatus = complete.success ? 'success' : 'failure';
-    if (verboseLog) {
+    if (enabledLogChannels.has('lifecycle')) {
       logs = [
         ...logs,
         `[GOAL] endOfRun=true goalStatus=${state.goalStatus} NSwon=${complete.tricksWon.NS} EWwon=${complete.tricksWon.EW} required${state.goal.side}>=${state.goal.n} success=${complete.success}`,
@@ -2896,16 +2965,16 @@ function renderDebugControls(): HTMLElement {
   showLogLabel.append(showLogBox, ' Show log');
   row.appendChild(showLogLabel);
 
-  const verboseLabel = document.createElement('label');
-  const verboseBox = document.createElement('input');
-  verboseBox.type = 'checkbox';
-  verboseBox.checked = verboseLog;
-  verboseBox.onchange = () => {
-    verboseLog = verboseBox.checked;
+  const semanticLabel = document.createElement('label');
+  const semanticBox = document.createElement('input');
+  semanticBox.type = 'checkbox';
+  semanticBox.checked = showSemanticReducer;
+  semanticBox.onchange = () => {
+    showSemanticReducer = semanticBox.checked;
     render();
   };
-  verboseLabel.append(verboseBox, ' Verbose log');
-  row.appendChild(verboseLabel);
+  semanticLabel.append(semanticBox, ' Show Semantic Reducer');
+  row.appendChild(semanticLabel);
 
   const variationsLabel = document.createElement('label');
   variationsLabel.textContent = 'Variations: ';
@@ -2930,11 +2999,94 @@ function renderDebugControls(): HTMLElement {
   return panel;
 }
 
+function renderLogChannelControls(): HTMLElement {
+  const panel = document.createElement('section');
+  panel.className = 'log-channel-panel debug-subsection';
+
+  const title = document.createElement('strong');
+  title.textContent = 'Log channels';
+  panel.appendChild(title);
+
+  const actions = document.createElement('div');
+  actions.className = 'log-channel-actions';
+  const allBtn = document.createElement('button');
+  allBtn.type = 'button';
+  allBtn.textContent = 'All';
+  allBtn.onclick = () => {
+    enabledLogChannels = new Set(LOG_CHANNELS.map((channel) => channel.id));
+    render();
+  };
+  const noneBtn = document.createElement('button');
+  noneBtn.type = 'button';
+  noneBtn.textContent = 'None';
+  noneBtn.onclick = () => {
+    enabledLogChannels = new Set();
+    render();
+  };
+  actions.append(allBtn, noneBtn);
+  panel.appendChild(actions);
+
+  for (const family of ['core', 'diagnostics', 'admin'] as const) {
+    const familyChannels = LOG_CHANNELS.filter((channel) => channel.family === family);
+    const familyWrap = document.createElement('details');
+    familyWrap.className = 'log-channel-family';
+    familyWrap.open = expandedLogFamilies.has(family);
+    familyWrap.ontoggle = () => {
+      if (familyWrap.open) expandedLogFamilies.add(family);
+      else expandedLogFamilies.delete(family);
+    };
+
+    const summary = document.createElement('summary');
+    const familyToggle = document.createElement('input');
+    familyToggle.type = 'checkbox';
+    const enabledCount = familyChannels.filter((channel) => enabledLogChannels.has(channel.id)).length;
+    familyToggle.checked = enabledCount === familyChannels.length;
+    familyToggle.indeterminate = enabledCount > 0 && enabledCount < familyChannels.length;
+    familyToggle.onclick = (event) => event.stopPropagation();
+    familyToggle.onchange = () => {
+      if (familyToggle.checked) {
+        familyChannels.forEach((channel) => enabledLogChannels.add(channel.id));
+      } else {
+        familyChannels.forEach((channel) => enabledLogChannels.delete(channel.id));
+      }
+      render();
+    };
+    const familyLabel = document.createElement('span');
+    familyLabel.textContent = LOG_CHANNEL_FAMILY_LABEL[family];
+    summary.append(familyToggle, familyLabel);
+    familyWrap.appendChild(summary);
+
+    const list = document.createElement('div');
+    list.className = 'log-channel-list';
+    for (const channel of familyChannels) {
+      const label = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = enabledLogChannels.has(channel.id);
+      box.onchange = () => {
+        if (box.checked) enabledLogChannels.add(channel.id);
+        else enabledLogChannels.delete(channel.id);
+        render();
+      };
+      label.append(box, ` ${channel.label}`);
+      list.appendChild(label);
+    }
+    familyWrap.appendChild(list);
+    panel.appendChild(familyWrap);
+  }
+
+  return panel;
+}
+
 function renderDebugSection(): HTMLElement {
   const section = document.createElement('section');
   section.className = 'debug-section';
   section.appendChild(renderDebugControls());
-  section.appendChild(renderDebugPanel());
+  if (showLog) section.appendChild(renderLogChannelControls());
+
+  if (showSemanticReducer) {
+    section.appendChild(renderDebugPanel());
+  }
 
   if (showLog) {
     const panel = document.createElement('section');
@@ -2946,7 +3098,8 @@ function renderDebugSection(): HTMLElement {
 
     const log = document.createElement('div');
     log.className = 'log';
-    log.textContent = logs.length > 0 ? logs.join('\n') : 'No events yet';
+    const visibleLogs = filteredLogLines(logs);
+    log.textContent = visibleLogs.length > 0 ? visibleLogs.join('\n') : 'No matching log lines';
     panel.appendChild(log);
     section.appendChild(panel);
     log.scrollTop = log.scrollHeight;
@@ -3023,7 +3176,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
     logs = [...logs, `[PLAYAGAIN] candidates=[${candidates.map((c) => c.index).join(',')}] chosen=${divergenceIndex}`].slice(-500);
     logs = [...logs, `[PLAYAGAIN] divergenceIndex=${divergenceIndex} forcedClass=${forcedClass} forcedCard=${forcedCard ?? '-'}`].slice(-500);
   }
-  if (verboseLog) {
+  if (enabledLogChannels.has('coverage')) {
     logs = [...logs, '----- PLAY AGAIN COVERAGE -----', ...(coverageLines.length > 0 ? coverageLines : ['[EQC:playagain] none'])].slice(-500);
   }
   if (!forcedClass || divergenceIndex === null) {
@@ -3930,9 +4083,9 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
       const nonDdReasons = (entry.reasons ?? []).filter((reason) => !reason.startsWith('DD:'));
       const bracketParts: string[] = [];
       if (ddReasons.length > 0) {
-        bracketParts.push(...ddReasons.map((item) => (verboseLog ? item.full : item.short)));
+        bracketParts.push(...ddReasons.map((item) => (verboseDetailEnabled() ? item.full : item.short)));
       }
-      if (verboseLog && nonDdReasons.length > 0) {
+      if (verboseDetailEnabled() && nonDdReasons.length > 0) {
         bracketParts.push(...nonDdReasons);
       }
       text.textContent = bracketParts.length > 0 ? `${entry.summary} [${bracketParts.join('; ')}]` : entry.summary;
@@ -3946,7 +4099,7 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
         row.appendChild(ddsLine);
       }
 
-      const shownEffects = (entry.effects ?? []).filter((effect) => verboseLog || !isIdleTransitionEffect(effect));
+      const shownEffects = (entry.effects ?? []).filter((effect) => verboseDetailEnabled() || !isIdleTransitionEffect(effect));
       if (shownEffects.length > 0) {
         const detail = document.createElement('pre');
         detail.className = 'teaching-detail';
