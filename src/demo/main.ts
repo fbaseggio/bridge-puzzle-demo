@@ -3620,6 +3620,22 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     if (advancedPanelOpen) {
       const panel = document.createElement('section');
       panel.className = 'advanced-panel widget-advanced-panel';
+      const panelHead = document.createElement('div');
+      panelHead.className = 'advanced-panel-head';
+      const panelClose = document.createElement('button');
+      panelClose.type = 'button';
+      panelClose.className = 'advanced-close-btn';
+      panelClose.textContent = '×';
+      panelClose.title = 'Close advanced options';
+      panelClose.setAttribute('aria-label', 'Close advanced options');
+      panelClose.onclick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        advancedPanelOpen = false;
+        render();
+      };
+      panelHead.appendChild(panelClose);
+      panel.appendChild(panelHead);
 
       const mkToggle = (label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement => {
         const row = document.createElement('label');

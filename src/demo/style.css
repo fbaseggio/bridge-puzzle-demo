@@ -1223,6 +1223,31 @@ html.mode-widget {
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
 }
 
+.mode-widget .advanced-panel-head {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.mode-widget .advanced-close-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  border-radius: 4px;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  padding: 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mode-widget .advanced-close-btn:hover {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
 .mode-widget .widget-advanced-panel {
   position: absolute;
   left: calc(50% + var(--trick-box-w) / 2 + 6px);
