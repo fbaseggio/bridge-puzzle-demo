@@ -1,4 +1,4 @@
-import type { EngineEvent, Goal, Hand, Play, Policy, Problem, Rank, Seat, State, Suit } from './types';
+import type { EngineEvent, EwVariant, EwVariantState, Goal, Hand, Play, Policy, Problem, Rank, Seat, State, Suit } from './types';
 import { evaluatePolicy } from '../ai/evaluatePolicy';
 import {
   initClassification,
@@ -40,6 +40,63 @@ function cloneHand(hand: Hand): Hand {
   };
 }
 
+function cloneEwVariantHands(hands: EwVariant['hands']): EwVariant['hands'] {
+  return {
+    E: cloneHand(hands.E),
+    W: cloneHand(hands.W)
+  };
+}
+
+function cloneEwVariantState(state: EwVariantState | null): EwVariantState | null {
+  if (!state) return null;
+  return {
+    variants: state.variants.map((variant) => ({
+      id: variant.id,
+      label: variant.label,
+      hands: cloneEwVariantHands(variant.hands)
+    })),
+    activeVariantIds: [...state.activeVariantIds],
+    committedVariantId: state.committedVariantId,
+    representativeVariantId: state.representativeVariantId
+  };
+}
+
+function variantById(state: EwVariantState | null, variantId: string | null | undefined): EwVariant | null {
+  if (!state || !variantId) return null;
+  return state.variants.find((variant) => variant.id === variantId) ?? null;
+}
+
+function syncRepresentativeVariantHands(state: State): void {
+  const representative = variantById(state.ewVariantState, state.ewVariantState?.representativeVariantId);
+  if (!representative) return;
+  state.hands.E = cloneHand(representative.hands.E);
+  state.hands.W = cloneHand(representative.hands.W);
+  const threatCardIds = state.threat?.threatCardIds ?? [];
+  const resourceCardIds = state.resource?.resourceCardIds ?? [];
+  if (threatCardIds.length === 0 && resourceCardIds.length === 0) return;
+  const threatSymbolByCardId = Object.fromEntries(
+    Object.values(state.threat?.threatsBySuit ?? {})
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+      .map((entry) => [entry.threatCardId, entry.symbol])
+      .filter(([, symbol]) => typeof symbol === 'string')
+  ) as Partial<Record<CardId, string>>;
+  const classification = initClassification(
+    { hands: state.hands },
+    threatCardIds,
+    resourceCardIds,
+    undefined,
+    threatSymbolByCardId
+  );
+  state.threat = classification.threat as State['threat'];
+  state.resource = classification.resource as State['resource'];
+  state.threatLabels = classification.labels as State['threatLabels'];
+  state.cardRoles = { ...classification.perCardRole };
+}
+
+function removeCardFromVariantHands(variantHands: EwVariant['hands'], seat: 'E' | 'W', suit: Suit, rank: Rank): void {
+  removeCard(variantHands[seat], suit, rank);
+}
+
 function cloneState(state: State): State {
   return {
     ...state,
@@ -76,6 +133,7 @@ function cloneState(state: State): State {
       W: state.preferredDiscards.W ? [...state.preferredDiscards.W] : undefined
     },
     preferredDiscardUsed: { ...state.preferredDiscardUsed },
+    ewVariantState: cloneEwVariantState(state.ewVariantState),
     replay: {
       enabled: state.replay.enabled,
       transcript: state.replay.transcript
@@ -270,6 +328,7 @@ type AutoChoice = {
     overridden: boolean;
     reason: 'applied' | 'runtime-unavailable' | 'no-safe-match';
   };
+  ewVariantState?: EwVariantState | null;
 };
 
 type ApplyOptions = {
@@ -593,9 +652,14 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
       threat: state.threat as any,
       resource: state.resource as any,
       threatLabels: state.threatLabels as any,
+      ewVariantState: state.ewVariantState,
       rng: state.rng
     });
     state.rng = { ...evaluated.rngAfter };
+    if (evaluated.ewVariantState) {
+      state.ewVariantState = cloneEwVariantState(evaluated.ewVariantState);
+      syncRepresentativeVariantHands(state);
+    }
     if (!evaluated.chosenCardId) return { play: null, preferredDiscard: pref ?? undefined, decisionSig, replay: replayNote };
     const { suit, rank } = parseCardId(evaluated.chosenCardId);
     const legal = legalPlays(state);
@@ -606,6 +670,7 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
       bucketCards: evaluated.bucketCards ?? legal.map((p) => toCardId(p.suit, p.rank)),
       policyClassByCard: evaluated.policyClassByCard,
       ddPolicy: evaluated.ddPolicy,
+      ewVariantState: cloneEwVariantState(state.ewVariantState),
       decisionSig,
       replay: replayNote
     };
@@ -623,9 +688,14 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
     threat: state.threat as any,
     resource: state.resource as any,
     threatLabels: state.threatLabels as any,
+    ewVariantState: state.ewVariantState,
     rng: state.rng
   });
   state.rng = { ...evaluated.rngAfter };
+  if (evaluated.ewVariantState) {
+    state.ewVariantState = cloneEwVariantState(evaluated.ewVariantState);
+    syncRepresentativeVariantHands(state);
+  }
   if (!evaluated.chosenCardId) {
     return { play: null, preferredDiscard: pref ?? undefined, decisionSig, replay: replayNote };
   }
@@ -638,6 +708,7 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
     policyClassByCard: evaluated.policyClassByCard,
     tierBuckets: evaluated.tierBuckets,
     ddPolicy: evaluated.ddPolicy,
+    ewVariantState: cloneEwVariantState(state.ewVariantState),
     decisionSig,
     replay: replayNote
   };
@@ -690,6 +761,12 @@ function applyOnePlay(
   }
 
   state.trick.push({ ...play });
+  if (state.ewVariantState && (play.seat === 'E' || play.seat === 'W')) {
+    for (const variant of state.ewVariantState.variants) {
+      if (!state.ewVariantState.activeVariantIds.includes(variant.id)) continue;
+      removeCardFromVariantHands(variant.hands, play.seat, play.suit, play.rank);
+    }
+  }
   state.trickClassIds.push(`${play.seat}:${playedClass}`);
   emitSemantic(collector, {
     type: 'card-played',
@@ -928,6 +1005,19 @@ export function init(problem: Problem): State {
     policies: { ...problem.policies },
     preferredDiscards: normalizePreferred(problem),
     preferredDiscardUsed: {},
+    ewVariantState:
+      problem.ewVariants && problem.ewVariants.length > 0
+        ? {
+            variants: problem.ewVariants.map((variant) => ({
+              id: variant.id,
+              label: variant.label,
+              hands: cloneEwVariantHands(variant.hands)
+            })),
+            activeVariantIds: problem.ewVariants.map((variant) => variant.id),
+            committedVariantId: null,
+            representativeVariantId: problem.representativeEwVariantId ?? problem.ewVariants[0].id
+          }
+        : null,
     replay: { enabled: false, transcript: null, cursor: 0, divergenceIndex: null, forcedCard: null, forcedClassId: null }
   };
 

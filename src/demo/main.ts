@@ -37,8 +37,9 @@ import {
 import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock, formatInitBlock } from '../ai/threatModelVerbose';
 import { buildFeatureStateFromRuntime, getRankColorForFeatureRole } from '../ai/features';
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
-import { demoProblems, resolveDemoProblem } from './problems';
+import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem } from './problems';
 import { buildPracticeQueue, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
+import { fixedRanksForSeatSuit, unresolvedEwCardsBySuit } from './ewVariantView';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -165,6 +166,11 @@ const initialProblemIdFromUrl: string = (() => {
   if (!requested) return demoProblems[0].id;
   return demoProblems.some((p) => p.id === requested) ? requested : demoProblems[0].id;
 })();
+const initialVariantIdFromUrl: string | null = (() => {
+  if (typeof window === 'undefined') return null;
+  const requested = new URLSearchParams(window.location.search).get('variant');
+  return requested?.trim() ? requested.trim().toLowerCase() : null;
+})();
 let practiceSetId: PracticeSetId = 'set1';
 const initialPracticeEntries = displayMode === 'practice' ? buildPracticeQueue(practiceSetId) : [];
 let practiceProblemOverrides = new Map<string, ProblemWithThreats>(
@@ -197,15 +203,27 @@ const startupGateEnabledFromUrl: boolean = (() => {
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 })();
 
-function resolveProblemById(problemId: string): ProblemWithThreats {
+function resolveProblemById(problemId: string, variantId?: string | null): ProblemWithThreats {
   const override = practiceProblemOverrides.get(problemId);
   if (override) return override;
   const entry = demoProblems.find((p) => p.id === problemId) ?? demoProblems[0];
-  return resolveDemoProblem(entry) as ProblemWithThreats;
+  return resolveDemoProblem(entry, variantId) as ProblemWithThreats;
+}
+
+function resolveProblemVariantId(problemId: string, variantId?: string | null): string | null {
+  if (!variantId?.trim()) return null;
+  const entry = demoProblems.find((p) => p.id === problemId);
+  if (!entry) return null;
+  return normalizeDemoProblemVariantId(entry, variantId);
+}
+
+function versionUnknownModeEnabled(): boolean {
+  return !currentProblemVariantId && Boolean(currentProblem.ewVariants && currentProblem.ewVariants.length > 0);
 }
 
 const initialProblemId = initialPracticeQueue[0] ?? initialProblemIdFromUrl;
-let currentProblem = resolveProblemById(initialProblemId);
+let currentProblemVariantId = resolveProblemVariantId(initialProblemId, initialVariantIdFromUrl);
+let currentProblem = resolveProblemById(initialProblemId, currentProblemVariantId);
 let currentProblemId = initialProblemId;
 let currentSeed = currentProblem.rngSeed >>> 0;
 let state: State = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
@@ -267,6 +285,7 @@ let threatLabels: DefenderLabels | null = null;
 type GameSnapshot = {
   state: State;
   currentProblemId: string;
+  currentProblemVariantId: string | null;
   currentSeed: number;
   logs: string[];
   deferredLogLines: string[];
@@ -1208,6 +1227,21 @@ function cloneStateForLog(src: State): State {
       W: src.preferredDiscards.W ? [...src.preferredDiscards.W] : undefined
     },
     preferredDiscardUsed: { ...src.preferredDiscardUsed },
+    ewVariantState: src.ewVariantState
+      ? {
+          variants: src.ewVariantState.variants.map((variant) => ({
+            id: variant.id,
+            label: variant.label,
+            hands: {
+              E: { S: [...variant.hands.E.S], H: [...variant.hands.E.H], D: [...variant.hands.E.D], C: [...variant.hands.E.C] },
+              W: { S: [...variant.hands.W.S], H: [...variant.hands.W.H], D: [...variant.hands.W.D], C: [...variant.hands.W.C] }
+            }
+          })),
+          activeVariantIds: [...src.ewVariantState.activeVariantIds],
+          committedVariantId: src.ewVariantState.committedVariantId,
+          representativeVariantId: src.ewVariantState.representativeVariantId
+        }
+      : null,
     replay: src.replay.transcript
       ? {
           enabled: src.replay.enabled,
@@ -1263,6 +1297,7 @@ function makeSnapshot(play: Play): GameSnapshot {
   return {
     state: cloneStateForLog(state),
     currentProblemId,
+    currentProblemVariantId,
     currentSeed,
     logs: [...logs],
     deferredLogLines: [...deferredLogLines],
@@ -1290,7 +1325,8 @@ function makeSnapshot(play: Play): GameSnapshot {
 function restoreSnapshot(snapshot: GameSnapshot): void {
   state = cloneStateForLog(snapshot.state);
   currentProblemId = snapshot.currentProblemId;
-  currentProblem = resolveProblemById(currentProblemId);
+  currentProblemVariantId = snapshot.currentProblemVariantId;
+  currentProblem = resolveProblemById(currentProblemId, currentProblemVariantId);
   currentSeed = snapshot.currentSeed;
   logs = [...snapshot.logs];
   deferredLogLines = [...snapshot.deferredLogLines];
@@ -2571,13 +2607,14 @@ function resetGame(seed: number, reason: string): void {
   render();
 }
 
-function selectProblem(problemId: string): void {
+function selectProblem(problemId: string, variantId?: string | null): void {
   clearSingletonAutoplayTimer();
   clearPulseTimer();
   pulseUntilByCardKey.clear();
   const entry = demoProblems.find((p) => p.id === problemId);
   if (!entry && !practiceProblemOverrides.has(problemId)) return;
-  currentProblem = resolveProblemById(problemId);
+  currentProblemVariantId = practiceProblemOverrides.has(problemId) ? null : resolveProblemVariantId(problemId, variantId);
+  currentProblem = resolveProblemById(problemId, currentProblemVariantId);
   currentProblemId = problemId;
   currentSeed = currentProblem.rngSeed >>> 0;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
@@ -3055,6 +3092,7 @@ function renderSuitRow(
   view: State,
   seat: Seat,
   suit: Suit,
+  displayRanks: Rank[],
   legalSet: Set<string>,
   canAct: boolean,
   hintBestSet: Set<CardId>,
@@ -3071,7 +3109,7 @@ function renderSuitRow(
   const cards = document.createElement('div');
   cards.className = 'cards';
 
-  const ranks = sortRanksDesc(view.hands[seat][suit]);
+  const ranks = [...displayRanks];
   const equivalentRanks = new Set<Rank>();
   if (teachingMode) {
     for (const cls of getSuitEquivalenceClasses(view, seat, suit)) {
@@ -3170,10 +3208,41 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   }
 
   for (const suit of suitOrder) {
-    card.appendChild(renderSuitRow(view, seat, suit, legalSet, effectiveCanAct, hintBestSet, ddErrorGoodSet));
+    const displayRanks =
+      versionUnknownModeEnabled() && (seat === 'E' || seat === 'W')
+        ? fixedRanksForSeatSuit(view.ewVariantState, seat, suit)
+        : sortRanksDesc(view.hands[seat][suit]);
+    card.appendChild(renderSuitRow(view, seat, suit, displayRanks, legalSet, effectiveCanAct, hintBestSet, ddErrorGoodSet));
   }
 
   return card;
+}
+
+function renderUnknownSlashLine(view: State): HTMLElement | null {
+  if (!versionUnknownModeEnabled()) return null;
+  const unresolved = unresolvedEwCardsBySuit(view.ewVariantState);
+  const visibleSuits = suitOrder.filter((suit) => unresolved[suit].length > 0);
+  const total = visibleSuits.reduce((sum, suit) => sum + unresolved[suit].length, 0);
+  if (total === 0) return null;
+
+  const line = document.createElement('aside');
+  line.className = 'unknown-slash-line';
+  line.setAttribute('aria-label', 'Unknown E/W cards across versions');
+
+  const title = document.createElement('span');
+  title.className = 'unknown-title';
+  title.textContent = 'Unknown';
+  line.appendChild(title);
+
+  for (const suit of visibleSuits) {
+    const chunk = document.createElement('span');
+    chunk.className = `unknown-suit suit-${suit}`;
+    const ranks = unresolved[suit].map((cardId) => displayRank(cardId.slice(1) as Rank)).join('');
+    chunk.textContent = `${suitSymbol[suit]}${ranks || '-'}`;
+    line.appendChild(chunk);
+  }
+
+  return line;
 }
 
 function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
@@ -3339,6 +3408,28 @@ function renderControlsBanner(): HTMLElement {
   row.appendChild(puzzleLabel);
 
   const currentEntry = demoProblems.find((p) => p.id === currentProblemId);
+  if (currentEntry?.variants && currentEntry.variants.length > 0) {
+    const variantLabel = document.createElement('label');
+    variantLabel.textContent = 'Version: ';
+    const variantSelect = document.createElement('select');
+    const unknownOpt = document.createElement('option');
+    unknownOpt.value = 'unknown';
+    unknownOpt.textContent = 'Version Unknown';
+    unknownOpt.selected = currentProblemVariantId === null;
+    variantSelect.appendChild(unknownOpt);
+    for (const variant of currentEntry.variants) {
+      const opt = document.createElement('option');
+      opt.value = variant.id;
+      opt.textContent = variant.label;
+      opt.selected = variant.id === currentProblemVariantId;
+      variantSelect.appendChild(opt);
+    }
+    variantSelect.onchange = () => {
+      selectProblem(currentProblemId, variantSelect.value === 'unknown' ? null : variantSelect.value);
+    };
+    variantLabel.appendChild(variantSelect);
+    row.appendChild(variantLabel);
+  }
   const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
 
   if (currentEntry?.articlePath) {
@@ -3590,6 +3681,8 @@ function renderBoardNavigationArea(view: State): HTMLElement {
       const u = new URL(window.location.href);
       u.searchParams.set('mode', 'analysis');
       u.searchParams.set('problem', currentProblemId);
+      if (currentProblemVariantId) u.searchParams.set('variant', currentProblemVariantId);
+      else u.searchParams.delete('variant');
       if (userPlayHistory.length > 0) u.searchParams.set('history', encodeUserHistoryForUrl(userPlayHistory));
       else u.searchParams.delete('history');
       pop.href = u.toString();
@@ -3899,6 +3992,8 @@ function render(): void {
   tableCanvas.appendChild(renderSeatHand(view, 'W'));
   tableCanvas.appendChild(renderSeatHand(view, 'E'));
   tableCanvas.appendChild(renderSeatHand(view, 'S'));
+  const unknownSlashLine = renderUnknownSlashLine(view);
+  if (unknownSlashLine) tableCanvas.appendChild(unknownSlashLine);
 
   tableHost.appendChild(tableCanvas);
   if (displayMode === 'analysis') {

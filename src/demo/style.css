@@ -425,6 +425,43 @@ html.mode-widget {
   transform: translateX(-50%);
 }
 
+.unknown-slash-line {
+  position: absolute;
+  left: calc(50% - var(--hand-box-w) / 2 - 104px);
+  top: calc(50% + var(--trick-box-h) / 2 + var(--gap-y) + 34px);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.unknown-suit {
+  display: block;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+}
+
+.unknown-title {
+  display: block;
+  margin-bottom: 1px;
+  color: #0f172a;
+  text-decoration: underline;
+}
+
+.mode-widget .unknown-slash-line {
+  left: calc(50% - var(--hand-box-w) / 2 - 96px);
+  top: calc(50% + var(--trick-box-h) / 2 + var(--gap-y) + 32px);
+  font-size: 11px;
+  padding: 2px 5px;
+}
+
 .hand-head {
   display: flex;
   gap: 4px;

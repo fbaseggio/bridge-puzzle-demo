@@ -40,6 +40,22 @@ export type Hand = {
   C: Rank[];
 };
 
+export type EwVariant = {
+  id: string;
+  label?: string;
+  hands: {
+    E: Hand;
+    W: Hand;
+  };
+};
+
+export type EwVariantState = {
+  variants: EwVariant[];
+  activeVariantIds: string[];
+  committedVariantId: string | null;
+  representativeVariantId: string;
+};
+
 export type Side = 'NS' | 'EW';
 
 export type Contract = {
@@ -70,6 +86,8 @@ export type Problem = {
   resourceCardIds?: CardId[];
   threatSymbolByCardId?: Partial<Record<CardId, string>>;
   preferredDiscards?: Partial<Record<Seat, CardId | CardId[]>>;
+  ewVariants?: EwVariant[];
+  representativeEwVariantId?: string;
   rngSeed: number;
 };
 
@@ -95,6 +113,7 @@ export type State = {
           active: boolean;
           threatLength: number;
           stopStatus?: 'none' | 'single' | 'double';
+          symbol?: string;
         }
       >
     >;
@@ -134,6 +153,7 @@ export type State = {
   policies: Partial<Record<Seat, Policy>>;
   preferredDiscards: Partial<Record<Seat, CardId[]>>;
   preferredDiscardUsed: Partial<Record<Seat, boolean>>;
+  ewVariantState: EwVariantState | null;
   replay: ReplayState;
 };
 

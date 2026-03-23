@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sure-tricks Demo</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #f5f7fb;
+        color: #18212f;
+        font-family: Georgia, "Times New Roman", serif;
+        line-height: 1.58;
+      }
+      .site-header {
+        border-bottom: 1px solid #e2e8f0;
+        background: #f8fafc;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      .site-header-inner {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 12px 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .site-title {
+        text-decoration: none;
+        color: #0f172a;
+        font-weight: 700;
+        font-size: 1rem;
+      }
+      .site-nav {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .site-nav a {
+        text-decoration: none;
+        color: #334155;
+        font-size: 0.95rem;
+      }
+      .site-nav a.active {
+        color: #0f172a;
+        font-weight: 600;
+      }
+      .site-nav a:hover,
+      .site-nav a:focus-visible {
+        color: #0f172a;
+      }
+      @media (max-width: 640px) {
+        .site-header-inner {
+          padding: 10px 14px;
+          flex-wrap: wrap;
+          gap: 8px 12px;
+          align-items: flex-start;
+        }
+        .site-title {
+          font-size: 0.95rem;
+        }
+        .site-nav {
+          width: 100%;
+          gap: 12px;
+        }
+        .site-nav a {
+          font-size: 0.9rem;
+        }
+      }
+      .article {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 28px 18px 36px;
+      }
+      .crumbs {
+        margin: 0 0 12px;
+        font-size: 0.92rem;
+        color: #64748b;
+      }
+      .crumbs a {
+        color: #64748b;
+        text-decoration: none;
+      }
+      .crumbs a:hover,
+      .crumbs a:focus-visible {
+        color: #334155;
+        text-decoration: underline;
+      }
+      h1 {
+        margin: 0 0 16px;
+        font-size: clamp(1.5rem, 2.8vw, 2rem);
+        line-height: 1.2;
+        font-weight: 700;
+        color: #101827;
+      }
+      p {
+        margin: 0 0 14px;
+        font-size: 1.03rem;
+      }
+      .variant-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 22px;
+        align-items: start;
+        margin-top: 18px;
+      }
+      .variant-card {
+        margin: 0;
+        padding: 16px;
+        background: #ffffff;
+        border: 1px solid #dbe4ee;
+      }
+      .variant-card h2 {
+        margin: 0 0 10px;
+        font-size: 1.1rem;
+        line-height: 1.2;
+        color: #101827;
+      }
+      .variant-card p {
+        margin: 0 0 12px;
+        color: #475569;
+        font-size: 0.97rem;
+      }
+      .variant-card iframe {
+        display: block;
+        width: 100%;
+        min-height: 364px;
+        border: none;
+        background: transparent;
+      }
+      @media (max-width: 980px) {
+        .variant-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-title" href="/">DeepSqueeze</a>
+        <nav class="site-nav" aria-label="Site">
+          <a href="/workbench/">Workbench</a>
+          <a href="/practice/">Practice</a>
+          <a class="active" href="/articles/">Articles</a>
+        </nav>
+      </div>
+    </header>
+    <main class="article">
+      <p class="crumbs"><a href="/">Home</a> / <a href="/articles/">Articles</a> / Sure-tricks Demo</p>
+      <h1>Sure-tricks Demo</h1>
+      <p>
+        This demo uses one puzzle identity with a fixed North-South layout and multiple East-West versions. The
+        designated threats are the ♠T and ♥T. Version B differs from Version A only by switching the jack between
+        spades and hearts.
+      </p>
+
+      <section class="variant-grid" aria-label="Sure-tricks variants">
+        <figure class="variant-card">
+          <h2>Version Unknown</h2>
+          <p>Only cards fixed in the same East or West hand across all live versions are shown; unresolved cards appear on the slash line.</p>
+          <iframe
+            src="/workbench/?mode=widget&amp;problem=sure_tricks_demo"
+            aria-label="Sure-tricks Demo Version Unknown"
+            loading="lazy"
+            referrerpolicy="same-origin"
+          ></iframe>
+        </figure>
+
+        <figure class="variant-card">
+          <h2>Version A</h2>
+          <p>West holds the ♠J and East holds the ♥J.</p>
+          <iframe
+            src="/workbench/?mode=widget&amp;problem=sure_tricks_demo&amp;variant=a"
+            aria-label="Sure-tricks Demo Version A"
+            loading="lazy"
+            referrerpolicy="same-origin"
+          ></iframe>
+        </figure>
+
+        <figure class="variant-card">
+          <h2>Version B</h2>
+          <p>West holds the ♥J and ♥9 while East holds the ♠J.</p>
+          <iframe
+            src="/workbench/?mode=widget&amp;problem=sure_tricks_demo&amp;variant=b"
+            aria-label="Sure-tricks Demo Version B"
+            loading="lazy"
+            referrerpolicy="same-origin"
+          ></iframe>
+        </figure>
+      </section>
+    </main>
+  </body>
+</html>

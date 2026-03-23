@@ -1,6 +1,6 @@
-import type { Hand, Play, Policy, Rank, RngState, Seat, State, Suit } from '../core';
+import type { EwVariantState, Hand, Play, Policy, Rank, RngState, Seat, State, Suit } from '../core';
 import { computeDiscardTiers, type DiscardTiers, getIdleThreatThresholdRank } from './defenderDiscard';
-import { parseCardId, toCardId, type CardId, type DefenderLabels, type ResourceContext, type ThreatContext } from './threatModel';
+import { initClassification, parseCardId, toCardId, type CardId, type DefenderLabels, type ResourceContext, type ThreatContext } from './threatModel';
 import { classInfoForCard } from '../core/equivalence';
 import { buildCanonicalPositionSignature, type DdPolicyTrace } from './ddPolicy';
 
@@ -77,6 +77,7 @@ export type EvaluatePolicyInput = {
   threat: ThreatContext | null;
   resource?: ResourceContext | null;
   threatLabels: DefenderLabels | null;
+  ewVariantState: EwVariantState | null;
   rng: RngState;
 };
 
@@ -104,9 +105,93 @@ export type EvaluatePolicyOutput = {
   discardTiers?: DiscardTiers;
   ddPolicy?: DdPolicyTrace;
   ddTrace?: DdDecisionTrace;
+  ewVariantState?: EwVariantState | null;
   rngBefore: RngState;
   rngAfter: RngState;
 };
+
+function cloneHand(hand: Hand): Hand {
+  return {
+    S: [...hand.S],
+    H: [...hand.H],
+    D: [...hand.D],
+    C: [...hand.C]
+  };
+}
+
+function cloneEwVariantState(state: EwVariantState | null): EwVariantState | null {
+  if (!state) return null;
+  return {
+    variants: state.variants.map((variant) => ({
+      id: variant.id,
+      label: variant.label,
+      hands: {
+        E: cloneHand(variant.hands.E),
+        W: cloneHand(variant.hands.W)
+      }
+    })),
+    activeVariantIds: [...state.activeVariantIds],
+    committedVariantId: state.committedVariantId,
+    representativeVariantId: state.representativeVariantId
+  };
+}
+
+function combinedHandsForVariant(
+  hands: Record<Seat, Hand>,
+  variant: NonNullable<EwVariantState['variants']>[number]
+): Record<Seat, Hand> {
+  return {
+    N: cloneHand(hands.N),
+    E: cloneHand(variant.hands.E),
+    S: cloneHand(hands.S),
+    W: cloneHand(variant.hands.W)
+  };
+}
+
+function classifyWorld(input: EvaluatePolicyInput, hands: Record<Seat, Hand>): {
+  threat: ThreatContext | null;
+  resource: ResourceContext | null;
+  threatLabels: DefenderLabels | null;
+} {
+  const threatCardIds = input.threat?.threatCardIds ?? [];
+  const resourceCardIds = input.resource?.resourceCardIds ?? [];
+  if (threatCardIds.length === 0 && resourceCardIds.length === 0) {
+    return {
+      threat: input.threat,
+      resource: input.resource ?? null,
+      threatLabels: input.threatLabels
+    };
+  }
+  const threatSymbolByCardId = Object.fromEntries(
+    Object.values(input.threat?.threatsBySuit ?? {})
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+      .map((entry) => [entry.threatCardId, entry.symbol])
+      .filter(([, symbol]) => typeof symbol === 'string')
+  ) as Partial<Record<CardId, string>>;
+  const classification = initClassification(
+    { hands },
+    threatCardIds,
+    resourceCardIds,
+    undefined,
+    threatSymbolByCardId
+  );
+  return {
+    threat: classification.threat,
+    resource: classification.resource,
+    threatLabels: classification.labels
+  };
+}
+
+function playableCardsFromEvaluation(output: EvaluatePolicyOutput): CardId[] {
+  if (output.bucketCards && output.bucketCards.length > 0) return [...output.bucketCards];
+  return output.chosenCardId ? [output.chosenCardId] : [];
+}
+
+function pickSeededCard(cards: CardId[], rng: RngState): [CardId | null, RngState] {
+  if (cards.length === 0) return [null, rng];
+  const [idx, nextRng] = pickRandomIndex(cards.length, rng);
+  return [cards[idx] ?? cards[0] ?? null, nextRng];
+}
 
 function randomUnit(rng: RngState): [number, RngState] {
   const x0 = (rng.seed + Math.imul(rng.counter, 0x9e3779b9)) >>> 0;
@@ -173,7 +258,7 @@ function buildPolicyClassByCard(
   return out;
 }
 
-export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput {
+function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOutput {
   const { policy, seat, hands, trick, threat, resource, threatLabels } = input;
   const leadSuit = trick[0]?.suit ?? null;
   const rngBefore = { seed: input.rng.seed >>> 0, counter: input.rng.counter };
@@ -512,5 +597,104 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
     ddTrace: buildDdDecisionTrace(tiers.legal, chosen.cards, ddFiltered, chosenCardId),
     rngBefore,
     rngAfter
+  };
+}
+
+export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput {
+  const variantState = input.ewVariantState;
+  if (!variantState || input.seat !== 'E' && input.seat !== 'W') {
+    return evaluatePolicySingleWorld(input);
+  }
+
+  const activeVariants = variantState.variants.filter((variant) => variantState.activeVariantIds.includes(variant.id));
+  if (activeVariants.length === 0) {
+    return evaluatePolicySingleWorld(input);
+  }
+
+  if (activeVariants.length === 1) {
+    const onlyVariant = activeVariants[0];
+    const worldHands = combinedHandsForVariant(input.hands, onlyVariant);
+    const world = classifyWorld(input, worldHands);
+    const output = evaluatePolicySingleWorld({
+      ...input,
+      hands: worldHands,
+      threat: world.threat,
+      resource: world.resource,
+      threatLabels: world.threatLabels,
+      ewVariantState: null
+    });
+    return {
+      ...output,
+      ewVariantState: {
+        variants: cloneEwVariantState(variantState)?.variants ?? [],
+        activeVariantIds: [onlyVariant.id],
+        committedVariantId: variantState.committedVariantId ?? onlyVariant.id,
+        representativeVariantId: onlyVariant.id
+      }
+    };
+  }
+
+  const rngBefore = { seed: input.rng.seed >>> 0, counter: input.rng.counter };
+  let rngAfter = { ...rngBefore };
+  const evaluations = activeVariants.map((variant) => ({
+    variant,
+    ...(() => {
+      const worldHands = combinedHandsForVariant(input.hands, variant);
+      const world = classifyWorld(input, worldHands);
+      return {
+        output: evaluatePolicySingleWorld({
+          ...input,
+          hands: worldHands,
+          threat: world.threat,
+          resource: world.resource,
+          threatLabels: world.threatLabels,
+          ewVariantState: null,
+          rng: rngBefore
+        })
+      };
+    })()
+  }));
+  const playableByVariant = evaluations.map(({ variant, output }) => ({
+    variant,
+    output,
+    playable: playableCardsFromEvaluation(output)
+  }));
+  const commonPlayable = playableByVariant.reduce<CardId[]>(
+    (shared, current) => shared.filter((card) => current.playable.includes(card)),
+    [...playableByVariant[0].playable]
+  );
+
+  if (commonPlayable.length > 0) {
+    const [chosenCardId, nextRng] = pickSeededCard(commonPlayable, rngAfter);
+    rngAfter = nextRng;
+    return {
+      chosenCardId,
+      chosenBucket: 'variant:intersection',
+      bucketCards: [...commonPlayable],
+      policyClassByCard: Object.fromEntries(commonPlayable.map((card) => [card, 'variant:common'])),
+      rngBefore,
+      rngAfter,
+      ewVariantState: cloneEwVariantState(variantState)
+    };
+  }
+
+  const [variantIndex, afterVariantPick] = pickRandomIndex(playableByVariant.length, rngAfter);
+  rngAfter = afterVariantPick;
+  const chosenVariantEval = playableByVariant[variantIndex] ?? playableByVariant[0];
+  const [chosenCardId, afterCardPick] = pickSeededCard(chosenVariantEval.playable, rngAfter);
+  rngAfter = afterCardPick;
+
+  return {
+    ...chosenVariantEval.output,
+    chosenCardId,
+    bucketCards: [...chosenVariantEval.playable],
+    rngBefore,
+    rngAfter,
+    ewVariantState: {
+      variants: cloneEwVariantState(variantState)?.variants ?? [],
+      activeVariantIds: [chosenVariantEval.variant.id],
+      committedVariantId: chosenVariantEval.variant.id,
+      representativeVariantId: chosenVariantEval.variant.id
+    }
   };
 }

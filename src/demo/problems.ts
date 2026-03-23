@@ -12,6 +12,7 @@ import { p011 } from '../puzzles/p011';
 import { p012 } from '../puzzles/p012';
 import { p013 } from '../puzzles/p013';
 import { squeezeSelf01 } from '../puzzles/squeeze_self_01';
+import { buildSureTricksDemo, buildSureTricksDemoVariant, sureTricksDemo } from '../puzzles/sure_tricks_demo';
 import {
   gorillas01,
   gorillas02,
@@ -35,19 +36,45 @@ export type DemoProblem = {
   label: string;
   problem?: Problem;
   loadProblem?: () => Problem;
+  variants?: DemoProblemVariant[];
+  defaultVariantId?: string;
   practiceEligible?: boolean;
   experimental?: boolean;
   articlePath?: string;
 };
 
+export type DemoProblemVariant = {
+  id: string;
+  label: string;
+  problem?: Problem;
+  loadProblem?: () => Problem;
+};
+
 const cachedById = new Map<string, Problem>();
 
-export function resolveDemoProblem(entry: DemoProblem): Problem {
-  const cached = cachedById.get(entry.id);
+function normalizeVariantId(raw?: string | null): string | null {
+  const trimmed = raw?.trim().toLowerCase();
+  return trimmed ? trimmed : null;
+}
+
+export function resolveDemoProblemVariant(entry: DemoProblem, variantId?: string | null): DemoProblemVariant | null {
+  if (!entry.variants || entry.variants.length === 0) return null;
+  const requested = normalizeVariantId(variantId) ?? normalizeVariantId(entry.defaultVariantId);
+  return entry.variants.find((variant) => normalizeVariantId(variant.id) === requested) ?? entry.variants[0] ?? null;
+}
+
+export function normalizeDemoProblemVariantId(entry: DemoProblem, variantId?: string | null): string | null {
+  return resolveDemoProblemVariant(entry, variantId)?.id ?? null;
+}
+
+export function resolveDemoProblem(entry: DemoProblem, variantId?: string | null): Problem {
+  const variant = normalizeVariantId(variantId) ? resolveDemoProblemVariant(entry, variantId) : null;
+  const cacheKey = variant ? `${entry.id}::${variant.id}` : entry.id;
+  const cached = cachedById.get(cacheKey);
   if (cached) return cached;
-  const loaded = entry.problem ?? entry.loadProblem?.();
+  const loaded = variant ? (variant.problem ?? variant.loadProblem?.()) : (entry.problem ?? entry.loadProblem?.());
   if (!loaded) throw new Error(`Demo problem '${entry.id}' has no problem payload`);
-  cachedById.set(entry.id, loaded);
+  cachedById.set(cacheKey, loaded);
   return loaded;
 }
 
@@ -64,6 +91,17 @@ export const demoProblems: DemoProblem[] = [
     label: 'Focus on the squeeze against yourself',
     problem: squeezeSelf01,
     articlePath: 'articles/squeeze-self/'
+  },
+  {
+    id: 'sure_tricks_demo',
+    label: 'Sure-tricks Demo',
+    problem: sureTricksDemo,
+    variants: [
+      { id: 'a', label: 'Version A', loadProblem: () => buildSureTricksDemoVariant('a') },
+      { id: 'b', label: 'Version B', loadProblem: () => buildSureTricksDemoVariant('b') }
+    ],
+    defaultVariantId: 'a',
+    articlePath: 'articles/sure-tricks-demo/'
   },
   { id: 'p001', label: 'p001', problem: p001 },
   { id: 'p002', label: 'p002', problem: p002, experimental: p002Experimental },
