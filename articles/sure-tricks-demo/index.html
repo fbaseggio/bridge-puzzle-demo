@@ -75,9 +75,9 @@
         }
       }
       .article {
-        max-width: 1180px;
+        max-width: 780px;
         margin: 0 auto;
-        padding: 28px 18px 36px;
+        padding: 28px 18px 40px;
       }
       .crumbs {
         margin: 0 0 12px;
@@ -104,41 +104,16 @@
         margin: 0 0 14px;
         font-size: 1.03rem;
       }
-      .variant-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 22px;
-        align-items: start;
-        margin-top: 18px;
+      figure.widget {
+        margin: 12px 0 14px;
       }
-      .variant-card {
-        margin: 0;
-        padding: 16px;
-        background: #ffffff;
-        border: 1px solid #dbe4ee;
-      }
-      .variant-card h2 {
-        margin: 0 0 10px;
-        font-size: 1.1rem;
-        line-height: 1.2;
-        color: #101827;
-      }
-      .variant-card p {
-        margin: 0 0 12px;
-        color: #475569;
-        font-size: 0.97rem;
-      }
-      .variant-card iframe {
+      figure.widget iframe {
         display: block;
         width: 100%;
-        min-height: 364px;
+        max-width: 470px;
+        height: 364px;
         border: none;
         background: transparent;
-      }
-      @media (max-width: 980px) {
-        .variant-grid {
-          grid-template-columns: 1fr;
-        }
       }
     </style>
   </head>
@@ -157,45 +132,17 @@
       <p class="crumbs"><a href="/">Home</a> / <a href="/articles/">Articles</a> / Sure-tricks Demo</p>
       <h1>Sure-tricks Demo</h1>
       <p>
-        This demo uses one puzzle identity with a fixed North-South layout and multiple East-West versions. The
-        designated threats are the ♠T and ♥T. Version B differs from Version A only by switching the jack between
-        spades and hearts.
+        This BridgeMaster-style problem illustrates a common issue in positional squeezes. Marked cards are shown in
+        the diagram, with remaining cards that might be in either hand listed to the lower-left.
       </p>
-
-      <section class="variant-grid" aria-label="Sure-tricks variants">
-        <figure class="variant-card">
-          <h2>Version Unknown</h2>
-          <p>Only cards fixed in the same East or West hand across all live versions are shown; unresolved cards appear on the slash line.</p>
-          <iframe
-            src="/workbench/?mode=widget&amp;problem=sure_tricks_demo"
-            aria-label="Sure-tricks Demo Version Unknown"
-            loading="lazy"
-            referrerpolicy="same-origin"
-          ></iframe>
-        </figure>
-
-        <figure class="variant-card">
-          <h2>Version A</h2>
-          <p>West holds the ♠J and East holds the ♥J.</p>
-          <iframe
-            src="/workbench/?mode=widget&amp;problem=sure_tricks_demo&amp;variant=a"
-            aria-label="Sure-tricks Demo Version A"
-            loading="lazy"
-            referrerpolicy="same-origin"
-          ></iframe>
-        </figure>
-
-        <figure class="variant-card">
-          <h2>Version B</h2>
-          <p>West holds the ♥J and ♥9 while East holds the ♠J.</p>
-          <iframe
-            src="/workbench/?mode=widget&amp;problem=sure_tricks_demo&amp;variant=b"
-            aria-label="Sure-tricks Demo Version B"
-            loading="lazy"
-            referrerpolicy="same-origin"
-          ></iframe>
-        </figure>
-      </section>
+      <figure class="widget">
+        <iframe
+          src="/workbench/?mode=widget&amp;problem=sure_tricks_demo"
+          aria-label="Sure-tricks Demo Version Unknown"
+          loading="lazy"
+          referrerpolicy="same-origin"
+        ></iframe>
+      </figure>
     </main>
   </body>
 </html>

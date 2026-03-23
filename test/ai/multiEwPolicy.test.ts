@@ -137,4 +137,49 @@ describe('multi-EW defender policy arbitration', () => {
     expect(variantA?.b).not.toContain('HQ');
     expect(variantB?.b).not.toContain('HQ');
   });
+
+  it('eliminates variants by follow-suit legality when a defender discards', () => {
+    const problem = { ...sureTricksDemo, userControls: ['N', 'E', 'S', 'W'] as const };
+    let state = init(problem);
+    const seq = ['CT', 'H9', 'CA', 'C2', 'CQ', 'C3', 'CK', 'SK', 'CJ', 'HK', 'ST', 'C4', 'S2', 'SQ', 'SA'];
+    for (const cardId of seq) {
+      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+    }
+
+    expect(state.turn).toBe('E');
+    expect(state.ewVariantState?.activeVariantIds).toEqual(['a', 'b']);
+
+    state = apply(state, { seat: 'E', suit: 'D', rank: 'A' }).state;
+    expect(state.ewVariantState?.activeVariantIds).toEqual(['a']);
+    expect(state.ewVariantState?.committedVariantId).toBe('a');
+    expect(state.ewVariantState?.representativeVariantId).toBe('a');
+  });
+
+  it('looks ahead through forced trick resolution when scoring ambiguous-to-uniform promotions', () => {
+    const problem = { ...sureTricksDemo, userControls: ['N', 'E', 'S', 'W'] as const };
+    let state = init(problem);
+    const seq = ['CT', 'H9', 'CA', 'C2', 'CQ', 'C3', 'CK', 'SK', 'CJ', 'HK', 'ST', 'C4', 'S2', 'SQ', 'SA'];
+    for (const cardId of seq) {
+      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+    }
+
+    const result = evaluatePolicy({
+      policy: { kind: 'threatAware' },
+      seat: 'E',
+      problemId: state.id,
+      contractStrain: state.contract.strain,
+      hands: state.hands,
+      trick: state.trick,
+      threat: state.threat as any,
+      resource: state.resource as any,
+      threatLabels: state.threatLabels as any,
+      ewVariantState: state.ewVariantState,
+      rng: state.rng
+    });
+
+    expect(result.chosenCardId).toBe('SJ');
+    const variantA = result.ewVariantTrace?.perVariant.find((variant) => variant.variantId === 'a');
+    expect(variantA?.a).toEqual([]);
+    expect(variantA?.c).toEqual(expect.arrayContaining(['DA', 'DK']));
+  });
 });

@@ -330,38 +330,49 @@ function decisionTriggerForSeat(hands: Record<Seat, Hand>, seat: 'E' | 'W', tric
   return hands[seat][leadSuit].length > 0 ? 'follow' : 'discard';
 }
 
-function simulateVariantRolesAfterPlay(
+type VariantSimulation = {
+  variantId: string;
+  hands: Record<Seat, Hand>;
+  trick: Play[];
+  classification: ClassificationState | null;
+};
+
+function simulationNextSeat(trick: Play[]): Seat {
+  const current = trick[trick.length - 1]?.seat ?? 'N';
+  return nextSeat(current);
+}
+
+function applyPlayToSimulation(
   input: EvaluatePolicyInput,
-  worldHands: Record<Seat, Hand>,
-  world: {
-    threat: ThreatContext | null;
-    resource: ResourceContext | null;
-    threatLabels: DefenderLabels | null;
-    cardRoles: Partial<Record<CardId, CardRole>>;
-  },
-  seat: 'E' | 'W',
+  simulation: VariantSimulation,
+  seat: Seat,
   cardId: CardId
-): Partial<Record<CardId, CardRole>> {
-  if (!world.threat || !world.threatLabels) return {};
-  const nextHands = cloneHands(worldHands);
+): VariantSimulation | null {
   const { suit, rank } = parseCardId(cardId);
+  const nextHands = cloneHands(simulation.hands);
   const idx = nextHands[seat][suit].indexOf(rank);
-  if (idx < 0) return world.cardRoles;
+  if (idx < 0) return null;
   nextHands[seat][suit].splice(idx, 1);
-  const trigger = decisionTriggerForSeat(worldHands, seat, input.trick);
-  const play = { seat, suit, rank };
+
+  const nextTrick = [...simulation.trick, { seat, suit, rank }];
+  if (!simulation.classification) {
+    return {
+      variantId: simulation.variantId,
+      hands: nextHands,
+      trick: nextTrick,
+      classification: null
+    };
+  }
+
+  const trigger: ClassificationTrigger =
+    simulation.trick.length === 0 ? 'lead' : simulation.trick[0]?.suit === suit ? 'follow' : 'discard';
   const runtime = {
-    trick: [...input.trick, play],
+    trick: nextTrick,
     trumpSuit: input.contractStrain === 'NT' ? null : input.contractStrain ?? null,
     goalStatus: null
   };
-  let updated = updateClassificationAfterPlay(
-    {
-      threat: world.threat,
-      resource: world.resource ?? { resourceCardIds: [], resourcesBySuit: {} },
-      labels: world.threatLabels,
-      perCardRole: world.cardRoles
-    } as ClassificationState,
+  let classification = updateClassificationAfterPlay(
+    simulation.classification,
     { hands: nextHands },
     cardId,
     runtime,
@@ -369,9 +380,71 @@ function simulateVariantRolesAfterPlay(
     'immediate'
   );
   if (trigger === 'discard') {
-    updated = updateClassificationAfterPlay(updated, { hands: nextHands }, cardId, runtime, trigger, 'deferred');
+    classification = updateClassificationAfterPlay(classification, { hands: nextHands }, cardId, runtime, trigger, 'deferred');
   }
-  return updated.perCardRole;
+  if (nextTrick.length === 4) {
+    classification = updateClassificationAfterPlay(classification, { hands: nextHands }, cardId, runtime, 'end-of-trick', 'deferred');
+  }
+  return {
+    variantId: simulation.variantId,
+    hands: nextHands,
+    trick: nextTrick.length === 4 ? [] : nextTrick,
+    classification
+  };
+}
+
+function simulateCandidateThroughForcedTrickResolution(
+  input: EvaluatePolicyInput,
+  evaluations: Array<{
+    variant: NonNullable<EwVariantState['variants']>[number];
+    worldHands: Record<Seat, Hand>;
+    world: {
+      threat: ThreatContext | null;
+      resource: ResourceContext | null;
+      threatLabels: DefenderLabels | null;
+      cardRoles: Partial<Record<CardId, CardRole>>;
+    };
+    output: EvaluatePolicyOutput;
+  }>,
+  seat: 'E' | 'W',
+  cardId: CardId
+): VariantSimulation[] {
+  let simulations = evaluations
+    .filter(({ output, worldHands }) => classifyVariantCard(cardId, output, worldHands, seat) !== 'D')
+    .map(({ variant, worldHands, world }) => ({
+      variantId: variant.id,
+      hands: cloneHands(worldHands),
+      trick: [...input.trick],
+      classification: world.threat && world.threatLabels
+        ? {
+            threat: world.threat,
+            resource: world.resource ?? { resourceCardIds: [], resourcesBySuit: {} },
+            labels: world.threatLabels,
+            perCardRole: { ...world.cardRoles }
+          }
+        : null
+    }));
+  simulations = simulations
+    .map((simulation) => applyPlayToSimulation(input, simulation, seat, cardId))
+    .filter((simulation): simulation is VariantSimulation => Boolean(simulation));
+  if (simulations.length === 0) return simulations;
+
+  while (simulations.length > 0 && simulations[0].trick.length > 0 && simulations[0].trick.length < 4) {
+    const seatToPlay = simulationNextSeat(simulations[0].trick);
+    const legalByVariant = simulations.map((simulation) => ({
+      simulation,
+      legal: legalPlaysForSeat(simulation.hands, seatToPlay, simulation.trick[0]?.suit ?? null)
+    }));
+    if (legalByVariant.some(({ legal }) => legal.length !== 1)) break;
+    simulations = legalByVariant
+      .map(({ simulation, legal }) => {
+        const forced = legal[0];
+        return applyPlayToSimulation(input, simulation, seatToPlay, toCardId(forced.suit, forced.rank) as CardId);
+      })
+      .filter((simulation): simulation is VariantSimulation => Boolean(simulation));
+  }
+
+  return simulations;
 }
 
 function cardEqualsInLegalUniverse(
@@ -408,29 +481,27 @@ function ambiguousThreatDemotions(
 
   const candidateCards = [...new Set(evaluations.flatMap(({ output }) => legalUniverseFromEvaluation(output)))];
   for (const candidate of candidateCards) {
-    const labels = evaluations.map(({ output, worldHands }) => classifyVariantCard(candidate, output, worldHands, input.seat));
-    if (labels.some((label) => label === 'D')) continue;
-
-    const afterRolesByVariant = evaluations.map(({ worldHands, world }) =>
-      simulateVariantRolesAfterPlay(input, worldHands, world, input.seat, candidate)
-    );
+    const survivingSimulations = simulateCandidateThroughForcedTrickResolution(input, evaluations, input.seat, candidate);
+    if (survivingSimulations.length === 0) continue;
     const resolvesAmbiguity = designatedThreats.some((threatCardId) => {
       const beforeRoles = evaluations.map(({ world }) => world.cardRoles[threatCardId] ?? 'default');
       const wasAmbiguous = beforeRoles.some((role) => role !== beforeRoles[0]);
       if (!wasAmbiguous) return false;
-      const afterRoles = afterRolesByVariant.map((roles) => roles[threatCardId] ?? 'default');
+      const afterRoles = survivingSimulations.map((simulation) => simulation.classification?.perCardRole[threatCardId] ?? 'default');
       return afterRoles.every((role) => role === 'promotedWinner');
     });
     if (!resolvesAmbiguity) continue;
 
-    evaluations.forEach(({ variant, worldHands, output }) => {
+    evaluations
+      .filter(({ variant }) => survivingSimulations.some((simulation) => simulation.variantId === variant.id))
+      .forEach(({ variant, worldHands, output }) => {
       const legalUniverse = legalUniverseFromEvaluation(output);
       const equals = cardEqualsInLegalUniverse(worldHands, input.seat, candidate, legalUniverse);
       if (equals.length === 0) return;
       const bucket = demotedByVariant.get(variant.id) ?? new Set<CardId>();
       equals.forEach((equalCard) => bucket.add(equalCard));
       demotedByVariant.set(variant.id, bucket);
-    });
+      });
   }
 
   return demotedByVariant;

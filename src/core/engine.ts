@@ -103,6 +103,31 @@ function removeCardFromVariantHands(variantHands: EwVariant['hands'], seat: 'E' 
   removeCard(variantHands[seat], suit, rank);
 }
 
+function pruneVariantsByFollowSuitLegality(
+  state: State,
+  seat: 'E' | 'W',
+  leadSuit: Suit | null,
+  playedSuit: Suit
+): void {
+  if (!state.ewVariantState || !leadSuit || playedSuit === leadSuit) return;
+
+  const survivingVariantIds = state.ewVariantState.activeVariantIds.filter((variantId) => {
+    const variant = variantById(state.ewVariantState, variantId);
+    if (!variant) return false;
+    return variant.hands[seat][leadSuit].length === 0;
+  });
+  if (survivingVariantIds.length === state.ewVariantState.activeVariantIds.length) return;
+
+  state.ewVariantState.activeVariantIds = survivingVariantIds;
+  state.ewVariantState.committedVariantId = survivingVariantIds.length === 1 ? survivingVariantIds[0] ?? null : null;
+  if (!survivingVariantIds.includes(state.ewVariantState.representativeVariantId)) {
+    state.ewVariantState.representativeVariantId = survivingVariantIds[0] ?? state.ewVariantState.representativeVariantId;
+  }
+  if (survivingVariantIds.length > 0) {
+    syncRepresentativeVariantHands(state);
+  }
+}
+
 function cloneState(state: State): State {
   return {
     ...state,
@@ -802,6 +827,7 @@ function applyOnePlay(
       if (!state.ewVariantState.activeVariantIds.includes(variant.id)) continue;
       removeCardFromVariantHands(variant.hands, play.seat, play.suit, play.rank);
     }
+    pruneVariantsByFollowSuitLegality(state, play.seat, leadSuit, play.suit);
   }
   state.trickClassIds.push(`${play.seat}:${playedClass}`);
   emitSemantic(collector, {

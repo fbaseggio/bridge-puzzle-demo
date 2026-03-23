@@ -28,9 +28,12 @@ import { queryDdsNextPlays, warmDdsRuntime } from '../ai/ddsBrowser';
 import { buildDdsScoreByCard } from '../ai/ddsCardScores';
 import { evaluatePolicy } from '../ai/evaluatePolicy';
 import {
+  initClassification,
+  parseCardId,
   toCardId,
   updateClassificationAfterPlay,
   type CardId,
+  type Hand,
   type DefenderLabels,
   type Position,
   type ThreatContext,
@@ -305,6 +308,7 @@ if (displayMode === 'widget' && (widgetUiMode === 'dd-puzzle' || widgetUiMode ==
   hintsEnabled = false;
   hideEastWest = widgetUiMode === 'sd-puzzle';
 }
+applyWidgetProblemDefaults();
 let showWidgetTeachingPane = false;
 let advancedPanelOpen = false;
 let ddsPlayHistory: string[] = [];
@@ -314,6 +318,15 @@ let activeHintKey: string | null = null;
 let hintLoading = false;
 let hintRequestSeq = 0;
 let ddErrorVisual: DdErrorVisualState | null = null;
+function applyWidgetProblemDefaults(): void {
+  if (displayMode !== 'widget') return;
+  if (widgetUiMode === 'dd-puzzle' || widgetUiMode === 'sd-puzzle') return;
+  if (versionUnknownModeEnabled()) {
+    alwaysHint = false;
+    cardColoringEnabled = false;
+    narrate = true;
+  }
+}
 type WidgetStatusType = 'hint' | 'narration' | 'message' | 'default';
 type WidgetStatus = { type: WidgetStatusType; text: string };
 let widgetStatus: WidgetStatus = { type: 'default', text: '' };
@@ -419,6 +432,7 @@ type UnknownModePlayedEvent = {
   seat: Seat;
   card: CardId;
   source?: string;
+  ddError?: boolean;
   chosenBucket?: string;
   bucketCards?: CardId[];
   policyClassByCard?: Record<string, string>;
@@ -439,6 +453,7 @@ type UnknownModePlayedEvent = {
 type UnknownModeVariantReplay = {
   state: State;
   entries: TeachingEntryView[];
+  ddsSummaries: string[];
 };
 let pulseUntilByCardKey = new Map<string, number>();
 let pulseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -589,6 +604,95 @@ function variantLabelPrefix(variantId: string): string {
   return variantId.trim().toUpperCase();
 }
 
+function cloneHandForVariantSync(hand: Hand): Hand {
+  return {
+    S: [...hand.S],
+    H: [...hand.H],
+    D: [...hand.D],
+    C: [...hand.C]
+  };
+}
+
+function cardExistsInHandsForVariantSync(hands: Record<Seat, Hand>, cardId: CardId): boolean {
+  const { suit, rank } = parseCardId(cardId);
+  return seatOrder.some((seat) => hands[seat][suit].includes(rank));
+}
+
+function syncRepresentativeVariantWorld(viewState: State): void {
+  const representativeId = viewState.ewVariantState?.representativeVariantId;
+  const representative = viewState.ewVariantState?.variants.find((variant) => variant.id === representativeId);
+  if (!representative) return;
+
+  viewState.hands.E = cloneHandForVariantSync(representative.hands.E);
+  viewState.hands.W = cloneHandForVariantSync(representative.hands.W);
+
+  const threatCardIds = (viewState.threat?.threatCardIds ?? []).filter((cardId) => cardExistsInHandsForVariantSync(viewState.hands, cardId));
+  const resourceCardIds = (viewState.resource?.resourceCardIds ?? []).filter((cardId) => cardExistsInHandsForVariantSync(viewState.hands, cardId));
+  if (threatCardIds.length === 0 && resourceCardIds.length === 0) return;
+
+  const threatSymbolByCardId = Object.fromEntries(
+    Object.values(viewState.threat?.threatsBySuit ?? {})
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+      .map((entry) => [entry.threatCardId, entry.symbol])
+      .filter(([cardId]) => threatCardIds.includes(cardId as CardId))
+      .filter(([, symbol]) => typeof symbol === 'string')
+  ) as Partial<Record<CardId, string>>;
+
+  const classification = initClassification(
+    { hands: viewState.hands },
+    threatCardIds,
+    resourceCardIds,
+    undefined,
+    threatSymbolByCardId
+  );
+  viewState.threat = classification.threat as State['threat'];
+  viewState.resource = classification.resource as State['resource'];
+  viewState.threatLabels = classification.labels as State['threatLabels'];
+  viewState.cardRoles = { ...classification.perCardRole };
+}
+
+function pruneVariantsByUserDdError(viewState: State, survivingVariantIds: string[]): void {
+  if (!viewState.ewVariantState) return;
+  if (survivingVariantIds.length === 0 || survivingVariantIds.length === viewState.ewVariantState.activeVariantIds.length) return;
+
+  viewState.ewVariantState.activeVariantIds = [...survivingVariantIds];
+  viewState.ewVariantState.committedVariantId = survivingVariantIds.length === 1 ? survivingVariantIds[0] ?? null : null;
+  if (!survivingVariantIds.includes(viewState.ewVariantState.representativeVariantId)) {
+    viewState.ewVariantState.representativeVariantId = survivingVariantIds[0] ?? viewState.ewVariantState.representativeVariantId;
+  }
+  syncRepresentativeVariantWorld(viewState);
+}
+
+function classifyDdErrorForReplay(
+  replayState: State,
+  replayProblem: ProblemWithThreats,
+  play: Play,
+  playedCardIds: string[]
+): boolean | undefined {
+  const legal = legalPlays(replayState).filter((candidate) => candidate.seat === replayState.turn);
+  if (legal.length === 0) return undefined;
+  const chosen = toCardId(play.suit, play.rank) as CardId;
+  const legalCardIds = legal.map((candidate) => toCardId(candidate.suit, candidate.rank) as CardId);
+  try {
+    const dds = queryDdsNextPlays({
+      openingLeader: replayProblem.leader,
+      initialHands: replayProblem.hands,
+      contract: replayState.contract,
+      playedCardIds
+    });
+    if (!dds.ok) return undefined;
+    const scoreByCard = buildDdsScoreByCard(dds.result.plays);
+    const scoredLegal = legalCardIds.filter((card) => scoreByCard.has(card));
+    if (scoredLegal.length === 0) return undefined;
+    const maxScore = Math.max(...scoredLegal.map((card) => scoreByCard.get(card) ?? Number.NEGATIVE_INFINITY));
+    const chosenScore = scoreByCard.get(chosen);
+    if (typeof chosenScore !== 'number') return undefined;
+    return chosenScore < maxScore;
+  } catch {
+    return undefined;
+  }
+}
+
 function buildUnknownModeVariantReplayData(
   activeVariantIds: string[]
 ): Map<string, UnknownModeVariantReplay> | null {
@@ -596,6 +700,7 @@ function buildUnknownModeVariantReplayData(
   const rawEvents = (rawSemanticReducer.snapshot() as { events: Array<{ type: string; seat?: Seat; card?: CardId; details?: Record<string, unknown> }> }).events;
   const pendingByCardKey = new Map<string, {
     source?: string;
+    ddError?: boolean;
     chosenBucket?: string;
     bucketCards?: CardId[];
     policyClassByCard?: Record<string, string>;
@@ -619,6 +724,7 @@ function buildUnknownModeVariantReplayData(
     seat: Seat;
     card: CardId;
     source?: string;
+    ddError?: boolean;
     chosenBucket?: string;
     bucketCards?: CardId[];
     policyClassByCard?: Record<string, string>;
@@ -661,6 +767,7 @@ function buildUnknownModeVariantReplayData(
     if (event.type === 'decision-chosen' && event.seat && event.card) {
       pendingByCardKey.set(`${event.seat}:${event.card}`, {
         source: typeof event.details?.source === 'string' ? event.details.source : undefined,
+        ddError: event.details?.ddError === true,
         chosenBucket: typeof event.details?.chosenBucket === 'string' ? event.details.chosenBucket : decisionEvalBySeat.get(event.seat)?.chosenBucket,
         bucketCards: decisionEvalBySeat.get(event.seat)?.bucketCards,
         policyClassByCard: decisionEvalBySeat.get(event.seat)?.policyClassByCard,
@@ -684,16 +791,21 @@ function buildUnknownModeVariantReplayData(
     const concrete = resolveProblemById(currentProblemId, variantId);
     const replayProblem: ProblemWithThreats = { ...concrete, userControls: ['N', 'E', 'S', 'W'] };
     let replayState = init(replayProblem);
+    const ddsSummaries: string[] = [];
+    const replayedCardIds: string[] = [];
     const reducer = new TeachingReducer();
     reducer.setTrumpSuit(replayState.trumpSuit);
     const collector = new InMemorySemanticEventCollector();
     collector.attachReducer(reducer);
     let failed = false;
 
-    for (const event of playedEvents) {
+    for (const [eventIndex, event] of playedEvents.entries()) {
       const play = { seat: event.seat, suit: event.card[0] as Suit, rank: event.card.slice(1) as Rank };
       const result = apply(replayState, play, {
         eventCollector: collector,
+        userDdError: event.source === 'user'
+          ? classifyDdErrorForReplay(replayState, replayProblem, play, replayedCardIds)
+          : undefined,
         manualDecision: event.source && event.source !== 'user'
           ? {
               source: event.source,
@@ -709,12 +821,14 @@ function buildUnknownModeVariantReplayData(
         failed = true;
         break;
       }
+      replayedCardIds.push(event.card);
       replayState = result.state;
     }
     if (!failed) {
       perVariant.set(variantId, {
         state: replayState,
-        entries: (reducer.snapshot() as { entries: TeachingEntryView[] }).entries
+        entries: (reducer.snapshot() as { entries: TeachingEntryView[] }).entries,
+        ddsSummaries
       });
     }
   }
@@ -765,6 +879,35 @@ function teachingEntriesForUnknownMode(): TeachingEntryView[] | null {
     merged.push(variantGroups.length === 1 ? { ...base } : { ...base, variantGroups });
   }
 
+  return merged;
+}
+
+function ddsTeachingSummariesForUnknownMode(): Array<string | { labels: string[]; text: string }[]> | null {
+  const perVariant = unknownModeVariantReplayMap();
+  if (!perVariant || perVariant.size <= 1) return null;
+
+  const maxEntries = Math.max(...[...perVariant.values()].map((variant) => variant.ddsSummaries.length), 0);
+  const merged: Array<string | { labels: string[]; text: string }[]> = [];
+  for (let i = 0; i < maxEntries; i += 1) {
+    const present = [...perVariant.entries()]
+      .map(([variantId, replay]) => ({ variantId, text: replay.ddsSummaries[i] }))
+      .filter((item): item is { variantId: string; text: string } => typeof item.text === 'string' && item.text.length > 0);
+    if (present.length === 0) {
+      merged.push('');
+      continue;
+    }
+    const groups = new Map<string, { labels: string[]; text: string }>();
+    for (const { variantId, text } of present) {
+      const existing = groups.get(text);
+      if (existing) {
+        existing.labels.push(variantLabelPrefix(variantId));
+      } else {
+        groups.set(text, { labels: [variantLabelPrefix(variantId)], text });
+      }
+    }
+    const grouped = [...groups.values()];
+    merged.push(grouped.length === 1 ? grouped[0].text : grouped);
+  }
   return merged;
 }
 
@@ -2396,6 +2539,7 @@ function applyEventToShadow(s: State, event: EngineEvent): void {
   if (event.type === 'played' || event.type === 'autoplay') {
     const playedCard = toCardId(event.play.suit, event.play.rank) as CardId;
     const classId = classInfoForCard(s, event.play.seat, playedCard).classId;
+    const leadSuit = s.trick[0]?.suit ?? null;
     const hand = s.hands[event.play.seat][event.play.suit];
     const idx = hand.indexOf(event.play.rank);
     if (idx >= 0) {
@@ -2409,6 +2553,13 @@ function applyEventToShadow(s: State, event: EngineEvent): void {
         if (variantIdx >= 0) {
           variantHand.splice(variantIdx, 1);
         }
+      }
+      if (leadSuit && event.play.suit !== leadSuit) {
+        const survivingVariantIds = s.ewVariantState.activeVariantIds.filter((variantId) => {
+          const variant = s.ewVariantState?.variants.find((item) => item.id === variantId);
+          return variant ? variant.hands[event.play.seat][leadSuit].length === 0 : false;
+        });
+        pruneVariantsByUserDdError(s, survivingVariantIds);
       }
     }
     s.trick.push({ ...event.play });
@@ -3148,6 +3299,7 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   currentProblemVariantId = practiceProblemOverrides.has(problemId) ? null : resolveProblemVariantId(problemId, variantId);
   currentProblem = resolveProblemById(problemId, currentProblemVariantId);
   currentProblemId = problemId;
+  applyWidgetProblemDefaults();
   currentSeed = currentProblem.rngSeed >>> 0;
   state = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
   syncConfiguredUserControls();
@@ -3247,6 +3399,15 @@ function runTurn(play: Play): void {
   const userDdError = (play.seat === 'N' || play.seat === 'S')
     ? classifyDdErrorForUserPlay(play, ddsHistoryForTurn)
     : undefined;
+  const variantDdErrorById =
+    (play.seat === 'N' || play.seat === 'S') && versionUnknownModeEnabled() && state.ewVariantState && state.ewVariantState.activeVariantIds.length > 1
+      ? Object.fromEntries(
+          state.ewVariantState.activeVariantIds.map((variantId) => {
+            const replayProblem = resolveProblemById(currentProblemId, variantId);
+            return [variantId, classifyDdErrorForReplay(state, replayProblem, play, ddsHistoryForTurn)];
+          })
+        ) as Record<string, boolean | undefined>
+      : null;
   if (play.seat === 'N' || play.seat === 'S') {
     if (userDdError?.ddError) {
       ddErrorVisual = {
@@ -3265,6 +3426,17 @@ function runTurn(play: Play): void {
     autoplayBackstop: buildBrowserDdsBackstop(backstopHistoryForTurn)
   });
   state = result.state;
+  if (variantDdErrorById) {
+    const errorVariants = Object.entries(variantDdErrorById)
+      .filter((entry): entry is [string, boolean] => entry[1] === true)
+      .map(([variantId]) => variantId);
+    const cleanVariants = Object.entries(variantDdErrorById)
+      .filter((entry): entry is [string, boolean] => entry[1] === false)
+      .map(([variantId]) => variantId);
+    if (errorVariants.length > 0 && cleanVariants.length > 0) {
+      pruneVariantsByUserDdError(state, errorVariants);
+    }
+  }
   syncConfiguredUserControls();
   threatCtx = (state.threat as ThreatContext | null) ?? null;
   threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
@@ -3279,6 +3451,17 @@ function runTurn(play: Play): void {
     const visibleShadow = cloneStateForLog(before);
     for (const event of visibleEvents) {
       applyEventToShadow(visibleShadow, event);
+    }
+    if (variantDdErrorById) {
+      const errorVariants = Object.entries(variantDdErrorById)
+        .filter((entry): entry is [string, boolean] => entry[1] === true)
+        .map(([variantId]) => variantId);
+      const cleanVariants = Object.entries(variantDdErrorById)
+        .filter((entry): entry is [string, boolean] => entry[1] === false)
+        .map(([variantId]) => variantId);
+      if (errorVariants.length > 0 && cleanVariants.length > 0) {
+        pruneVariantsByUserDdError(visibleShadow, errorVariants);
+      }
     }
 
     trickFrozen = true;
@@ -4535,6 +4718,14 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
       const short = full.split('; alternatives')[0] ?? full;
       return { short: short.trim(), full: full.trim() };
     };
+    const splitDdErrorSummary = (summary: string): { summary: string; ddError: string | null } => {
+      const marker = ' DD Error.';
+      if (!summary.endsWith(marker)) return { summary, ddError: null };
+      return {
+        summary: summary.slice(0, -marker.length).trimEnd(),
+        ddError: 'DD Error.'
+      };
+    };
     const isIdleTransitionEffect = (effect: string): boolean =>
       effect.includes('becomes idle.') || effect.includes('becomes idle');
 
@@ -4559,9 +4750,10 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
       if (entry.variantGroups && entry.variantGroups.length > 0) {
         text.classList.add('teaching-text-variants');
         for (const group of entry.variantGroups) {
+          const parsed = splitDdErrorSummary(group.summary);
           const line = document.createElement('div');
           line.className = 'teaching-variant-line';
-          line.textContent = `${group.labels.join('/')}: ${group.summary}`;
+          line.textContent = `${group.labels.join('/')}: ${parsed.summary}`;
           text.appendChild(line);
         }
         row.appendChild(text);
@@ -4577,16 +4769,29 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
         if (verboseDetailEnabled() && nonDdReasons.length > 0) {
           bracketParts.push(...nonDdReasons);
         }
-        text.textContent = bracketParts.length > 0 ? `${entry.summary} [${bracketParts.join('; ')}]` : entry.summary;
+        const parsed = splitDdErrorSummary(entry.summary);
+        text.textContent = bracketParts.length > 0 ? `${parsed.summary} [${bracketParts.join('; ')}]` : parsed.summary;
         row.appendChild(text);
       }
 
-      const ddsSummary = ddsTeachingSummaries[idx];
-      if (ddsSummary) {
-        const ddsLine = document.createElement('div');
-        ddsLine.className = 'teaching-dds';
-        ddsLine.textContent = ddsSummary;
-        row.appendChild(ddsLine);
+      if (entry.variantGroups && entry.variantGroups.length > 0) {
+        const ddErrorGroups = entry.variantGroups
+          .map((group) => ({ labels: group.labels, ddError: splitDdErrorSummary(group.summary).ddError }))
+          .filter((group): group is { labels: string[]; ddError: string } => Boolean(group.ddError));
+        for (const group of ddErrorGroups) {
+          const ddsLine = document.createElement('div');
+          ddsLine.className = 'teaching-dds';
+          ddsLine.textContent = `${group.labels.join('/')}: ${group.ddError}`;
+          row.appendChild(ddsLine);
+        }
+      } else {
+        const ddError = splitDdErrorSummary(entry.summary).ddError;
+        if (ddError) {
+          const ddsLine = document.createElement('div');
+          ddsLine.className = 'teaching-dds';
+          ddsLine.textContent = ddError;
+          row.appendChild(ddsLine);
+        }
       }
 
       const shownEffects = entry.variantGroups && entry.variantGroups.length > 0
