@@ -19,7 +19,8 @@ export type EncapsulationToken =
   | 'i'
   | 'm'
   | 'o'
-  | 'u';
+  | 'u'
+  | '0';
 
 export type ParsedSuit = {
   suit: Suit;

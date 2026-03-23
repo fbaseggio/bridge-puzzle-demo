@@ -18,7 +18,8 @@ const VALID_TOKENS = new Set<EncapsulationToken>([
   'i',
   'm',
   'o',
-  'u'
+  'u',
+  '0'
 ]);
 const SUIT_ORDER: Suit[] = ['S', 'H', 'D', 'C'];
 

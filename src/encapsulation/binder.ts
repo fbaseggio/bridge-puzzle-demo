@@ -136,6 +136,7 @@ function computeSpecifiedCounts(parsed: ParsedEncapsulation): { specifiedNorth: 
     for (let i = 0; i < s.pattern.length; i += 1) {
       const ch = s.pattern[i] as string;
       if (ch === "'") continue;
+      if (ch === '0') continue;
       if (ch === 'o' || ch === 'u') continue;
       if (ch === 'm') {
         if (s.primary === 'N') specifiedSouth += 1;
@@ -268,6 +269,7 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
     for (let tokenIndex = 0; tokenIndex < suitRec.pattern.length; tokenIndex += 1) {
       let token = suitRec.pattern[tokenIndex] as string;
       if (token === "'") continue;
+      if (token === '0') continue;
       let gPrime = false;
       if ((token === 'g' || token === 'G') && suitRec.pattern[tokenIndex + 1] === "'") {
         gPrime = true;
