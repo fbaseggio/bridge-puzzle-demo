@@ -255,7 +255,8 @@ const rowHeight = compactWidgetLayout ? 15 : 17;
 const seatRowHeight = compactWidgetLayout ? 14 : 16;
 const seatToSuitGap = compactWidgetLayout ? 2 : 3;
 const suitRowSpacingTotal = compactWidgetLayout ? 12 : 16; // 4 rows with compact top/bottom margins.
-const verticalGap = Math.round(rowHeight * 0.6);
+const verticalGap = Math.max(4, Math.round(rowHeight * 0.6) - 4);
+const controlsGapY = 14;
 const horizontalGap = Math.round(rowHeight * 0.6);
 const handBoxWidth = suitColWidth + suitGap + maxSuitLineLen * rankGlyphWidth + Math.max(0, maxSuitLineLen - 1) * rankGap + handPadX;
 const handBoxHeight = seatRowHeight + seatToSuitGap + rowHeight * 4 + suitRowSpacingTotal + handPadY;
@@ -266,6 +267,7 @@ root.style.setProperty('--trick-box-w', `${trickBoxSize}px`);
 root.style.setProperty('--trick-box-h', `${trickBoxSize}px`);
 root.style.setProperty('--table-gap-y', `${verticalGap}px`);
 root.style.setProperty('--table-gap-x', `${horizontalGap}px`);
+root.style.setProperty('--controls-gap-y', `${controlsGapY}px`);
 root.style.setProperty('--slot-offset', '12%');
 let busyBranching: 'strict' | 'sameLevel' | 'allBusy' = 'sameLevel';
 // Browser DDS backstop is the active DD path in widget/analysis runtime.
@@ -4643,9 +4645,43 @@ function renderControlsBanner(): HTMLElement {
     row.appendChild(articleLink);
   }
 
+  const goalStateLabel = document.createElement('span');
+  goalStateLabel.className = 'controls-meta';
+  goalStateLabel.textContent = `Goal state: ${formatGoalStatus(state)}`;
+  row.appendChild(goalStateLabel);
+
+  const seedLabel = document.createElement('span');
+  seedLabel.className = 'controls-meta';
+  seedLabel.textContent = `Seed: ${currentSeed}`;
+  row.appendChild(seedLabel);
+
+  const seedBtn = document.createElement('button');
+  seedBtn.type = 'button';
+  seedBtn.textContent = 'New seed';
+  seedBtn.onclick = () => resetGame(Date.now() >>> 0, 'newSeed');
+  row.appendChild(seedBtn);
+
+  const debugLabel = document.createElement('label');
+  debugLabel.className = 'controls-meta-toggle';
+  const debugBox = document.createElement('input');
+  debugBox.type = 'checkbox';
+  debugBox.checked = showDebugSection;
+  debugBox.onchange = () => {
+    showDebugSection = debugBox.checked;
+    render();
+  };
+  debugLabel.append(debugBox, ' Show debug');
+  row.appendChild(debugLabel);
+
   row.appendChild(renderSettingsButton('analysis'));
 
   bar.appendChild(row);
+  if (currentProblem.status === 'underConstruction') {
+    const notice = document.createElement('div');
+    notice.className = 'status-notice status-notice-warning';
+    notice.textContent = 'Under construction: this puzzle may be buggy or incomplete.';
+    bar.appendChild(notice);
+  }
   return bar;
 }
 
@@ -5119,9 +5155,6 @@ function render(): void {
   mainRow.appendChild(tableHost);
   if (isWidgetShellMode && showWidgetTeachingPane) {
     mainRow.appendChild(renderTeachingEventsPane('widget'));
-  }
-  if (displayMode === 'analysis') {
-    mainRow.appendChild(renderStatusPanel(view));
   }
   root.appendChild(mainRow);
   if (displayMode !== 'practice') {

@@ -53,8 +53,24 @@ html.mode-widget {
   background: #f8fafc;
   min-height: 48px;
   padding: 6px 8px;
-  display: flex;
+  display: grid;
+  gap: 6px;
   align-items: center;
+}
+
+.controls-meta {
+  font-size: 12px;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.controls-meta-toggle {
+  font-size: 12px;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .practice-header {
@@ -1410,7 +1426,7 @@ html.mode-widget {
 }
 
 .board-navigation-area {
-  margin-top: 18px;
+  margin-top: var(--controls-gap-y, 18px);
   display: grid;
   gap: 10px;
   justify-items: center;
@@ -1421,15 +1437,15 @@ html.mode-widget {
 }
 
 .board-navigation-area.mode-widget {
-  margin-top: 18px;
-  gap: 1px;
+  margin-top: var(--controls-gap-y, 18px);
+  gap: 10px;
   width: calc(var(--hand-box-w) * 2 + var(--trick-box-w) + var(--table-gap-x, 8px) * 2);
   justify-items: center;
   position: relative;
 }
 
 .mode-practice .board-navigation-area.mode-practice {
-  margin-top: 18px;
+  margin-top: var(--controls-gap-y, 18px);
   gap: 10px;
   width: max-content;
   max-width: 100%;
