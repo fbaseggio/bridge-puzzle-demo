@@ -98,6 +98,14 @@
         color: #334155;
         font-size: 0.96rem;
       }
+      .article-introduction {
+        margin: 0 0 18px;
+        color: #334155;
+        font-style: italic;
+      }
+      .article-introduction p {
+        margin: 0 0 10px;
+      }
       h2 {
         margin: 24px 0 10px;
         font-size: 1.2rem;
@@ -138,6 +146,7 @@
       <p class="crumbs"><a href="/">Home</a> / <a href="/articles/">Articles</a> / Gorillas (1) and (2)</p>
       <h1>Gorillas (1) and (2)</h1>
       <p class="meta">Hugh Darwen · <em>Bridge Magazine</em>, June–July 1975</p>
+      <div class="article-introduction" id="article-introduction"></div>
 
       <h2>Gorillas (1)</h2>
       <p>In my introductory article (“Apes”) I discussed the three genera of Chimpansqueeze—the Right-handed Chimp, the Left-handed Chimp and the Ambidextrous Chimp—and I tendered the notion of a Gorilla as being the combination of two chimps. In this chapter I present the underlying principles of gorillas and analyse one genus, the Right-handed Gorilla, in detail.</p>
@@ -233,5 +242,12 @@
       <p>There is an interesting connection between this and position 10. As has been suggested, position 10 can be liberated by giving South another heart control. However, that transforms it to the ambidextrous gorilla.</p>
       <p>Finally, I must reaffirm that gorillas are not just zoological exhibits. Memorise the seven principles given at the beginning of Part 1, and I am sure you will be able to win even more tricks. Look, in particular, for the “diamond” guard being on the right side (if not, think in terms of a pseudosqueeze); learn which controls are best played off early and which are best retained for liberation; study the manipulation of alternate threats. Then you can abandon your fancy bidding sequences, for, if Blackwood guarantees enough aces and kings for twelve tricks, who needs a queen for the thirteenth?</p>
     </main>
+
+    <script type="module">
+      import introductionHtml from './introduction.html?raw';
+
+      const introductionRoot = document.getElementById('article-introduction');
+      if (introductionRoot) introductionRoot.innerHTML = introductionHtml;
+    </script>
   </body>
 </html>
