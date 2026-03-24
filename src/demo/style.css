@@ -1684,6 +1684,16 @@ html.mode-widget {
   background: transparent;
 }
 
+.mode-widget .outcome-module.ok,
+.mode-practice .outcome-module.ok {
+  padding: 7px 14px;
+  border-radius: 7px;
+  border: 1px solid #b7ddc6;
+  background: #eaf7ee;
+  color: #1f5d38;
+  font-weight: 600;
+}
+
 .mode-widget .transport-bar {
   gap: 4px;
 }
