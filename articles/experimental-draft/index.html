@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Experimental Draft</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #f5f7fb;
+        color: #18212f;
+        font-family: Georgia, "Times New Roman", serif;
+        line-height: 1.56;
+      }
+      .site-header {
+        border-bottom: 1px solid #e2e8f0;
+        background: #f8fafc;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      .site-header-inner {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 12px 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .site-title {
+        text-decoration: none;
+        color: #0f172a;
+        font-weight: 700;
+        font-size: 1rem;
+      }
+      .site-nav {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .site-nav a {
+        text-decoration: none;
+        color: #334155;
+        font-size: 0.95rem;
+      }
+      .site-nav a.active {
+        color: #0f172a;
+        font-weight: 600;
+      }
+      .article {
+        max-width: 780px;
+        margin: 0 auto;
+        padding: 28px 18px 40px;
+      }
+      .crumbs {
+        margin: 0 0 12px;
+        font-size: 0.92rem;
+        color: #64748b;
+      }
+      .crumbs a {
+        color: #64748b;
+        text-decoration: none;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: clamp(1.55rem, 2.8vw, 2.1rem);
+        line-height: 1.2;
+      }
+      .meta {
+        margin: 0 0 14px;
+        color: #334155;
+        font-size: 0.96rem;
+      }
+      p { margin: 0 0 12px; }
+      figure.widget { margin: 10px 0 14px; }
+      figure.widget iframe {
+        display: block;
+        width: 100%;
+        max-width: 470px;
+        height: 620px;
+        border: 0;
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-title" href="/">DeepSqueeze</a>
+        <nav class="site-nav" aria-label="Site">
+          <a href="/workbench/">Workbench</a>
+          <a href="/practice/">Practice</a>
+          <a class="active" href="/articles/">Articles</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="article">
+      <p class="crumbs"><a href="/">Home</a> / <a href="/articles/">Articles</a> / Experimental Draft</p>
+      <h1>Experimental Draft</h1>
+      <p class="meta">Franco Baseggio · <em>The Bridge World</em>, March 2009</p>
+
+      <p>
+        Brian Lee and Walter Lee introduced me to the theme of the veering squeeze card, a technique that can be used
+        to compensate for the absence of one of the usual requirements in some types of strip-squeeze. In these
+        positions, the squeeze card is a loser that, after being led, veers in one direction or another depending on
+        second hand’s discard: Sometimes declarer will ruff; sometimes he will discard and allow fourth hand to win
+        the trick.
+      </p>
+
+      <p>
+        The first such squeeze that I encountered was one involving overcoming a missing entry, where the veering
+        squeeze card can serve as a stepping-stone. Here is an example:
+      </p>
+
+      <h3>1</h3>
+      <figure class="widget"><iframe src="/workbench/?mode=widget&amp;problem=experimental_draft_01&amp;articleScript=experimental-draft-intro&amp;checkpoint=1" aria-label="Experimental draft opening deal"></iframe></figure>
+
+      <p>
+        East opens a weak notrump, and the next thing you know, you, South, are in six hearts. West leads a
+        third-or-lowest spade seven; you win in dummy, East follows with the six, and a successful heart finesse
+        follows. When the heart queen falls under the ace, you return to dummy with the heart ten (as East pitches a
+        diamond honor) to take a winning club finesse.
+      </p>
+
+      <p>After the club ace, you reach:</p>
+
+      <h3>1a</h3>
+      <figure class="widget"><iframe src="/workbench/?mode=widget&amp;problem=experimental_draft_01&amp;articleScript=experimental-draft-intro&amp;checkpoint=1a" aria-label="Experimental draft first ending"></iframe></figure>
+
+      <p>
+        If the closed hand now had a spade instead of one of those diamonds (or if the opening lead had been in any
+        other suit), you could cross to dummy in diamonds, cash the club king, ruff a club back to hand, and take your
+        last trump. East would be strip-squeezed down to only one diamond winner, so you could throw him in and take
+        the last two tricks in spades. With dummy cut off, that strip-squeeze fails—East can prevail by unguarding
+        spades.
+      </p>
+
+      <p>
+        If you were willing to play East for a particular shape in the minors, you could alternatively cash all of
+        your trumps, the diamond ace, and the club king and (unless the spades are good) exit with whichever
+        minor-suit loser you preserved. However, that would run the risk of keeping the wrong minor-suit loser in
+        dummy.
+      </p>
+
+      <p>
+        Instead, taking the spade lie as given, there is a sure-trick line that caters to all minor-suit
+        distributions and, in the given layout, exploits a veering squeeze card: Cash a trump, pitching a diamond
+        from dummy (East sheds a diamond), then cross to the diamond ace and take the club king, leaving:
+      </p>
+
+      <h3>1b</h3>
+      <figure class="widget"><iframe src="/workbench/?mode=widget&amp;problem=experimental_draft_01&amp;articleScript=experimental-draft-intro&amp;checkpoint=1b" aria-label="Experimental draft four-card continuation"></iframe></figure>
+    </main>
+  </body>
+</html>

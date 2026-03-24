@@ -59,6 +59,15 @@ import {
   type UnknownModeTeachingEntry,
   type UnknownModeVariantReplay
 } from './unknownModeReplay';
+import {
+  ARTICLE_SCRIPT_NAVIGATION_MODE,
+  clampArticleScriptCursor,
+  resolveArticleScript,
+  resolveArticleScriptCheckpoint,
+  type ArticleScriptNavigationMode,
+  type ArticleScriptSpec
+} from './articleScripts';
+import { replayArticleScript } from './articleScriptRuntime';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -329,11 +338,38 @@ const startupGateEnabledFromUrl: boolean = (() => {
   const raw = (new URLSearchParams(window.location.search).get('start') ?? '').trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 })();
+const initialArticleScriptIdFromUrl: string | null = (() => {
+  if (typeof window === 'undefined') return null;
+  const raw = new URLSearchParams(window.location.search).get('articleScript');
+  return raw?.trim() ? raw.trim() : null;
+})();
+const initialArticleCheckpointIdFromUrl: string | null = (() => {
+  if (typeof window === 'undefined') return null;
+  const raw = new URLSearchParams(window.location.search).get('checkpoint');
+  return raw?.trim() ? raw.trim() : null;
+})();
+const initialArticleScriptSpec = resolveArticleScript(initialArticleScriptIdFromUrl);
+const initialArticleCursor = (() => {
+  if (!initialArticleScriptSpec) return 0;
+  return resolveArticleScriptCheckpoint(initialArticleScriptSpec, initialArticleCheckpointIdFromUrl ?? '1').cursor;
+})();
 
 function startupOpeningForProblem(problem: ProblemWithThreats): CardId[] {
   if (initialOpeningFromUrl.length > 0) return [...initialOpeningFromUrl];
   const scripted = problem.scriptedOpening ?? [];
   return scripted.flatMap((trick) => trick);
+}
+
+type NavigationMode = 'standard' | ArticleScriptNavigationMode;
+
+function currentNavigationMode(): NavigationMode {
+  return displayMode === 'widget' && articleScriptState?.spec.navigationMode === ARTICLE_SCRIPT_NAVIGATION_MODE
+    ? ARTICLE_SCRIPT_NAVIGATION_MODE
+    : 'standard';
+}
+
+function articleScriptModeEnabled(): boolean {
+  return currentNavigationMode() === ARTICLE_SCRIPT_NAVIGATION_MODE;
 }
 
 function resolveProblemById(problemId: string, variantId?: string | null): ProblemWithThreats {
@@ -355,6 +391,7 @@ function versionUnknownModeEnabled(): boolean {
 }
 
 function configuredUserControls(base: Seat[] = currentProblem.userControls): Seat[] {
+  if (articleScriptModeEnabled()) return ['N', 'E', 'S', 'W'];
   return autoplayEw ? [...base] : ['N', 'E', 'S', 'W'];
 }
 
@@ -363,7 +400,7 @@ function syncConfiguredUserControls(): void {
   if (frozenViewState) frozenViewState.userControls = configuredUserControls();
 }
 
-const initialProblemId = initialPracticeQueue[0] ?? initialProblemIdFromUrl;
+const initialProblemId = initialPracticeQueue[0] ?? initialArticleScriptSpec?.parentProblemId ?? initialProblemIdFromUrl;
 let currentProblemVariantId = resolveProblemVariantId(initialProblemId, initialVariantIdFromUrl);
 let currentProblem = resolveProblemById(initialProblemId, currentProblemVariantId);
 let currentProblemId = initialProblemId;
@@ -394,6 +431,15 @@ let assistLevelByMode: Record<PuzzleModeId, AssistLevelId> = {
   'multi-ew': 'puzzle',
   draft: displayMode === 'practice' ? 'puzzle' : 'solution'
 };
+let articleScriptState: { spec: ArticleScriptSpec; checkpointId: string | null; initialCursor: number; cursor: number } | null =
+  initialArticleScriptSpec
+    ? {
+        spec: initialArticleScriptSpec,
+        checkpointId: resolveArticleScriptCheckpoint(initialArticleScriptSpec, initialArticleCheckpointIdFromUrl).id,
+        initialCursor: initialArticleCursor,
+        cursor: initialArticleCursor
+      }
+    : null;
 let alwaysHint = displayMode === 'widget';
 let cardColoringEnabled = true;
 let narrate = displayMode === 'analysis';
@@ -409,6 +455,10 @@ if (displayMode === 'widget' && (widgetUiMode === 'dd-puzzle' || widgetUiMode ==
 }
 applyWidgetProblemDefaults();
 applyCurrentAssistLevelToControls();
+if (articleScriptModeEnabled()) {
+  autoplaySingletons = false;
+  autoplayEw = false;
+}
 let showWidgetTeachingPane = false;
 let settingsPanelContext: 'analysis' | 'practice' | 'widget' | null = null;
 let settingsNestedOptionsOpen = false;
@@ -839,12 +889,18 @@ function ensureSettingsOutsideDismiss(): void {
   });
 }
 
-function renderSettingsToggle(label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement {
+function renderSettingsToggle(
+  label: string,
+  checked: boolean,
+  onChange: (checked: boolean) => void,
+  options?: { disabled?: boolean }
+): HTMLElement {
   const row = document.createElement('label');
   row.className = 'advanced-toggle';
   const box = document.createElement('input');
   box.type = 'checkbox';
   box.checked = checked;
+  box.disabled = options?.disabled === true;
   box.onchange = () => onChange(box.checked);
   const text = document.createElement('span');
   text.textContent = label;
@@ -911,6 +967,7 @@ function renderSettingsToggles(context: 'analysis' | 'practice' | 'widget'): HTM
 
   const otherGroup = document.createElement('div');
   otherGroup.className = 'advanced-group other-group';
+  const autoplayLocked = articleScriptModeEnabled();
   if (context !== 'analysis') {
     otherGroup.appendChild(
       renderSettingsToggle('Show boxes', showGuides, (checked) => {
@@ -924,7 +981,7 @@ function renderSettingsToggles(context: 'analysis' | 'practice' | 'widget'): HTM
       autoplaySingletons = checked;
       syncSingletonAutoplay();
       render();
-    })
+    }, { disabled: autoplayLocked })
   );
   otherGroup.appendChild(
     renderSettingsToggle('Autoplay E/W', autoplayEw, (checked) => {
@@ -935,7 +992,7 @@ function renderSettingsToggles(context: 'analysis' | 'practice' | 'widget'): HTM
       }
       syncSingletonAutoplay();
       render();
-    })
+    }, { disabled: autoplayLocked })
   );
   body.appendChild(otherGroup);
 
@@ -3616,6 +3673,11 @@ function resetGame(seed: number, reason: string): void {
   deferredLogLines = [];
   unfreezeTrick(false);
   refreshThreatModel(currentProblemId, false);
+  if (articleScriptModeEnabled()) {
+    autoplaySingletons = false;
+    autoplayEw = false;
+    resetToCurrentArticleCheckpoint();
+  }
   render();
 }
 
@@ -3668,6 +3730,11 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   deferredLogLines = [];
   unfreezeTrick(false);
   refreshThreatModel(currentProblemId, true);
+  if (articleScriptModeEnabled()) {
+    autoplaySingletons = false;
+    autoplayEw = false;
+    resetToCurrentArticleCheckpoint();
+  }
   render();
 }
 
@@ -4913,6 +4980,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
 
   const transport = document.createElement('div');
   transport.className = `transport-bar mode-${displayMode}`;
+  const widgetArticleScript = displayMode === 'widget' ? articleScriptState : null;
 
   const restartBtn = document.createElement('button');
   restartBtn.type = 'button';
@@ -4920,7 +4988,14 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   restartBtn.title = 'Restart';
   restartBtn.setAttribute('aria-label', 'Restart');
   if (isWidgetShellMode) restartBtn.classList.add('icon-btn');
-  restartBtn.onclick = () => resetGame(currentSeed, 'reset');
+  restartBtn.onclick = () => {
+    if (widgetArticleScript) {
+      resetToCurrentArticleCheckpoint();
+      render();
+      return;
+    }
+    resetGame(currentSeed, 'reset');
+  };
   transport.appendChild(restartBtn);
 
   const undoBtn = document.createElement('button');
@@ -4929,12 +5004,33 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   undoBtn.title = 'Undo';
   undoBtn.setAttribute('aria-label', 'Undo');
   if (isWidgetShellMode) undoBtn.classList.add('icon-btn', 'undo-btn');
-  if (!isWidgetShellMode) undoBtn.disabled = undoStack.length === 0;
+  if (widgetArticleScript) undoBtn.disabled = widgetArticleScript.cursor === 0;
+  else if (!isWidgetShellMode) undoBtn.disabled = undoStack.length === 0;
   undoBtn.onclick = () => {
+    if (widgetArticleScript) {
+      replayArticleScriptToCursor(widgetArticleScript.cursor - 1);
+      render();
+      return;
+    }
     if (undoStack.length === 0) return;
     backupLastUserPlay();
   };
   transport.appendChild(undoBtn);
+
+  if (widgetArticleScript) {
+    const forwardBtn = document.createElement('button');
+    forwardBtn.type = 'button';
+    forwardBtn.textContent = '⏭';
+    forwardBtn.title = 'Forward';
+    forwardBtn.setAttribute('aria-label', 'Forward');
+    forwardBtn.classList.add('icon-btn');
+    forwardBtn.disabled = widgetArticleScript.cursor >= widgetArticleScript.spec.steps.length;
+    forwardBtn.onclick = () => {
+      replayArticleScriptToCursor(widgetArticleScript.cursor + 1);
+      render();
+    };
+    transport.appendChild(forwardBtn);
+  }
 
   if (displayMode === 'analysis') {
     const nextVariationBtn = document.createElement('button');
@@ -5370,8 +5466,44 @@ function launchStartSequence(): void {
   render();
 }
 
+function replayArticleScriptToCursor(cursor: number): void {
+  if (!articleScriptState) return;
+  const bounded = clampArticleScriptCursor(articleScriptState.spec, cursor);
+  articleScriptState.cursor = bounded;
+  const replayed = replayArticleScript(withDdSource(currentProblem), articleScriptState.spec, bounded, currentSeed);
+  state = replayed.state;
+  syncConfiguredUserControls();
+  resetSemanticStreams();
+  teachingReducer.setTrumpSuit(state.trumpSuit);
+  ddsPlayHistory = replayed.playedCardIds.map((cardId) => `${cardId[0]}${cardId.slice(1)}`);
+  ddsTeachingSummaries = [];
+  clearDdErrorVisual();
+  inevitableFailureAlert = false;
+  clearWidgetNarrationFeed();
+  clearHint();
+  clearTeachingEvents();
+  inversePrimaryBySuit = {};
+  deferredLogLines = [];
+  unfreezeTrick(false);
+  runStatus = 'running';
+  runPlayCounter = bounded;
+  rebuildUserEqClassMapping(state);
+  resetDefenderEqInitSnapshot();
+  refreshThreatModel(currentProblemId, false);
+}
+
+function resetToCurrentArticleCheckpoint(): void {
+  if (!articleScriptState) return;
+  replayArticleScriptToCursor(articleScriptState.initialCursor);
+}
+
 if (practiceSession) beginPracticeRun(false);
 refreshThreatModel(currentProblemId, false);
+if (articleScriptModeEnabled()) {
+  autoplaySingletons = false;
+  autoplayEw = false;
+  resetToCurrentArticleCheckpoint();
+}
 replayInitialUserHistoryIfPresent();
 warmDdsRuntime();
 render();

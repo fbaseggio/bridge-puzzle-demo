@@ -12,6 +12,7 @@ import { p011 } from '../puzzles/p011';
 import { p012 } from '../puzzles/p012';
 import { p013 } from '../puzzles/p013';
 import { squeezeSelf01 } from '../puzzles/squeeze_self_01';
+import { experimentalDraft01, experimentalDraft01a, experimentalDraft01b } from '../puzzles/experimental_draft';
 import {
   buildSureTricksDemo,
   buildSureTricksDemoVariant,
@@ -117,6 +118,9 @@ export const demoProblems: DemoProblem[] = [
     problem: squeezeSelf01,
     articlePath: 'articles/squeeze-self/'
   },
+  { id: 'experimental_draft_01', label: 'experimental_draft_01', problem: experimentalDraft01, practiceEligible: false, articlePath: 'articles/experimental-draft/' },
+  { id: 'experimental_draft_01a', label: 'experimental_draft_01a', problem: experimentalDraft01a, practiceEligible: false },
+  { id: 'experimental_draft_01b', label: 'experimental_draft_01b', problem: experimentalDraft01b, practiceEligible: false },
   {
     id: 'sure_tricks_demo',
     label: 'Sure-tricks Demo',
