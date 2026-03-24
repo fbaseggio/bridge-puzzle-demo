@@ -357,7 +357,7 @@ semanticCollector.attachReducer(semanticReducer);
 let logs: string[] = [];
 let deferredLogLines: string[] = [];
 let showLog = false;
-let showGuides = displayMode !== 'analysis';
+let showGuides = false;
 let showDebugSection = false;
 let showSemanticReducer = false;
 let expandedLogFamilies = new Set<LogChannelFamilyId>(['core', 'diagnostics', 'admin']);
@@ -4423,6 +4423,23 @@ function applyCompactTableAlignment(tableCanvas: HTMLElement): void {
   tableCanvas.style.setProperty('--table-axis-shift', `${tableAxisShift}px`);
 }
 
+function applyUnknownSlashLinePlacement(tableCanvas: HTMLElement): void {
+  const line = tableCanvas.querySelector<HTMLElement>('.unknown-slash-line');
+  if (!line) return;
+  const tableRect = tableCanvas.getBoundingClientRect();
+  const westAnchorRect =
+    tableCanvas.querySelector<HTMLElement>('.seat-W .hand-content-anchor-west')?.getBoundingClientRect() ??
+    tableCanvas.querySelector<HTMLElement>('.seat-W')?.getBoundingClientRect();
+  const southRect = tableCanvas.querySelector<HTMLElement>('.seat-S')?.getBoundingClientRect();
+  if (!westAnchorRect || !southRect) return;
+
+  const currentRect = line.getBoundingClientRect();
+  const preferredLeft = westAnchorRect.left - tableRect.left;
+  const maxRight = southRect.left - tableRect.left - 6;
+  const adjustedLeft = Math.min(preferredLeft, maxRight - currentRect.width);
+  line.style.left = `${Math.max(0, Math.round(adjustedLeft))}px`;
+}
+
 function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
   const table = document.createElement('section');
   const hideTrickVisual = visuallyHidden && !startPending;
@@ -5111,6 +5128,7 @@ function render(): void {
     root.appendChild(renderBoardNavigationArea(view));
   }
   applyCompactTableAlignment(tableCanvas);
+  applyUnknownSlashLinePlacement(tableCanvas);
   applyNarrationBubbleCollisionAvoidance(tableCanvas);
   if (displayMode === 'analysis' && (showLog || showDebugSection)) {
     root.appendChild(renderDebugSection());

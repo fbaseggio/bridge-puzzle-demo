@@ -504,8 +504,8 @@ html.mode-widget {
 
 .unknown-slash-line {
   position: absolute;
-  left: calc(50% + var(--table-axis-shift) - var(--hand-box-w) / 2 - 104px);
-  top: calc(50% + var(--trick-box-h) / 2 + var(--gap-y) + 34px);
+  left: calc(50% + var(--table-axis-shift) - var(--trick-box-w) / 2 - var(--gap-x) - var(--west-anchor-width, var(--hand-box-w)) + var(--west-snug-shift));
+  top: calc(50% + var(--trick-box-h) / 2 + var(--gap-y) + 26px);
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
@@ -533,8 +533,8 @@ html.mode-widget {
 }
 
 .mode-widget .unknown-slash-line {
-  left: calc(50% + var(--table-axis-shift) - var(--hand-box-w) / 2 - 96px);
-  top: calc(50% + var(--trick-box-h) / 2 + var(--gap-y) + 32px);
+  left: calc(50% + var(--table-axis-shift) - var(--trick-box-w) / 2 - var(--gap-x) - var(--west-anchor-width, var(--hand-box-w)) + var(--west-snug-shift));
+  top: calc(50% + var(--trick-box-h) / 2 + var(--gap-y) + 24px);
   font-size: 11px;
   padding: 2px 5px;
 }
