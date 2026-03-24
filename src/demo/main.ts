@@ -357,7 +357,7 @@ semanticCollector.attachReducer(semanticReducer);
 let logs: string[] = [];
 let deferredLogLines: string[] = [];
 let showLog = false;
-let showGuides = false;
+let showGuides = displayMode !== 'analysis';
 let showDebugSection = false;
 let showSemanticReducer = false;
 let expandedLogFamilies = new Set<LogChannelFamilyId>(['core', 'diagnostics', 'admin']);
@@ -366,6 +366,7 @@ let teachingMode = true;
 let autoplaySingletons = displayMode !== 'widget';
 let autoplayEw = true;
 let unknownModeVariantReplayData: Map<string, UnknownModeVariantReplay> | null = null;
+let westInitialContentWidth: number | null = null;
 let assistLevelByMode: Record<PuzzleModeId, AssistLevelId> = {
   standard: displayMode === 'practice' ? 'puzzle' : 'solution',
   'single-dummy': 'sd',
@@ -879,6 +880,14 @@ function renderSettingsToggles(context: 'analysis' | 'practice' | 'widget'): HTM
 
   const otherGroup = document.createElement('div');
   otherGroup.className = 'advanced-group other-group';
+  if (context !== 'analysis') {
+    otherGroup.appendChild(
+      renderSettingsToggle('Show boxes', showGuides, (checked) => {
+        showGuides = checked;
+        render();
+      })
+    );
+  }
   otherGroup.appendChild(
     renderSettingsToggle('Autoplay singletons', autoplaySingletons, (checked) => {
       autoplaySingletons = checked;
@@ -3289,6 +3298,10 @@ function formatGoal(s: State): string {
   return 'Unknown goal';
 }
 
+function formatStrainText(strain: State['contract']['strain']): string {
+  return strain === 'NT' ? 'NT' : suitSymbol[strain];
+}
+
 function formatGoalStatus(s: State): string {
   if (s.goalStatus === 'assuredSuccess') return 'Assured success';
   if (s.goalStatus === 'assuredFailure') return 'Assured failure';
@@ -3518,6 +3531,7 @@ function resetGame(seed: number, reason: string): void {
   clearSingletonAutoplayTimer();
   clearPulseTimer();
   pulseUntilByCardKey.clear();
+  westInitialContentWidth = null;
   const nextSeed = seed >>> 0;
   if (nextSeed !== (currentSeed >>> 0)) {
     replayCoverage.triedByIdx.clear();
@@ -3564,6 +3578,7 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   clearSingletonAutoplayTimer();
   clearPulseTimer();
   pulseUntilByCardKey.clear();
+  westInitialContentWidth = null;
   const entry = demoProblems.find((p) => p.id === problemId);
   if (!entry && !practiceProblemOverrides.has(problemId)) return;
   currentProblemVariantId = practiceProblemOverrides.has(problemId) ? null : resolveProblemVariantId(problemId, variantId);
@@ -4238,10 +4253,21 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   const active = view.turn === seat;
   card.className = `hand seat-${seat}`;
 
+  const content = document.createElement('div');
+  content.className = `hand-content${
+    seat === 'W'
+      ? ' hand-content-west'
+      : seat === 'E'
+        ? ' hand-content-east'
+        : seat === 'N' || seat === 'S'
+          ? ' hand-content-ns'
+          : ''
+  }`;
+
   const header = document.createElement('div');
   header.className = 'hand-head';
   header.innerHTML = `<strong class="seat-name${active ? ' active-seat-name' : ''}">${seatName[seat]}</strong>`;
-  card.appendChild(header);
+  content.appendChild(header);
   if (isWidgetShellMode && narrate) {
     const entry = widgetNarrationBySeat[seat];
     if (entry?.text) {
@@ -4282,7 +4308,16 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
       versionUnknownModeEnabled() && (seat === 'E' || seat === 'W')
         ? fixedRanksForSeatSuit(view.ewVariantState, seat, suit)
         : sortRanksDesc(view.hands[seat][suit]);
-    card.appendChild(renderSuitRow(view, seat, suit, displayRanks, legalSet, effectiveCanAct, hintBestSet, ddErrorGoodSet));
+    content.appendChild(renderSuitRow(view, seat, suit, displayRanks, legalSet, effectiveCanAct, hintBestSet, ddErrorGoodSet));
+  }
+
+  if (seat === 'W') {
+    const anchor = document.createElement('div');
+    anchor.className = 'hand-content-anchor hand-content-anchor-west';
+    anchor.appendChild(content);
+    card.appendChild(anchor);
+  } else {
+    card.appendChild(content);
   }
 
   return card;
@@ -4315,6 +4350,40 @@ function renderUnknownSlashLine(view: State): HTMLElement | null {
   return line;
 }
 
+function renderBoardMeta(view: State): HTMLElement {
+  const meta = document.createElement('aside');
+  meta.className = 'board-meta';
+
+  const strainLine = document.createElement('div');
+  strainLine.className = 'board-meta-line';
+  strainLine.appendChild(document.createTextNode('Strain: '));
+  const strainValue = document.createElement('span');
+  strainValue.className = `board-meta-strain${view.contract.strain === 'NT' ? '' : ` suit-${view.contract.strain}`}`;
+  strainValue.textContent = formatStrainText(view.contract.strain);
+  strainLine.appendChild(strainValue);
+  meta.appendChild(strainLine);
+
+  const goalLine = document.createElement('div');
+  goalLine.className = 'board-meta-line';
+  if (view.goal.type === 'minTricks') {
+    const initialTricksInDeal = seatOrder
+      .filter((seat) => seat === 'N' || seat === 'S')
+      .map((seat) => suitOrder.reduce((sum, suit) => sum + currentProblem.hands[seat][suit].length, 0))
+      .reduce((max, count) => Math.max(max, count), 0);
+    goalLine.textContent = `Goal: ${view.goal.n}/${initialTricksInDeal}`;
+  } else {
+    goalLine.textContent = `Goal: ${formatGoal(view)}`;
+  }
+  meta.appendChild(goalLine);
+
+  const tricksLine = document.createElement('div');
+  tricksLine.className = 'board-meta-line';
+  tricksLine.textContent = `NS ${view.tricksWon.NS} · EW ${view.tricksWon.EW}`;
+  meta.appendChild(tricksLine);
+
+  return meta;
+}
+
 function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
   return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
 }
@@ -4332,6 +4401,26 @@ function applyNarrationBubbleCollisionAvoidance(tableCanvas: HTMLElement): void 
       bubble.classList.add('shift-out');
     }
   }
+}
+
+function applyCompactTableAlignment(tableCanvas: HTMLElement): void {
+  const handBoxWidth = Number.parseFloat(getComputedStyle(root).getPropertyValue('--hand-box-w')) || 0;
+  if (!handBoxWidth) return;
+  const northWidth = tableCanvas.querySelector<HTMLElement>('.seat-N .hand-content')?.getBoundingClientRect().width ?? handBoxWidth;
+  const southWidth = tableCanvas.querySelector<HTMLElement>('.seat-S .hand-content')?.getBoundingClientRect().width ?? handBoxWidth;
+  const westWidth = tableCanvas.querySelector<HTMLElement>('.seat-W .hand-content')?.getBoundingClientRect().width ?? handBoxWidth;
+  const nsFitWidth = Math.max(northWidth, southWidth);
+  const compactSlack = handBoxWidth - nsFitWidth;
+  if (westInitialContentWidth === null) westInitialContentWidth = westWidth;
+  const westSlack = handBoxWidth - westInitialContentWidth;
+
+  const westSnugShift = westSlack >= 18 ? Math.min(8, Math.round((westSlack - 12) / 3)) : 0;
+  const tableAxisShift = compactSlack >= 28 ? -Math.min(8, Math.round(compactSlack / 2)) : 0;
+
+  tableCanvas.style.setProperty('--ns-fit-width', `${Math.round(nsFitWidth)}px`);
+  tableCanvas.style.setProperty('--west-anchor-width', `${Math.round(westInitialContentWidth)}px`);
+  tableCanvas.style.setProperty('--west-snug-shift', `${westSnugShift}px`);
+  tableCanvas.style.setProperty('--table-axis-shift', `${tableAxisShift}px`);
 }
 
 function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
@@ -4395,14 +4484,38 @@ function renderStatusPanel(view: State): HTMLElement {
 
   const facts = document.createElement('div');
   facts.className = 'status-facts';
-  facts.innerHTML = `
-    <div><span class="k">Contract</span><span class="v">${view.contract.strain}</span></div>
-    <div><span class="k">Goal</span><span class="v">${formatGoal(view)}</span></div>
-    <div><span class="k">Goal state</span><span class="v">${formatGoalStatus(view)}</span></div>
-    <div class="tricks"><span class="k">Tricks</span><span class="v heavy">NS ${view.tricksWon.NS} - EW ${view.tricksWon.EW}</span></div>
-    <div class="meta-row"><span class="k">Leader</span><span class="v turn-meta">${view.leader}</span></div>
-    <div class="meta-row"><span class="k">Turn</span><span class="v turn-meta turn-emph">${view.turn}</span></div>
-  `;
+  const contractRow = document.createElement('div');
+  const contractKey = document.createElement('span');
+  contractKey.className = 'k';
+  contractKey.textContent = 'Contract';
+  const contractValue = document.createElement('span');
+  contractValue.className = `v${view.contract.strain === 'NT' ? '' : ` suit-${view.contract.strain}`}`;
+  contractValue.textContent = formatStrainText(view.contract.strain);
+  contractRow.append(contractKey, contractValue);
+  facts.appendChild(contractRow);
+
+  const goalRow = document.createElement('div');
+  goalRow.innerHTML = `<span class="k">Goal</span><span class="v">${formatGoal(view)}</span>`;
+  facts.appendChild(goalRow);
+
+  const goalStateRow = document.createElement('div');
+  goalStateRow.innerHTML = `<span class="k">Goal state</span><span class="v">${formatGoalStatus(view)}</span>`;
+  facts.appendChild(goalStateRow);
+
+  const tricksRow = document.createElement('div');
+  tricksRow.className = 'tricks';
+  tricksRow.innerHTML = `<span class="k">Tricks</span><span class="v heavy">NS ${view.tricksWon.NS} - EW ${view.tricksWon.EW}</span>`;
+  facts.appendChild(tricksRow);
+
+  const leaderRow = document.createElement('div');
+  leaderRow.className = 'meta-row';
+  leaderRow.innerHTML = `<span class="k">Leader</span><span class="v turn-meta">${view.leader}</span>`;
+  facts.appendChild(leaderRow);
+
+  const turnRow = document.createElement('div');
+  turnRow.className = 'meta-row';
+  turnRow.innerHTML = `<span class="k">Turn</span><span class="v turn-meta turn-emph">${view.turn}</span>`;
+  facts.appendChild(turnRow);
   const seedRow = document.createElement('div');
   seedRow.className = 'meta-row';
   const seedKey = document.createElement('span');
@@ -4554,7 +4667,6 @@ function renderPracticeHeader(view: State): HTMLElement {
   const undoCount = practiceSession.perPuzzleUndoCount[currentProblemId] ?? practiceSession.currentUndoCount;
   summary.textContent = ` Practice Mode · Puzzle ${indexLabel} · Solved ${practiceSession.solved}/${practiceSession.attempted} · Perfect ${practiceSession.perfect} · Undo ${undoCount}`;
   header.appendChild(summary);
-  header.appendChild(renderSettingsButton('practice'));
   return header;
 }
 
@@ -4590,12 +4702,11 @@ function renderPracticePuzzleStateBar(view: State): HTMLElement {
 
 function renderBoardNavigationArea(view: State): HTMLElement {
   const section = document.createElement('section');
-  section.className = `board-navigation-area mode-${displayMode}`;
+  section.className = `board-navigation-area mode-${displayMode}${showGuides ? ' show-guides' : ''}`;
   const practicePuzzleMode = displayMode === 'practice' && !!practiceSession && !practiceSession.solutionMode;
 
   const outcome = document.createElement('div');
   outcome.className = `outcome-module ${runStatus === 'success' ? 'ok' : runStatus === 'failure' ? 'fail' : 'neutral'}`;
-  const noPlayYet = ddsPlayHistory.length === 0 && view.tricksWon.NS === 0 && view.tricksWon.EW === 0 && view.trick.length === 0;
   const canonicalStatus = canonicalRunStatusText(runStatus);
   const terminalCanonical = runStatus === 'success' || runStatus === 'failure';
   if (isWidgetShellMode && terminalCanonical) {
@@ -4651,19 +4762,19 @@ function renderBoardNavigationArea(view: State): HTMLElement {
       outcome.textContent = widgetStatus.text;
     } else if (widgetStatus.type === 'message' && widgetStatus.text) {
       outcome.textContent = widgetStatus.text;
-    } else if (noPlayYet) {
-      if (displayMode === 'practice') {
-        outcome.textContent = `Practice Mode · Goal: ${practiceGoalSummary(view)}`;
-      } else {
-        const strain = view.contract.strain;
-        const takeN = view.goal.type === 'minTricks' ? view.goal.n : '-';
-        outcome.textContent = alwaysHint ? `${strain} take ${takeN} · Press 💡` : `${strain} take ${takeN}`;
-      }
+    } else if (state.userControls.includes(view.turn) && (!trickFrozen || canLeadDismiss)) {
+      outcome.textContent = `${seatName[view.turn]} to play`;
     } else {
-      outcome.textContent = canonicalStatus;
+      outcome.textContent = 'Press Start';
     }
   } else {
-    outcome.textContent = canonicalStatus;
+    if (terminalCanonical) {
+      outcome.textContent = canonicalStatus;
+    } else if (state.userControls.includes(view.turn) && (!trickFrozen || canLeadDismiss)) {
+      outcome.textContent = `${seatName[view.turn]} to play`;
+    } else {
+      outcome.textContent = 'Press Start';
+    }
   }
   section.appendChild(outcome);
 
@@ -4756,14 +4867,13 @@ function renderBoardNavigationArea(view: State): HTMLElement {
       pop.setAttribute('aria-label', 'Pop Out (open full analysis)');
       transport.appendChild(pop);
     }
-
     transport.appendChild(renderSettingsButton('widget'));
   }
 
   section.appendChild(transport);
   if (displayMode === 'practice' && practiceSession?.solutionMode) {
     const actions = document.createElement('div');
-    actions.className = 'practice-actions';
+    actions.className = 'practice-actions practice-secondary-actions';
 
     const replayBtn = document.createElement('button');
     replayBtn.type = 'button';
@@ -4785,7 +4895,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
 
   if (displayMode === 'practice' && practiceSession?.isTerminal && !practiceSession.solutionMode) {
     const actions = document.createElement('div');
-    actions.className = 'practice-actions';
+    actions.className = 'practice-actions practice-secondary-actions';
 
     const replayBtn = document.createElement('button');
     replayBtn.type = 'button';
@@ -4963,7 +5073,6 @@ function render(): void {
   }
   if (displayMode === 'practice') {
     root.appendChild(renderPracticeHeader(view));
-    root.appendChild(renderPracticePuzzleStateBar(view));
   }
 
   const mainRow = document.createElement('section');
@@ -4974,6 +5083,7 @@ function render(): void {
 
   const tableCanvas = document.createElement('main');
   tableCanvas.className = `table-canvas${showGuides ? ' show-guides' : ''}`;
+  tableCanvas.appendChild(renderBoardMeta(view));
   tableCanvas.appendChild(renderTrickTable(view, isWidgetReadingMode));
   tableCanvas.appendChild(renderSeatHand(view, 'N'));
   tableCanvas.appendChild(renderSeatHand(view, 'W'));
@@ -4983,6 +5093,9 @@ function render(): void {
   if (unknownSlashLine) tableCanvas.appendChild(unknownSlashLine);
 
   tableHost.appendChild(tableCanvas);
+  if (displayMode === 'practice') {
+    tableHost.appendChild(renderBoardNavigationArea(view));
+  }
   if (displayMode === 'analysis') {
     mainRow.appendChild(renderTeachingEventsPane('analysis'));
   }
@@ -4994,10 +5107,10 @@ function render(): void {
     mainRow.appendChild(renderStatusPanel(view));
   }
   root.appendChild(mainRow);
-  root.appendChild(renderBoardNavigationArea(view));
-  if (displayMode === 'practice') {
-    root.appendChild(renderPracticeClaimDebugPanel());
+  if (displayMode !== 'practice') {
+    root.appendChild(renderBoardNavigationArea(view));
   }
+  applyCompactTableAlignment(tableCanvas);
   applyNarrationBubbleCollisionAvoidance(tableCanvas);
   if (displayMode === 'analysis' && (showLog || showDebugSection)) {
     root.appendChild(renderDebugSection());

@@ -110,6 +110,10 @@ html.mode-widget {
   align-items: start;
 }
 
+.main-row.mode-practice {
+  margin-top: 20px;
+}
+
 .main-row.mode-widget.with-widget-pane {
   grid-template-columns: auto minmax(185px, 230px);
   gap: 8px;
@@ -119,6 +123,11 @@ html.mode-widget {
   display: block;
   width: 100%;
   align-self: start;
+}
+
+.mode-practice .table-host {
+  width: fit-content;
+  margin: 0 auto;
 }
 
 .mode-widget .table-host {
@@ -388,9 +397,33 @@ html.mode-widget {
 .table-canvas {
   --gap-x: var(--table-gap-x, 8px);
   --gap-y: var(--table-gap-y, 8px);
+  --table-axis-shift: 0px;
+  --west-snug-shift: 0px;
   position: relative;
   width: calc(var(--hand-box-w) * 2 + var(--trick-box-w) + var(--gap-x) * 2);
   height: calc(var(--hand-box-h) * 2 + var(--trick-box-h) + var(--gap-y) * 2);
+}
+
+.board-meta {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  gap: 1px;
+  pointer-events: none;
+  color: #334155;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.15;
+  z-index: 2;
+}
+
+.mode-widget .board-meta {
+  font-size: 13px;
+}
+
+.board-meta-line {
+  white-space: nowrap;
 }
 
 .hand {
@@ -404,12 +437,45 @@ html.mode-widget {
   overflow: hidden;
 }
 
+.hand-content {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.hand-content-ns {
+  width: var(--ns-fit-width, fit-content);
+  max-width: 100%;
+  margin-left: calc((var(--hand-box-w) - var(--ns-fit-width, var(--hand-box-w))) / 2);
+  margin-right: 0;
+}
+
+.hand-content-anchor {
+  max-width: 100%;
+}
+
+.hand-content-anchor-west {
+  width: var(--west-anchor-width, fit-content);
+  max-width: 100%;
+  margin-left: auto;
+}
+
+.hand-content-west,
+.hand-content-east {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.hand-content-east {
+  margin-right: auto;
+}
+
 .mode-widget .hand {
   overflow: visible;
 }
 
 .seat-N {
-  left: 50%;
+  left: calc(50% + var(--table-axis-shift));
   top: calc(50% - var(--trick-box-h) / 2 - var(--gap-y) - var(--hand-box-h));
   transform: translateX(-50%);
 }
@@ -419,26 +485,26 @@ html.mode-widget {
 }
 
 .seat-W {
-  left: calc(50% - var(--trick-box-w) / 2 - var(--gap-x) - var(--hand-box-w));
+  left: calc(50% + var(--table-axis-shift) - var(--trick-box-w) / 2 - var(--gap-x) - var(--hand-box-w) + var(--west-snug-shift));
   top: 50%;
   transform: translateY(-50%);
 }
 
 .seat-E {
-  left: calc(50% + var(--trick-box-w) / 2 + var(--gap-x));
+  left: calc(50% + var(--table-axis-shift) + var(--trick-box-w) / 2 + var(--gap-x));
   top: 50%;
   transform: translateY(-50%);
 }
 
 .seat-S {
-  left: 50%;
+  left: calc(50% + var(--table-axis-shift));
   top: calc(50% + var(--trick-box-h) / 2 + var(--gap-y));
   transform: translateX(-50%);
 }
 
 .unknown-slash-line {
   position: absolute;
-  left: calc(50% - var(--hand-box-w) / 2 - 104px);
+  left: calc(50% + var(--table-axis-shift) - var(--hand-box-w) / 2 - 104px);
   top: calc(50% + var(--trick-box-h) / 2 + var(--gap-y) + 34px);
   display: inline-flex;
   flex-direction: column;
@@ -467,7 +533,7 @@ html.mode-widget {
 }
 
 .mode-widget .unknown-slash-line {
-  left: calc(50% - var(--hand-box-w) / 2 - 96px);
+  left: calc(50% + var(--table-axis-shift) - var(--hand-box-w) / 2 - 96px);
   top: calc(50% + var(--trick-box-h) / 2 + var(--gap-y) + 32px);
   font-size: 11px;
   padding: 2px 5px;
@@ -577,7 +643,7 @@ html.mode-widget {
 
 .trick-table {
   position: absolute;
-  left: 50%;
+  left: calc(50% + var(--table-axis-shift));
   top: 50%;
   transform: translate(-50%, -50%);
   width: var(--trick-box-w);
@@ -752,6 +818,37 @@ html.mode-widget {
 .show-guides .hand {
   outline: 1px dashed rgba(71, 85, 105, 0.25);
   outline-offset: -1px;
+}
+
+.show-guides .hand-content {
+  outline: 1px dashed rgba(14, 165, 233, 0.45);
+}
+
+.show-guides .hand-content-anchor-west {
+  outline: 1px dashed rgba(249, 115, 22, 0.5);
+  outline-offset: -1px;
+}
+
+.table-canvas.show-guides::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed rgba(100, 116, 139, 0.38);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.table-canvas.show-guides::after {
+  content: '';
+  position: absolute;
+  left: calc(50% + var(--table-axis-shift));
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed rgba(37, 99, 235, 0.42);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .show-guides .trick-table {
@@ -1313,17 +1410,18 @@ html.mode-widget {
 }
 
 .board-navigation-area {
-  margin-top: 2px;
+  margin-top: 18px;
   display: grid;
-  gap: 6px;
+  gap: 10px;
   justify-items: center;
+  position: relative;
   width: min(calc(var(--hand-box-w) * 2 + var(--trick-box-w) + var(--table-gap-x, 8px) * 2), 100%);
   margin-left: auto;
   margin-right: auto;
 }
 
 .board-navigation-area.mode-widget {
-  margin-top: 8px;
+  margin-top: 18px;
   gap: 1px;
   width: calc(var(--hand-box-w) * 2 + var(--trick-box-w) + var(--table-gap-x, 8px) * 2);
   justify-items: center;
@@ -1331,9 +1429,33 @@ html.mode-widget {
 }
 
 .mode-practice .board-navigation-area.mode-practice {
-  gap: 4px;
-  width: var(--trick-box-w);
+  margin-top: 18px;
+  gap: 10px;
+  width: max-content;
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
   justify-items: center;
+}
+
+.board-navigation-area.show-guides::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed rgba(100, 116, 139, 0.38);
+  pointer-events: none;
+}
+
+.board-navigation-area.show-guides::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed rgba(220, 38, 38, 0.42);
+  pointer-events: none;
 }
 
 .outcome-module {
@@ -1439,10 +1561,23 @@ html.mode-widget {
   flex-wrap: wrap;
 }
 
-.practice-actions {
-  display: inline-flex;
-  gap: 6px;
+.mode-practice .transport-bar.mode-practice {
+  flex-wrap: nowrap;
+  justify-content: center;
   align-items: center;
+  gap: 10px;
+}
+
+.practice-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  align-items: center;
+}
+
+.practice-secondary-actions {
+  flex-wrap: nowrap;
 }
 
 .practice-actions button {
