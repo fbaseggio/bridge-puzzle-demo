@@ -114,9 +114,10 @@ html.mode-widget {
 .main-row {
   --play-area-height: calc(var(--hand-box-h) * 2 + var(--trick-box-h) + var(--table-gap-y, 8px) * 2);
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 240px;
+  grid-template-columns: auto 300px;
   gap: 6px;
   align-items: start;
+  justify-content: center;
 }
 
 .main-row.mode-widget {
@@ -137,8 +138,12 @@ html.mode-widget {
 
 .table-host {
   display: block;
-  width: 100%;
+  width: fit-content;
   align-self: start;
+}
+
+.mode-analysis .table-host {
+  margin: 0;
 }
 
 .mode-practice .table-host {
@@ -149,6 +154,33 @@ html.mode-widget {
 .mode-widget .table-host {
   width: fit-content;
   margin: 0;
+}
+
+.draft-notes {
+  margin-top: 8px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: rgba(255, 252, 245, 0.96);
+  color: #5b4630;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.draft-notes strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #7c4a11;
+  font-size: 12px;
+}
+
+.draft-notes ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.draft-notes li + li {
+  margin-top: 4px;
 }
 
 .mode-widget .teaching-pane.widget-mirror-pane {

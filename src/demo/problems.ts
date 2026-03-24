@@ -12,7 +12,31 @@ import { p011 } from '../puzzles/p011';
 import { p012 } from '../puzzles/p012';
 import { p013 } from '../puzzles/p013';
 import { squeezeSelf01 } from '../puzzles/squeeze_self_01';
-import { buildSureTricksDemo, buildSureTricksDemoVariant, sureTricksDemo } from '../puzzles/sure_tricks_demo';
+import {
+  buildSureTricksDemo,
+  buildSureTricksDemoVariant,
+  buildSureTricksRuffOrSluffEnding,
+  buildSureTricksRuffOrSluffEndingVariant,
+  sureTricksDemo,
+  sureTricksRuffOrSluffEnding
+} from '../puzzles/sure_tricks_demo';
+import {
+  ruffOrSluff01,
+  ruffOrSluff01c,
+  ruffOrSluff01dDiamond,
+  ruffOrSluff01dSpade,
+  ruffOrSluff02,
+  ruffOrSluff03,
+  ruffOrSluff04,
+  ruffOrSluff04b,
+  ruffOrSluff05,
+  ruffOrSluff06,
+  ruffOrSluff07,
+  ruffOrSluff08,
+  ruffOrSluff09,
+  ruffOrSluff10,
+  ruffOrSluff11
+} from '../puzzles/ruff_or_sluff';
 import {
   gorillas01,
   gorillas02,
@@ -34,6 +58,7 @@ import { listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } 
 export type DemoProblem = {
   id: string;
   label: string;
+  puzzleModeId?: 'standard' | 'single-dummy' | 'multi-ew' | 'draft';
   problem?: Problem;
   loadProblem?: () => Problem;
   variants?: DemoProblemVariant[];
@@ -103,6 +128,33 @@ export const demoProblems: DemoProblem[] = [
     defaultVariantId: 'a',
     articlePath: 'articles/sure-tricks-demo/'
   },
+  {
+    id: 'sure_tricks_ruff_or_sluff_ending',
+    label: 'sure_tricks_ruff_or_sluff_ending',
+    problem: sureTricksRuffOrSluffEnding,
+    puzzleModeId: 'draft',
+    variants: [
+      { id: 'a', label: 'Version A', loadProblem: () => buildSureTricksRuffOrSluffEndingVariant('a') },
+      { id: 'b', label: 'Version B', loadProblem: () => buildSureTricksRuffOrSluffEndingVariant('b') }
+    ],
+    defaultVariantId: 'a',
+    practiceEligible: false
+  },
+  { id: 'ruff_or_sluff_01', label: 'ruff_or_sluff_01', problem: ruffOrSluff01, practiceEligible: false, articlePath: 'articles/ruff-or-sluff/' },
+  { id: 'ruff_or_sluff_01c', label: 'ruff_or_sluff_01c', problem: ruffOrSluff01c, practiceEligible: false },
+  { id: 'ruff_or_sluff_01d_spade', label: 'ruff_or_sluff_01d_spade', problem: ruffOrSluff01dSpade, practiceEligible: false },
+  { id: 'ruff_or_sluff_01d_diamond', label: 'ruff_or_sluff_01d_diamond', problem: ruffOrSluff01dDiamond, practiceEligible: false },
+  { id: 'ruff_or_sluff_02', label: 'ruff_or_sluff_02', problem: ruffOrSluff02, practiceEligible: false },
+  { id: 'ruff_or_sluff_03', label: 'ruff_or_sluff_03', problem: ruffOrSluff03, practiceEligible: false, articlePath: 'articles/ruff-or-sluff/' },
+  { id: 'ruff_or_sluff_04', label: 'ruff_or_sluff_04', problem: ruffOrSluff04, practiceEligible: false },
+  { id: 'ruff_or_sluff_04b', label: 'ruff_or_sluff_04b', problem: ruffOrSluff04b, practiceEligible: false },
+  { id: 'ruff_or_sluff_05', label: 'ruff_or_sluff_05', problem: ruffOrSluff05, practiceEligible: false },
+  { id: 'ruff_or_sluff_06', label: 'ruff_or_sluff_06', problem: ruffOrSluff06, practiceEligible: false },
+  { id: 'ruff_or_sluff_07', label: 'ruff_or_sluff_07', problem: ruffOrSluff07, practiceEligible: false },
+  { id: 'ruff_or_sluff_08', label: 'ruff_or_sluff_08', problem: ruffOrSluff08, practiceEligible: false },
+  { id: 'ruff_or_sluff_09', label: 'ruff_or_sluff_09', problem: ruffOrSluff09, practiceEligible: false },
+  { id: 'ruff_or_sluff_10', label: 'ruff_or_sluff_10', problem: ruffOrSluff10, practiceEligible: false },
+  { id: 'ruff_or_sluff_11', label: 'ruff_or_sluff_11', problem: ruffOrSluff11, practiceEligible: false },
   { id: 'p001', label: 'p001', problem: p001 },
   { id: 'p002', label: 'p002', problem: p002, experimental: p002Experimental },
   { id: 'p003', label: 'p003', problem: p003 },

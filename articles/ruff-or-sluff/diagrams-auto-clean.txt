@@ -1,0 +1,386 @@
+RuffOrSluff automatic diagram cleanup attempt
+
+Heuristics used:
+- hands are parsed as four vertical suit rows in S/H/D/C order
+- ranks are normalized to bridge ranks with 10 preferred over T
+- all four seats are expected to land near a common hand size
+- hand sizes above 8 are treated as unusual unless they resolve to 13
+- ambiguous or suspicious parses are left in place but flagged
+
+=== Diagram 1 ===
+Page 1, line 4
+Expected hand size: 13
+Score: -94
+NORTH (25)
+  S: KJ10101010
+  H: AAQ107
+  D: A86
+  C: AAAKQ1010101064
+WEST (0)
+  S: -
+  H: -
+  D: -
+  C: -
+EAST (38)
+  S: QQ1010101098432
+  H: QQ101010107
+  D: AAAAQJ10101010102
+  C: AQ101010984
+SOUTH (11)
+  S: K5
+  H: K1010
+  D: AQ10101010
+  C: -
+Warnings:
+  - NORTH: parsed 25 cards, expected about 13
+  - WEST: no cards parsed
+  - EAST: parsed 38 cards, expected about 13
+  - SOUTH: parsed 11 cards, expected about 13
+  - NORTH S: duplicate ranks after cleanup
+  - NORTH H: duplicate ranks after cleanup
+  - NORTH C: duplicate ranks after cleanup
+  - NORTH: unusual hand size 25
+  - EAST S: duplicate ranks after cleanup
+  - EAST H: duplicate ranks after cleanup
+  - EAST D: duplicate ranks after cleanup
+  - EAST C: duplicate ranks after cleanup
+  - EAST: unusual hand size 38
+  - SOUTH H: duplicate ranks after cleanup
+  - SOUTH D: duplicate ranks after cleanup
+  - SOUTH: unusual hand size 11
+
+=== Diagram 2 ===
+Page 1, line 30
+Expected hand size: 13
+Score: -69
+NORTH (0)
+  S: -
+  H: -
+  D: -
+  C: -
+WEST (40)
+  S: AAAAQQ10101010109876432
+  H: AAAQ987776
+  D: AAQ10101053
+  C: 10987
+EAST (21)
+  S: 10732
+  H: AA1086
+  D: AAAKK10101010642
+  C: -
+SOUTH (23)
+  S: AAAA1010
+  H: AAA101010
+  D: AKJ754
+  C: AAAK10
+Warnings:
+  - NORTH: no cards parsed
+  - WEST: parsed 40 cards, expected about 13
+  - EAST: parsed 21 cards, expected about 13
+  - SOUTH: parsed 23 cards, expected about 13
+  - EAST H: duplicate ranks after cleanup
+  - EAST D: duplicate ranks after cleanup
+  - EAST: unusual hand size 21
+  - WEST S: duplicate ranks after cleanup
+  - WEST H: duplicate ranks after cleanup
+  - WEST D: duplicate ranks after cleanup
+  - WEST: unusual hand size 40
+  - SOUTH S: duplicate ranks after cleanup
+  - SOUTH H: duplicate ranks after cleanup
+  - SOUTH C: duplicate ranks after cleanup
+  - SOUTH: unusual hand size 23
+
+=== Diagram 3 ===
+Page 4, line 4
+Expected hand size: 13
+Score: -81
+NORTH (32)
+  S: AAK1010101010632
+  H: AAK101084
+  D: AAA1010
+  C: A10101010101087
+WEST (0)
+  S: -
+  H: -
+  D: -
+  C: -
+EAST (38)
+  S: AAA1010109876
+  H: AQJJ9763
+  D: AAKJ10101092
+  C: AAQJ1010106542
+SOUTH (14)
+  S: AAAAK10
+  H: AKQ1054
+  D: 52
+  C: -
+Warnings:
+  - NORTH: parsed 32 cards, expected about 13
+  - WEST: no cards parsed
+  - EAST: parsed 38 cards, expected about 13
+  - SOUTH: parsed 14 cards, expected about 13
+  - NORTH S: duplicate ranks after cleanup
+  - NORTH H: duplicate ranks after cleanup
+  - NORTH D: duplicate ranks after cleanup
+  - NORTH C: duplicate ranks after cleanup
+  - NORTH: unusual hand size 32
+  - EAST S: duplicate ranks after cleanup
+  - EAST H: duplicate ranks after cleanup
+  - EAST D: duplicate ranks after cleanup
+  - EAST C: duplicate ranks after cleanup
+  - EAST: unusual hand size 38
+  - SOUTH S: duplicate ranks after cleanup
+  - SOUTH: unusual hand size 14
+
+=== Diagram 4 ===
+Page 4, line 19
+Expected hand size: 13
+Score: -11
+NORTH (6)
+  S: KK10983
+  H: -
+  D: -
+  C: -
+WEST (0)
+  S: -
+  H: -
+  D: -
+  C: -
+EAST (0)
+  S: -
+  H: -
+  D: -
+  C: -
+SOUTH (14)
+  S: -
+  H: A1010
+  D: AAAAAKJJ101010
+  C: -
+Warnings:
+  - NORTH: parsed 6 cards, expected about 13
+  - WEST: no cards parsed
+  - EAST: no cards parsed
+  - SOUTH: parsed 14 cards, expected about 13
+  - NORTH S: duplicate ranks after cleanup
+  - SOUTH H: duplicate ranks after cleanup
+  - SOUTH D: duplicate ranks after cleanup
+  - SOUTH: unusual hand size 14
+
+=== Diagram 5 ===
+Page 5, line 10
+Expected hand size: 13
+Score: -41
+NORTH (7)
+  S: AA1010432
+  H: -
+  D: -
+  C: -
+WEST (0)
+  S: -
+  H: -
+  D: -
+  C: -
+EAST (14)
+  S: AAAKKJJ10101010832
+  H: -
+  D: -
+  C: -
+SOUTH (28)
+  S: AKQJJ10101010101097
+  H: A1097654
+  D: AAAK101010
+  C: 10
+Warnings:
+  - NORTH: parsed 7 cards, expected about 13
+  - WEST: no cards parsed
+  - EAST: parsed 14 cards, expected about 13
+  - SOUTH: parsed 28 cards, expected about 13
+  - NORTH S: duplicate ranks after cleanup
+  - EAST S: duplicate ranks after cleanup
+  - EAST: unusual hand size 14
+  - SOUTH S: duplicate ranks after cleanup
+  - SOUTH D: duplicate ranks after cleanup
+  - SOUTH: unusual hand size 28
+
+=== Diagram 6 ===
+Page 5, line 28
+Expected hand size: 13
+Score: -147
+NORTH (11)
+  S: -
+  H: J83
+  D: -
+  C: AKJ1010101010
+WEST (13)
+  S: K101010
+  H: AAK101010101010
+  D: -
+  C: -
+EAST (23)
+  S: AAA10
+  H: AKQ10101010
+  D: 109765
+  C: AAKK101010
+SOUTH (17)
+  S: AA1010
+  H: 10
+  D: AAAAQ85
+  C: AAAA10
+Warnings:
+  - NORTH: parsed 11 cards, expected about 13
+  - EAST: parsed 23 cards, expected about 13
+  - SOUTH: parsed 17 cards, expected about 13
+  - NORTH C: duplicate ranks after cleanup
+  - NORTH: unusual hand size 11
+  - WEST S: duplicate ranks after cleanup
+  - WEST H: duplicate ranks after cleanup
+  - EAST S: duplicate ranks after cleanup
+  - EAST H: duplicate ranks after cleanup
+  - EAST C: duplicate ranks after cleanup
+  - EAST: unusual hand size 23
+  - SOUTH S: duplicate ranks after cleanup
+  - SOUTH D: duplicate ranks after cleanup
+  - SOUTH C: duplicate ranks after cleanup
+  - SOUTH: unusual hand size 17
+
+=== Diagram 7 ===
+Page 6, line 7
+Expected hand size: 13
+Score: -6
+NORTH (12)
+  S: AA
+  H: 10
+  D: AKQQ54
+  C: A76
+WEST: missing
+EAST (11)
+  S: -
+  H: -
+  D: 432
+  C: KQJJ6543
+SOUTH (14)
+  S: 1010
+  H: 10987632
+  D: 982
+  C: 65
+Warnings:
+  - NORTH: parsed 12 cards, expected about 13
+  - WEST: missing entirely
+  - EAST: parsed 11 cards, expected about 13
+  - SOUTH: parsed 14 cards, expected about 13
+  - NORTH S: duplicate ranks after cleanup
+  - NORTH D: duplicate ranks after cleanup
+  - NORTH: unusual hand size 12
+  - EAST C: duplicate ranks after cleanup
+  - EAST: unusual hand size 11
+  - SOUTH S: duplicate ranks after cleanup
+  - SOUTH: unusual hand size 14
+
+=== Diagram 8 ===
+Page 6, line 66
+Expected hand size: 13
+Score: -68
+NORTH (0)
+  S: -
+  H: -
+  D: -
+  C: -
+WEST (14)
+  S: A10
+  H: AQ101010
+  D: AA
+  C: AA101010
+EAST (1)
+  S: Q
+  H: -
+  D: -
+  C: -
+SOUTH (5)
+  S: -
+  H: AK6
+  D: -
+  C: A10
+Warnings:
+  - NORTH: no cards parsed
+  - WEST: parsed 14 cards, expected about 13
+  - EAST: parsed 1 cards, expected about 13
+  - SOUTH: parsed 5 cards, expected about 13
+  - WEST H: duplicate ranks after cleanup
+  - WEST D: duplicate ranks after cleanup
+  - WEST C: duplicate ranks after cleanup
+  - WEST: unusual hand size 14
+
+=== Diagram 9 ===
+Page 7, line 8
+Expected hand size: 13
+Score: -29
+NORTH (0)
+  S: -
+  H: -
+  D: -
+  C: -
+WEST (41)
+  S: AKJ10101010101098765
+  H: AAAK10101087654
+  D: AAAAAJ1010101092
+  C: 1053
+EAST (21)
+  S: J3
+  H: AAAA72
+  D: AAAAAKKQJ10101010
+  C: -
+SOUTH (0)
+  S: -
+  H: -
+  D: -
+  C: -
+Warnings:
+  - NORTH: no cards parsed
+  - WEST: parsed 41 cards, expected about 13
+  - EAST: parsed 21 cards, expected about 13
+  - SOUTH: no cards parsed
+  - EAST H: duplicate ranks after cleanup
+  - EAST D: duplicate ranks after cleanup
+  - EAST: unusual hand size 21
+  - WEST S: duplicate ranks after cleanup
+  - WEST H: duplicate ranks after cleanup
+  - WEST D: duplicate ranks after cleanup
+  - WEST: unusual hand size 41
+
+=== Diagram 10 ===
+Page 7, line 44
+Expected hand size: 13
+Score: -85
+NORTH (17)
+  S: AAAA1010101010103
+  H: AAAJ103
+  D: -
+  C: -
+WEST (0)
+  S: -
+  H: -
+  D: -
+  C: -
+EAST (7)
+  S: A1043
+  H: A1010
+  D: -
+  C: -
+SOUTH (18)
+  S: AAQ10101010
+  H: AAAQJ1010109
+  D: 1010
+  C: -
+Warnings:
+  - NORTH: parsed 17 cards, expected about 13
+  - WEST: no cards parsed
+  - EAST: parsed 7 cards, expected about 13
+  - SOUTH: parsed 18 cards, expected about 13
+  - NORTH S: duplicate ranks after cleanup
+  - NORTH H: duplicate ranks after cleanup
+  - NORTH: unusual hand size 17
+  - EAST H: duplicate ranks after cleanup
+  - SOUTH S: duplicate ranks after cleanup
+  - SOUTH H: duplicate ranks after cleanup
+  - SOUTH D: duplicate ranks after cleanup
+  - SOUTH: unusual hand size 18

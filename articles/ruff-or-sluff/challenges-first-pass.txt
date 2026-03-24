@@ -1,0 +1,24 @@
+RuffOrSluff first-pass challenges
+
+1. The PDF scan already contains a usable text layer, so the first pass was extracted from that rather than from full image OCR. This is fast and preserves article flow, but several diagrams remain noisy.
+
+2. Hand diagrams are the main challenge.
+- Suit symbols are frequently misread.
+- Void markers and club/diamond suit assignments are often lost.
+- Some end-position diagrams are only partly recoverable from the OCR text alone.
+
+3. The article headers/footers are noisy but manageable.
+- Repeated magazine headers like "THE BRIDGE WORLD" and "MARCH 2009" were excluded from the body file.
+
+4. The two small non-article boxes on the last two pages were excluded.
+- Page 6: "BACK ISSUES"
+- Page 7: "CLARIFICATION"
+
+5. Best next help from the user:
+- confirm whether you want a manual transcription pass on each diagram from the page images
+- or whether you want me to prioritize just the prose first and leave diagrams for a second pass
+
+6. Highest-risk diagram sections:
+- page 2 lower example / page 3 continuation
+- page 6 left and right diagrams
+- page 7 final ending

@@ -1,0 +1,57 @@
+RUFF OR SLUFF
+By Franco Baseggio, New York City
+
+First-pass extraction from source.pdf. This is a working text file, not a final edited article.
+Page headers/footers have been omitted where obvious. The two small non-article boxes on the last two pages have been excluded.
+
+Brian Lee and Walter Lee introduced me to the theme of the veering squeeze card, a technique that can be used to compensate for the absence of one of the usual requirements in some types of strip-squeeze. In these positions, the squeeze card is a loser that, after being led, veers in one direction or another depending on second hand's discard: sometimes declarer will ruff; sometimes he will discard and allow fourth hand to win the trick.
+
+The first such squeeze that I encountered was one involving overcoming a missing entry, where the veering squeeze card can serve as a stepping-stone. Here is an example.
+
+East opens a weak notrump, and the next thing you know, you, South, are in six hearts. West leads a third-or-lowest spade seven; you win in dummy, East follows with the six, and a successful heart finesse follows. When the heart queen falls under the ace, you return to dummy with the heart ten (as East pitches a diamond honor) to take a winning club finesse.
+
+After the club ace, you reach the first ending diagram.
+
+Now, unless East showed out on the club king, in which case a diamond play assures the contract, play dummy's last club. If East pitches a diamond, ruff and then throw East in with a diamond. If East pitches a spade, ruff a diamond, forcing West to give dummy two spade tricks. Should East follow to the fourth club, he has already been squeezed out of a long diamond, and he can be thrown in with a diamond. Indeed, a triple squeeze is a more common remedy for a broken strip-squeeze.
+
+The simpler positions involving a veering squeeze card feature the possibility of the squeezee's partner's being thrown in to lead a particular suit, spades in the previous deal. This may be necessary because declarer is void, or in the wrong hand, or needs to preserve a trump for control or for a late entry. These variants share the following requirements:
+
+1. The squeeze card is a loser led toward the last trump and through the squeeze victim. Where a normal strip-squeeze is automatic, functioning against either opponent, a veering squeeze is inherently positional.
+
+2. Strip squeezes always have at least one menace that is either extended, that is, if it is unguarded a trick can be established by losing a trick in its suit after the squeeze, or can be used as a throw-in card against the squeezee once he has been stripped of excess winners. A veering squeeze must contain such a menace, typically in the hand with the trump opposite the squeeze card. Another menace, which may be of many types, must be in the opposite hand, that is, with the squeeze card.
+
+3. In order for veering to work, the unsqueezed defender must have a singleton master card in the squeeze-card suit and all other cards in the suit that declarer needs led, normally this is the suit of the menace in the hand with the squeeze card. Generally, none of the unsqueezed defender's cards in this needed suit can be high enough to take an active role in the play. This is a very restrictive requirement and one of the main reasons that so few veering squeeze cards appear in practice.
+
+In this context, most simple squeezes have veer-squeeze counterparts. For example, in the previous ending, let us weaken the spade ace to South but move the diamond menace to North.
+
+If South's unspecified fifth card is a low spade, he can lead the last trump, or ruff dummy's club, for a squeeze without the count against East. If East releases a diamond, declarer ducks a diamond. In contrast, if South's unspecified card is a diamond, the squeeze succeeds only if the lead is in the North hand. On the lead of the veering club six, if East throws a spade declarer sluffs, or if East throws a diamond declarer ruffs and ducks a diamond.
+
+A missing entry to a menace is not the only problem that can be solved with a veering squeeze card. Here is a different sort of example.
+
+After East opens one club, you, South, reach four spades. West leads the club jack. Glad to have avoided a heart lead and looking far ahead, you win the opening lead with dummy's ace, draw trumps ending in the North hand as West discards a heart, lead a diamond to the queen, and duck a diamond to East's ace. East exits with a high club to your king. This is the position, with the lead in the South hand.
+
+If you still had control of the club suit, you could strip-squeeze East and force him to lead away from the ace of hearts, but that is impossible when he has club winners. Once again, though, the veering squeeze card will bail you out. The importance of having won the first trick in dummy is that you are now able to ruff to hand to cash one more trump, pitching a heart, or a club, from dummy; this tightens up the position. You could also have achieved this by winning the first club in hand and cashing a fourth trump before ducking a diamond. Then, you cross to dummy's king of diamonds and lead the diamond eight.
+
+If East releases a club, you ruff and exit in clubs, as if this were a standard strip-squeeze. The reason it is not a standard strip-squeeze is that the throw-in fails if East discards the queen on the eight of diamonds. If he does that, you pitch your club loser and West will lead a heart for you, while you retain a trump for control.
+
+On the next deal, after East overcalls hearts vigorously, you, South, are in four spades. After a heart lead and a heart shift won by dummy's ace, you are constrained immediately to attack spades and to draw trumps, or the opponents ruff you to death. Once again, though, a veering squeeze card can help. The text around this deal is noisy in the scan and needs manual review.
+
+If the club queen and jack were reversed, you could ruff the last diamond and then, depending on what East kept, either overtake the club jack to cash a good club or establish a heart with South's club honor as an entry. A veering jettison stepping-stone serves to overcome the actual club blockage. On the lead of dummy's diamond five, if East pitches a heart, you ruff and establish a heart with the club queen as an entry, or you could unblock in clubs and step over to the club jack by putting East in with a heart. Alternatively, if East throws a club, so that the club blockage prevents you from taking two club tricks, you instead jettison the club queen; West wins the diamond but is forced to give dummy two club tricks, and the trump ten wins the last trick.
+
+A veering squeeze card can also come into play in a criss-cross variation.
+
+Diamonds are trumps, North leads, and declarer needs four tricks. On the lead of dummy's club, if East discards a heart, declarer ruffs and attacks hearts. If East discards a spade, though, declarer cannot both establish hearts and enjoy the spade ten in the ordinary way; instead, he must veer off by discarding a heart, to preserve diamonds as a late entry.
+
+A similar squeeze functions in the previous diagram. Note that the arrangement of menaces is jumbled. West's long suit matches the menace opposite the squeeze card; and, in the variation with fewer spades, the only extended menace is in the hand with the squeeze card.
+
+A full deal with a similar end-position appears next.
+
+South plays in four spades against a trump lead. On the indicated line, East is squeezed of his club guard. A diamond to the ace and the eight of clubs produce the ending.
+
+Like its counterparts, the veering squeeze can arise in more-complex end-positions.
+
+East opens two diamonds, South lands in six clubs, and West leads the obviously singleton diamond three. It feels natural to win and to hope that spades and clubs behave: club ace-king, spade ace, spade ruff, club queen, spade king, throwing a diamond, planning to cash the spade queen and a long spade, then to run the heart jack. However, when East shows out on the spade king, a change of tack is needed. A diamond pitch on the spade king is still okay, but on the spade queen declarer had best pitch a heart, leaving the final ending diagram.
+
+If one of dummy's diamonds were a heart, declarer could finesse the heart queen, after which the club ten would strip-squeeze East. On the actual deal, South must lead the spade three to make four tricks in the ending. If East gives up a diamond, declarer can ruff and exit with the diamond jack. East may then block hearts by coming back with the heart king, but there will be an established diamond in dummy to compensate, so that extra diamond had value after all, as a lunar menace. If East pitches a heart on the three of spades, declarer can discard his diamond. Then, West is forced to help both by leading the suit declarer needs led and by leading away from the guarded ten of hearts. As with the criss-cross ending, the normal arrangement of menaces does not apply.
+
+Clearly, the veering squeeze card is not an everyday occurrence. However, a study of its variations may help to clarify the mechanisms of some strip-squeezes, probably the most often overlooked form of squeeze.

@@ -13,6 +13,7 @@ export default defineConfig({
         squeezeSelf: resolve(__dirname, 'articles/squeeze-self/index.html'),
         sureTricksDemo: resolve(__dirname, 'articles/sure-tricks-demo/index.html'),
         coffinExamples: resolve(__dirname, 'articles/coffin-examples/index.html'),
+        ruffOrSluff: resolve(__dirname, 'articles/ruff-or-sluff/index.html'),
         gorillas: resolve(__dirname, 'articles/gorillas/index.html')
       }
     }

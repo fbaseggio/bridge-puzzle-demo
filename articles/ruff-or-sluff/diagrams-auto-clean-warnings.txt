@@ -1,0 +1,145 @@
+RuffOrSluff diagram cleanup warnings
+
+This is a manual-review file. Any diagram listed here still looks uncertain.
+
+Diagram 1 (page 1, line 4)
+- NORTH: parsed 25 cards, expected about 13
+- WEST: no cards parsed
+- EAST: parsed 38 cards, expected about 13
+- SOUTH: parsed 11 cards, expected about 13
+- NORTH S: duplicate ranks after cleanup
+- NORTH H: duplicate ranks after cleanup
+- NORTH C: duplicate ranks after cleanup
+- NORTH: unusual hand size 25
+- EAST S: duplicate ranks after cleanup
+- EAST H: duplicate ranks after cleanup
+- EAST D: duplicate ranks after cleanup
+- EAST C: duplicate ranks after cleanup
+- EAST: unusual hand size 38
+- SOUTH H: duplicate ranks after cleanup
+- SOUTH D: duplicate ranks after cleanup
+- SOUTH: unusual hand size 11
+
+Diagram 2 (page 1, line 30)
+- NORTH: no cards parsed
+- WEST: parsed 40 cards, expected about 13
+- EAST: parsed 21 cards, expected about 13
+- SOUTH: parsed 23 cards, expected about 13
+- EAST H: duplicate ranks after cleanup
+- EAST D: duplicate ranks after cleanup
+- EAST: unusual hand size 21
+- WEST S: duplicate ranks after cleanup
+- WEST H: duplicate ranks after cleanup
+- WEST D: duplicate ranks after cleanup
+- WEST: unusual hand size 40
+- SOUTH S: duplicate ranks after cleanup
+- SOUTH H: duplicate ranks after cleanup
+- SOUTH C: duplicate ranks after cleanup
+- SOUTH: unusual hand size 23
+
+Diagram 3 (page 4, line 4)
+- NORTH: parsed 32 cards, expected about 13
+- WEST: no cards parsed
+- EAST: parsed 38 cards, expected about 13
+- SOUTH: parsed 14 cards, expected about 13
+- NORTH S: duplicate ranks after cleanup
+- NORTH H: duplicate ranks after cleanup
+- NORTH D: duplicate ranks after cleanup
+- NORTH C: duplicate ranks after cleanup
+- NORTH: unusual hand size 32
+- EAST S: duplicate ranks after cleanup
+- EAST H: duplicate ranks after cleanup
+- EAST D: duplicate ranks after cleanup
+- EAST C: duplicate ranks after cleanup
+- EAST: unusual hand size 38
+- SOUTH S: duplicate ranks after cleanup
+- SOUTH: unusual hand size 14
+
+Diagram 4 (page 4, line 19)
+- NORTH: parsed 6 cards, expected about 13
+- WEST: no cards parsed
+- EAST: no cards parsed
+- SOUTH: parsed 14 cards, expected about 13
+- NORTH S: duplicate ranks after cleanup
+- SOUTH H: duplicate ranks after cleanup
+- SOUTH D: duplicate ranks after cleanup
+- SOUTH: unusual hand size 14
+
+Diagram 5 (page 5, line 10)
+- NORTH: parsed 7 cards, expected about 13
+- WEST: no cards parsed
+- EAST: parsed 14 cards, expected about 13
+- SOUTH: parsed 28 cards, expected about 13
+- NORTH S: duplicate ranks after cleanup
+- EAST S: duplicate ranks after cleanup
+- EAST: unusual hand size 14
+- SOUTH S: duplicate ranks after cleanup
+- SOUTH D: duplicate ranks after cleanup
+- SOUTH: unusual hand size 28
+
+Diagram 6 (page 5, line 28)
+- NORTH: parsed 11 cards, expected about 13
+- EAST: parsed 23 cards, expected about 13
+- SOUTH: parsed 17 cards, expected about 13
+- NORTH C: duplicate ranks after cleanup
+- NORTH: unusual hand size 11
+- WEST S: duplicate ranks after cleanup
+- WEST H: duplicate ranks after cleanup
+- EAST S: duplicate ranks after cleanup
+- EAST H: duplicate ranks after cleanup
+- EAST C: duplicate ranks after cleanup
+- EAST: unusual hand size 23
+- SOUTH S: duplicate ranks after cleanup
+- SOUTH D: duplicate ranks after cleanup
+- SOUTH C: duplicate ranks after cleanup
+- SOUTH: unusual hand size 17
+
+Diagram 7 (page 6, line 7)
+- NORTH: parsed 12 cards, expected about 13
+- WEST: missing entirely
+- EAST: parsed 11 cards, expected about 13
+- SOUTH: parsed 14 cards, expected about 13
+- NORTH S: duplicate ranks after cleanup
+- NORTH D: duplicate ranks after cleanup
+- NORTH: unusual hand size 12
+- EAST C: duplicate ranks after cleanup
+- EAST: unusual hand size 11
+- SOUTH S: duplicate ranks after cleanup
+- SOUTH: unusual hand size 14
+
+Diagram 8 (page 6, line 66)
+- NORTH: no cards parsed
+- WEST: parsed 14 cards, expected about 13
+- EAST: parsed 1 cards, expected about 13
+- SOUTH: parsed 5 cards, expected about 13
+- WEST H: duplicate ranks after cleanup
+- WEST D: duplicate ranks after cleanup
+- WEST C: duplicate ranks after cleanup
+- WEST: unusual hand size 14
+
+Diagram 9 (page 7, line 8)
+- NORTH: no cards parsed
+- WEST: parsed 41 cards, expected about 13
+- EAST: parsed 21 cards, expected about 13
+- SOUTH: no cards parsed
+- EAST H: duplicate ranks after cleanup
+- EAST D: duplicate ranks after cleanup
+- EAST: unusual hand size 21
+- WEST S: duplicate ranks after cleanup
+- WEST H: duplicate ranks after cleanup
+- WEST D: duplicate ranks after cleanup
+- WEST: unusual hand size 41
+
+Diagram 10 (page 7, line 44)
+- NORTH: parsed 17 cards, expected about 13
+- WEST: no cards parsed
+- EAST: parsed 7 cards, expected about 13
+- SOUTH: parsed 18 cards, expected about 13
+- NORTH S: duplicate ranks after cleanup
+- NORTH H: duplicate ranks after cleanup
+- NORTH: unusual hand size 17
+- EAST H: duplicate ranks after cleanup
+- SOUTH S: duplicate ranks after cleanup
+- SOUTH H: duplicate ranks after cleanup
+- SOUTH D: duplicate ranks after cleanup
+- SOUTH: unusual hand size 18

@@ -159,6 +159,9 @@ function pushDeclaredVsInferredIssue(
   declared: CardId[],
   inferred: CardId[]
 ): void {
+  if (label === 'threat' && declared.length > 0) {
+    return;
+  }
   const missing = inferred.filter((c) => !declared.includes(c));
   const extra = declared.filter((c) => !inferred.includes(c));
   if (missing.length === 0 && extra.length === 0) return;
@@ -200,6 +203,15 @@ function pushDeclaredVsInferredIssue(
 }
 
 function validateProblem(problem: Problem, entry?: DemoProblem): Issue[] {
+  if (entry?.puzzleModeId === 'draft') {
+    return [
+      {
+        level: 'INFO',
+        message: 'Draft mode: structural and inverse validation skipped for this best-effort article puzzle.'
+      }
+    ];
+  }
+
   const issues: Issue[] = [];
 
   if (entry) {

@@ -1,0 +1,100 @@
+RuffOrSluff diagram extraction - first pass
+
+These are OCR-based diagram captures and notes, not normalized final deals.
+Suits are often noisy in the scan; several rows need manual confirmation.
+
+Diagram 1: introductory ending on page 1
+Source lines:
+- NORTH: spades KJ, hearts void, diamonds A86, clubs K6
+- WEST: spades 98432, hearts void, diamonds 98, clubs unclear
+- EAST: spades Q10, hearts void, diamonds QJ102, clubs Q
+- SOUTH: spades K5, hearts/diamonds/clubs unclear in OCR
+Status: incomplete; South and minor-suit details need manual reconstruction.
+
+Diagram 2: six hearts full deal on page 1
+- NORTH: S AKJ / H 1032 / D A86 / C K642
+- WEST: S 987432 / H 987 / D unclear / C 10987
+- EAST: S Q106 / H Q6 / D Q53 / C unclear
+- SOUTH: S 5 / H AKJ54 / D AJ / C unclear
+Status: partly recoverable; some void markers and club/diamond assignments need confirmation.
+
+Diagram 3: ending after club ace on page 2
+- NORTH: S void / H KJ / D 6 / C unclear
+- WEST: S 984 / H void / D 9 / C unclear
+- EAST: S Q10 / H void / D void / C unclear
+- SOUTH: S 5 / H 976 / D void / C unclear
+Status: suit labels and club entries are noisy; likely recoverable by visual inspection.
+
+Diagram 4: altered example with weakened spade ace on page 2
+- NORTH: S K10 / H void / D 6 / clubs unclear
+- WEST: S 9843 / H void / D 910 / clubs unclear
+- EAST: corresponding right-hand holding unclear in OCR
+- SOUTH: implied by text, but not fully captured
+Status: poor OCR; likely needs image-based manual transcription.
+
+Diagram 5: four spades after one-club opening on page 4
+- NORTH: S 132 / H K84 / D A87 / clubs unclear
+- WEST: S 108 / H J10963 / D J1092 / C J2
+- EAST: S 976 / H AQ7 / D void? / C Q10654
+- SOUTH: S AKQ54 / H 52 / D void / C K93
+Status: mostly readable; verify minor-suit suit assignment and East club holding.
+
+Diagram 6: ending with lead in South hand on page 4
+- NORTH: S void / H K84 / D 8 / clubs unclear
+- WEST: S void / H J1096 / D void / clubs unclear
+- EAST: S void / H AQ7 / D 91054 / clubs unclear
+- SOUTH: S Q5 / H unclear / D 9 / clubs unclear
+Status: ending diagram only partly readable; use source image to normalize.
+
+Diagram 7: four spades after heart overcall on pages 4-5
+- NORTH: S 432 / H 6 / D J832 / clubs unclear
+- WEST: S 765 / H 7 / D A765 / clubs unclear
+- EAST: S Q98 / H AKQJ109 / D 1094 / clubs unclear
+- SOUTH: S AKJ10 / H 85432 / D 43 / C KQ
+Status: fairly readable but scan inserts noise around clubs and void markers.
+
+Diagram 8: ending from the previous deal on page 5
+- NORTH: S void / H void / D J83 / clubs unclear
+- WEST: S void / H KQ / D 765 / C 109
+- EAST: S void / H unclear / D void / clubs 10 85? / H Q?
+- SOUTH: lower hand visible but OCR corrupted
+Status: needs manual reconstruction from image.
+
+Diagram 9: criss-cross variation on page 6 left
+- NORTH: S A5 / H Q54 / D 6 / clubs unclear
+- WEST: S 96432 / H void / D A? / clubs ? 
+- EAST: S KQJ / H J108 / D void / clubs unclear
+- SOUTH: S 1081? / H 32 / D void / clubs unclear
+Status: poor OCR; likely best recovered by image transcription.
+
+Diagram 10: four-spade full deal on page 6 right
+- NORTH: S AKQ / H A7 / D 832 / clubs unclear
+- WEST: S 432 / H K6543 / D A109 / C KQ
+- EAST: S QJ10 / H KQJ109 / D 7654 / clubs unclear
+- SOUTH: S 109876 / H 982 / D 65 / C KQ
+Status: mixed; some suit assignments visible, but several symbols are corrupted.
+
+Diagram 11: ending after the squeeze on page 6 bottom-right
+- WEST: H 654 / D 9
+- SOUTH: S 6 / H 98 / D 65
+- EAST: H Q / clubs/other suit unclear
+- NORTH: H A / D 8
+Status: fragmentary ending only.
+
+Diagram 12: six clubs full deal on page 7
+- NORTH: S AKQ32 / H J3 / D 72 / C AKQ
+- WEST: S J9876 / H 10876 / D J92 / clubs unclear
+- EAST: S 105 / H K54 / D void / C ?53
+- SOUTH: S 4 / H AQ92 / D J84 / C 108764
+Status: mostly readable; needs final suit-symbol confirmation.
+
+Diagram 13: final ending on page 7
+- NORTH: S 3 / H J3 / D 72
+- WEST: S J / H 10876 / D ? / clubs unclear
+- EAST: H K54 / D void
+- SOUTH: H AQ9 / C 10
+Status: ending diagram only; OCR too weak for final normalization.
+
+Excluded non-article boxes:
+- Page 6 bottom-left "BACK ISSUES"
+- Page 7 right-side "CLARIFICATION"

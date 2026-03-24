@@ -71,6 +71,8 @@ export type ProblemStatus = 'active' | 'underConstruction';
 export type Problem = {
   id: string;
   status?: ProblemStatus;
+  draftNotes?: string[];
+  scriptedOpening?: CardId[][];
   source?: {
     author?: string;
     title?: string;

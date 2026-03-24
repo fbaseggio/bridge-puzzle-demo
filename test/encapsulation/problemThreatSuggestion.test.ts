@@ -40,6 +40,7 @@ describe('problem threat suggestions', () => {
     const flagged: string[] = [];
 
     for (const entry of demoProblems) {
+      if (entry.puzzleModeId === 'draft') continue;
       const problem = resolveDemoProblem(entry);
       if (hasThreatCardIds(problem) && problem.threatCardIds.length > 0) continue;
       const suggested = suggestedThreatsForProblem(problem);
@@ -51,4 +52,3 @@ describe('problem threat suggestions', () => {
     expect(flagged, `Problems missing threatCardIds with inverse suggestions:\n${flagged.join('\n')}`).toEqual([]);
   });
 });
-

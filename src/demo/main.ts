@@ -77,12 +77,13 @@ const busyBranchingLabel: Record<'strict' | 'sameLevel' | 'allBusy', string> = {
   sameLevel: 'Same level',
   allBusy: 'All busy'
 };
-type PuzzleModeId = 'standard' | 'single-dummy' | 'multi-ew';
+type PuzzleModeId = 'standard' | 'single-dummy' | 'multi-ew' | 'draft';
 type AssistLevelId = 'sd' | 'puzzle' | 'light' | 'guided' | 'solution';
 const PUZZLE_MODE_LABEL: Record<PuzzleModeId, string> = {
   standard: 'Double Dummy',
   'single-dummy': 'Single Dummy',
-  'multi-ew': 'Multi-EW'
+  'multi-ew': 'Multi-EW',
+  draft: 'Draft'
 };
 const ASSIST_LEVELS_BY_MODE: Record<PuzzleModeId, Array<{ id: AssistLevelId; label: string }>> = {
   standard: [
@@ -100,6 +101,12 @@ const ASSIST_LEVELS_BY_MODE: Record<PuzzleModeId, Array<{ id: AssistLevelId; lab
   ],
   'multi-ew': [
     { id: 'puzzle', label: 'None' },
+    { id: 'light', label: 'Light' },
+    { id: 'guided', label: 'Guided' },
+    { id: 'solution', label: 'Solution' }
+  ],
+  draft: [
+    { id: 'puzzle', label: 'DD' },
     { id: 'light', label: 'Light' },
     { id: 'guided', label: 'Guided' },
     { id: 'solution', label: 'Solution' }
@@ -126,6 +133,12 @@ const ASSIST_CONTROL_PRESETS: Record<PuzzleModeId, Partial<Record<AssistLevelId,
     solution: { showEw: true, cardColoring: true, alwaysHint: true, narrate: true }
   },
   'multi-ew': {
+    puzzle: { showEw: true, cardColoring: false, alwaysHint: false, narrate: false },
+    light: { showEw: true, cardColoring: true, alwaysHint: false, narrate: false },
+    guided: { showEw: true, cardColoring: true, alwaysHint: true, narrate: false },
+    solution: { showEw: true, cardColoring: true, alwaysHint: true, narrate: true }
+  },
+  draft: {
     puzzle: { showEw: true, cardColoring: false, alwaysHint: false, narrate: false },
     light: { showEw: true, cardColoring: true, alwaysHint: false, narrate: false },
     guided: { showEw: true, cardColoring: true, alwaysHint: true, narrate: false },
@@ -317,6 +330,12 @@ const startupGateEnabledFromUrl: boolean = (() => {
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 })();
 
+function startupOpeningForProblem(problem: ProblemWithThreats): CardId[] {
+  if (initialOpeningFromUrl.length > 0) return [...initialOpeningFromUrl];
+  const scripted = problem.scriptedOpening ?? [];
+  return scripted.flatMap((trick) => trick);
+}
+
 function resolveProblemById(problemId: string, variantId?: string | null): ProblemWithThreats {
   const override = practiceProblemOverrides.get(problemId);
   if (override) return override;
@@ -372,7 +391,8 @@ let westInitialContentWidth: number | null = null;
 let assistLevelByMode: Record<PuzzleModeId, AssistLevelId> = {
   standard: displayMode === 'practice' ? 'puzzle' : 'solution',
   'single-dummy': 'sd',
-  'multi-ew': 'puzzle'
+  'multi-ew': 'puzzle',
+  draft: displayMode === 'practice' ? 'puzzle' : 'solution'
 };
 let alwaysHint = displayMode === 'widget';
 let cardColoringEnabled = true;
@@ -650,10 +670,18 @@ function variantLabelPrefix(variantId: string): string {
   return variantId.trim().toUpperCase();
 }
 
+function currentEntryIsDraft(problemId = currentProblemId): boolean {
+  const entry = demoProblems.find((problem) => problem.id === problemId);
+  return entry?.puzzleModeId === 'draft';
+}
+
 function currentPuzzleModeId(problemId = currentProblemId): PuzzleModeId {
   if (widgetUiMode === 'sd-puzzle') return 'single-dummy';
   const entry = demoProblems.find((problem) => problem.id === problemId);
-  return entry?.variants && entry.variants.length > 0 ? 'multi-ew' : 'standard';
+  if (entry?.variants && entry.variants.length > 0) return 'multi-ew';
+  if (entry?.puzzleModeId === 'draft') return 'standard';
+  if (entry?.puzzleModeId) return entry.puzzleModeId;
+  return 'standard';
 }
 
 function currentAssistOptions(problemId = currentProblemId): Array<{ id: AssistLevelId; label: string }> {
@@ -4413,6 +4441,28 @@ function renderBoardMeta(view: State): HTMLElement {
   return meta;
 }
 
+function renderDraftNotes(): HTMLElement | null {
+  if (!currentEntryIsDraft()) return null;
+  const notes = currentProblem.draftNotes ?? [];
+  if (notes.length === 0) return null;
+
+  const box = document.createElement('aside');
+  box.className = 'draft-notes';
+
+  const title = document.createElement('strong');
+  title.textContent = 'Draft concerns';
+  box.appendChild(title);
+
+  const list = document.createElement('ul');
+  for (const note of notes) {
+    const item = document.createElement('li');
+    item.textContent = note;
+    list.appendChild(item);
+  }
+  box.appendChild(list);
+  return box;
+}
+
 function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
   return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
 }
@@ -5176,18 +5226,22 @@ function render(): void {
   if (unknownSlashLine) tableCanvas.appendChild(unknownSlashLine);
 
   tableHost.appendChild(tableCanvas);
-  if (displayMode === 'practice') {
+  if (displayMode === 'practice' || displayMode === 'analysis') {
     tableHost.appendChild(renderBoardNavigationArea(view));
   }
+  const draftNotes = renderDraftNotes();
+  if (draftNotes) tableHost.appendChild(draftNotes);
   if (displayMode === 'analysis') {
+    mainRow.appendChild(tableHost);
     mainRow.appendChild(renderTeachingEventsPane('analysis'));
+  } else {
+    mainRow.appendChild(tableHost);
   }
-  mainRow.appendChild(tableHost);
   if (isWidgetShellMode && showWidgetTeachingPane) {
     mainRow.appendChild(renderTeachingEventsPane('widget'));
   }
   root.appendChild(mainRow);
-  if (displayMode !== 'practice') {
+  if (displayMode !== 'practice' && displayMode !== 'analysis') {
     root.appendChild(renderBoardNavigationArea(view));
   }
   applyCompactTableAlignment(tableCanvas);
@@ -5239,7 +5293,8 @@ function replayInitialUserHistoryIfPresent(): void {
 function launchStartSequence(): void {
   if (!startPending) return;
   startPending = false;
-  if (initialOpeningFromUrl.length === 0) {
+  const startupOpening = startupOpeningForProblem(currentProblem);
+  if (startupOpening.length === 0) {
     const before = state;
     const ddsHistoryForTurn = [...ddsPlayHistory];
     const result = autoplayUntilUserOrEnd(state, {
@@ -5276,7 +5331,7 @@ function launchStartSequence(): void {
   let appliedAny = false;
   const originalUserControls = [...state.userControls];
   const forcedManualUserControls: Seat[] = ['N', 'E', 'S', 'W'];
-  for (const cardId of initialOpeningFromUrl) {
+  for (const cardId of startupOpening) {
     if (state.phase === 'end') break;
     const legal = legalPlays(state).filter((p) => p.seat === state.turn);
     const play = legal.find((p) => (toCardId(p.suit, p.rank) as CardId) === cardId);

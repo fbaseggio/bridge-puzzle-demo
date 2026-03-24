@@ -10,6 +10,7 @@ describe('problem inversion quality', () => {
     const unresolved: string[] = [];
 
     for (const entry of demoProblems) {
+      if (entry.puzzleModeId === 'draft') continue;
       const problem = resolveDemoProblem(entry);
       const explained = explainPositionInverse({
         hands: problem.hands,
@@ -28,4 +29,3 @@ describe('problem inversion quality', () => {
     expect(unresolved, `Unresolved inverse outcomes:\n${unresolved.join('\n')}`).toEqual([]);
   });
 });
-
