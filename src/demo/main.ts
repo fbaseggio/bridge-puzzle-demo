@@ -400,6 +400,7 @@ let hintLoading = false;
 let ddsLoadingForHint = false;
 let hintRequestSeq = 0;
 let ddErrorVisual: DdErrorVisualState | null = null;
+let inevitableFailureAlert = false;
 function applyWidgetProblemDefaults(): void {
   if (displayMode !== 'widget') return;
   if (widgetUiMode === 'sd-puzzle') {
@@ -3561,6 +3562,7 @@ function resetGame(seed: number, reason: string): void {
   ddsPlayHistory = [];
   ddsTeachingSummaries = [];
   clearDdErrorVisual();
+  inevitableFailureAlert = false;
   clearWidgetNarrationFeed();
   clearHint();
   clearTeachingEvents();
@@ -3608,6 +3610,7 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   ddsPlayHistory = [];
   ddsTeachingSummaries = [];
   clearDdErrorVisual();
+  inevitableFailureAlert = false;
   clearWidgetNarrationFeed();
   clearHint();
   clearTeachingEvents();
@@ -3703,6 +3706,7 @@ function runTurn(play: Play): void {
         goodCards: [...userDdError.goodCards],
         badCard: toCardId(play.suit, play.rank) as CardId
       };
+      inevitableFailureAlert = true;
     } else {
       clearDdErrorVisual();
     }
@@ -4757,13 +4761,16 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   const section = document.createElement('section');
   section.className = `board-navigation-area mode-${displayMode}${showGuides ? ' show-guides' : ''}`;
   const practicePuzzleMode = displayMode === 'practice' && !!practiceSession && !practiceSession.solutionMode;
+  const warningStatusActive = inevitableFailureAlert && runStatus !== 'success' && runStatus !== 'failure';
 
   const outcome = document.createElement('div');
-  outcome.className = `outcome-module ${runStatus === 'success' ? 'ok' : runStatus === 'failure' ? 'fail' : 'neutral'}`;
+  outcome.className = `outcome-module ${runStatus === 'success' ? 'ok' : runStatus === 'failure' ? 'fail' : warningStatusActive ? 'warn' : 'neutral'}`;
   const canonicalStatus = canonicalRunStatusText(runStatus);
   const terminalCanonical = runStatus === 'success' || runStatus === 'failure';
   if (isWidgetShellMode && terminalCanonical) {
     outcome.textContent = canonicalStatus;
+  } else if (warningStatusActive) {
+    outcome.textContent = 'Failure is inevitable';
   } else if (ddsLoadingForHint) {
     outcome.classList.add('dds-loading');
     const label = document.createElement('span');

@@ -1500,6 +1500,12 @@ html.mode-widget {
   color: #991b1b;
 }
 
+.outcome-module.warn {
+  border: 1px solid #f0c48a;
+  background: #fff6ea;
+  color: #9a5a12;
+}
+
 .outcome-module.hint-active {
   border: 1px solid #cbd5e1;
   background: #f8fafc;
@@ -1691,6 +1697,26 @@ html.mode-widget {
   border: 1px solid #b7ddc6;
   background: #eaf7ee;
   color: #1f5d38;
+  font-weight: 600;
+}
+
+.mode-widget .outcome-module.fail,
+.mode-practice .outcome-module.fail {
+  padding: 7px 14px;
+  border-radius: 7px;
+  border: 1px solid #e6c0c0;
+  background: #f9eded;
+  color: #7a2d2d;
+  font-weight: 600;
+}
+
+.mode-widget .outcome-module.warn,
+.mode-practice .outcome-module.warn {
+  padding: 7px 14px;
+  border-radius: 7px;
+  border: 1px solid #f0c48a;
+  background: #fff6ea;
+  color: #9a5a12;
   font-weight: 600;
 }
 
