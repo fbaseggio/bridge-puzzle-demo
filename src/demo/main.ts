@@ -1711,6 +1711,19 @@ function canonicalRunStatusText(status: typeof runStatus): string {
   return 'Run in Progress';
 }
 
+function withHintPrompt(text: string, view: State): string {
+  const shouldPrompt =
+    alwaysHint &&
+    hintsEnabled &&
+    !activeHint &&
+    runStatus !== 'success' &&
+    runStatus !== 'failure' &&
+    state.userControls.includes(view.turn) &&
+    (!trickFrozen || canLeadDismiss) &&
+    (displayMode === 'practice' || isWidgetShellMode);
+  return shouldPrompt ? `${text} Press 💡 for hint` : text;
+}
+
 function positionEncapsulationForLog(view: State): string {
   const hands = {
     N: { S: [...view.hands.N.S], H: [...view.hands.N.H], D: [...view.hands.N.D], C: [...view.hands.N.C] },
@@ -4360,6 +4373,16 @@ function renderBoardMeta(view: State): HTMLElement {
   const meta = document.createElement('aside');
   meta.className = 'board-meta';
 
+  if (displayMode === 'practice') {
+    const puzzleMode = currentPuzzleModeId();
+    if (puzzleMode !== 'standard') {
+      const modeLine = document.createElement('div');
+      modeLine.className = 'board-meta-line board-meta-mode';
+      modeLine.textContent = PUZZLE_MODE_LABEL[puzzleMode];
+      meta.appendChild(modeLine);
+    }
+  }
+
   const strainLine = document.createElement('div');
   strainLine.className = 'board-meta-line';
   strainLine.appendChild(document.createTextNode('Strain: '));
@@ -4823,7 +4846,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     } else if (widgetStatus.type === 'message' && widgetStatus.text) {
       outcome.textContent = widgetStatus.text;
     } else if (state.userControls.includes(view.turn) && (!trickFrozen || canLeadDismiss)) {
-      outcome.textContent = `${seatName[view.turn]} to play`;
+      outcome.textContent = withHintPrompt(`${seatName[view.turn]} to play.`, view);
     } else {
       outcome.textContent = 'Press Start';
     }
@@ -4831,7 +4854,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     if (terminalCanonical) {
       outcome.textContent = canonicalStatus;
     } else if (state.userControls.includes(view.turn) && (!trickFrozen || canLeadDismiss)) {
-      outcome.textContent = `${seatName[view.turn]} to play`;
+      outcome.textContent = withHintPrompt(`${seatName[view.turn]} to play.`, view);
     } else {
       outcome.textContent = 'Press Start';
     }

@@ -442,6 +442,10 @@ html.mode-widget {
   white-space: nowrap;
 }
 
+.board-meta-mode {
+  color: #b91c1c;
+}
+
 .hand {
   position: absolute;
   width: var(--hand-box-w);
