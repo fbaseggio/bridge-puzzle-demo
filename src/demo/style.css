@@ -1814,6 +1814,22 @@ html.mode-widget {
   color: #334155;
 }
 
+.outcome-module.article-script-status {
+  border: 1px solid #f0c48a;
+  background: #fff6ea;
+  color: #9a5a12;
+}
+
+.mode-widget .outcome-module.article-script-status,
+.mode-practice .outcome-module.article-script-status {
+  padding: 7px 14px;
+  border-radius: 7px;
+  border: 1px solid #f0c48a;
+  background: #fff6ea;
+  color: #9a5a12;
+  font-weight: 700;
+}
+
 .mode-widget .transport-bar {
   gap: 4px;
 }

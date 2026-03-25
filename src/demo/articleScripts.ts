@@ -24,6 +24,7 @@ export type ArticleScriptChoiceStep = {
   options?: CardId[];
   optionMode?: 'explicit' | 'dd-accurate';
   suit?: Suit;
+  assertedOptions?: CardId[];
   prompt?: string;
   choiceMessages?: Partial<Record<CardId, string>>;
   continuations?: Partial<Record<CardId, CardId[]>>;
@@ -111,6 +112,7 @@ export const doubleDummy01Script: ArticleScriptSpec = {
       kind: 'choice',
       seat: 'S',
       optionMode: 'dd-accurate',
+      assertedOptions: ['DQ', 'D8', 'D7', 'D2'],
       prompt: "Pick South's play",
       branchPrefix: 'SKDJ'
     },
@@ -138,50 +140,10 @@ export const doubleDummy01Script: ArticleScriptSpec = {
       kind: 'choice',
       seat: 'N',
       optionMode: 'dd-accurate',
-      prompt: "Pick North's discard",
+      prompt: "Pick North's play",
       branchPrefix: 'SKDJ'
     },
-    { kind: 'derived-play', seat: 'E', rule: 'lowest', branchPrefix: 'SKDJ' },
-    {
-      kind: 'choice',
-      seat: 'S',
-      optionMode: 'dd-accurate',
-      prompt: "Pick South's play",
-      branchPrefix: 'SKDJ'
-    },
-    { kind: 'derived-play', seat: 'W', rule: 'lowest', suit: 'C', branchPrefix: 'SKDJ' },
-    {
-      kind: 'choice',
-      seat: 'N',
-      optionMode: 'dd-accurate',
-      prompt: "Pick North's discard",
-      branchPrefix: 'SKDJ'
-    },
-    { kind: 'derived-play', seat: 'E', rule: 'lowest', branchPrefix: 'SKDJ' },
-    {
-      kind: 'choice',
-      seat: 'S',
-      optionMode: 'dd-accurate',
-      suit: 'D',
-      prompt: "Pick South's play",
-      branchPrefix: 'SKDJ'
-    },
-    { kind: 'play', cardId: 'S2', branchPrefix: 'SKDJ' },
-    {
-      kind: 'choice',
-      seat: 'N',
-      optionMode: 'dd-accurate',
-      prompt: "Pick North's discard",
-      branchPrefix: 'SKDJ'
-    },
-    {
-      kind: 'choice',
-      seat: 'E',
-      options: ['CJ', 'H5', 'S6'],
-      prompt: "Pick East's play",
-      branchPrefix: 'SKDJ'
-    },
-    { kind: 'play', cardId: 'D4', branchPrefix: 'SKD4' }
+    { kind: 'derived-play', seat: 'E', rule: 'lowest', branchPrefix: 'SKDJ' }
   ]
 };
 

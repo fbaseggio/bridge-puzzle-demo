@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { experimentalDraft01 } from '../../src/puzzles/experimental_draft';
 import { doubleDummy01 } from '../../src/puzzles/double_dummy_01';
+import { legalPlays, type Seat, type State, type Suit } from '../../src/core';
+import { toCardId, type CardId } from '../../src/ai/threatModel';
 import {
   ARTICLE_SCRIPT_NAVIGATION_MODE,
   ArticleScriptChoiceStep,
@@ -10,14 +12,49 @@ import {
   resolveArticleScriptCheckpointEndCursor,
   resolveArticleScriptLength,
   resolvePendingArticleScriptChoice,
-  resolveArticleScriptCheckpoint
+  resolveArticleScriptCheckpoint,
+  resolveArticleScriptStepAtCursor
 } from '../../src/demo/articleScripts';
 import {
   defaultArticleScriptHistory,
   deriveArticleScriptState,
+  matchArticleScriptHistory,
   replayArticleHistory,
   replayArticleScript
 } from '../../src/demo/articleScriptRuntime';
+
+function resolveWidgetTestChoiceOptions(
+  step: ArticleScriptChoiceStep,
+  historyPrefix: CardId[],
+  cursor: number
+): ArticleScriptChoiceStep {
+  if ((step.optionMode ?? 'explicit') === 'explicit') return { ...step, options: step.options ?? [] };
+  const replayed = replayArticleHistory(doubleDummy01, historyPrefix, cursor, doubleDummy01.rngSeed >>> 0);
+  const legal = legalPlays(replayed.state)
+    .filter((candidate) => candidate.seat === step.seat)
+    .map((candidate) => toCardId(candidate.suit, candidate.rank) as CardId);
+  const filteredLegal = step.suit ? legal.filter((cardId) => (cardId[0] as Suit) === step.suit) : legal;
+  return { ...step, options: filteredLegal };
+}
+
+function resolveWidgetTestDerivedPlayCard(step: { seat: Seat; suit?: Suit }, view: State): CardId | null {
+  const legal = legalPlays(view).filter((candidate) => candidate.seat === step.seat && (!step.suit || candidate.suit === step.suit));
+  if (legal.length === 0) return null;
+  legal.sort((a, b) => '23456789TJQKA'.indexOf(a.rank) - '23456789TJQKA'.indexOf(b.rank));
+  const chosen = legal[0];
+  return chosen ? (toCardId(chosen.suit, chosen.rank) as CardId) : null;
+}
+
+function deriveWidgetStyleArticleScriptState(history: CardId[], cursor: number): 'pre-script' | 'in-script' | 'off-script' | 'post-script' {
+  return matchArticleScriptHistory(doubleDummy01Script, '1', history, cursor, {
+    resolveChoiceStep: (step, historyPrefix, stepCursor) => resolveWidgetTestChoiceOptions(step, historyPrefix, stepCursor),
+    matchDerivedPlay: (matchHistory, stepCursor, seat, suit) => {
+      const replayed = replayArticleHistory(doubleDummy01, matchHistory, stepCursor, doubleDummy01.rngSeed >>> 0);
+      const expectedDerived = resolveWidgetTestDerivedPlayCard({ seat, suit }, replayed.state);
+      return Boolean(expectedDerived && matchHistory[stepCursor] === expectedDerived);
+    }
+  }).stateId;
+}
 
 describe('article script runtime', () => {
   it('uses explicit checkpoints and scripted navigation mode', () => {
@@ -151,6 +188,7 @@ describe('article script runtime', () => {
     expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 9, selections) as ArticleScriptChoiceStep).toMatchObject({
       seat: 'S',
       optionMode: 'dd-accurate',
+      assertedOptions: ['DQ', 'D8', 'D7', 'D2'],
       prompt: "Pick South's play"
     });
     expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 10, selections)).toBe('DK');
@@ -163,5 +201,82 @@ describe('article script runtime', () => {
     expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 13, selections)).toBe('H5');
     expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 14, selections)).toBe('HQ');
     expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 15, selections)).toBe('H7');
+    expect(resolveArticleScriptLength(doubleDummy01Script, selections)).toBe(20);
+  });
+
+  it('extends SKDJ into the authored trick 5 sequence', () => {
+    const selections = { 7: 'DJ' as const };
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 16, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      prompt: "Pick South's play"
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 17, selections)).toMatchObject({
+      kind: 'derived-play',
+      seat: 'W',
+      rule: 'lowest',
+      suit: 'C'
+    });
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 18, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play"
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 19, selections)).toMatchObject({
+      kind: 'derived-play',
+      seat: 'E',
+      rule: 'lowest'
+    });
+    expect(resolveArticleScriptLength(doubleDummy01Script, selections)).toBe(20);
+  });
+
+  it('keeps the authored SKDJ line in-script through the end of trick 4', () => {
+    const history = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ', 'D4', 'DQ', 'DK', 'DA', 'HA', 'H5', 'HQ', 'H7'];
+    const replay = replayArticleHistory(doubleDummy01, history, history.length);
+
+    expect(replay.playedCardIds).toEqual(history);
+    expect(deriveArticleScriptState(doubleDummy01Script, '1', history, history.length)).toBe('in-script');
+  });
+
+  it('treats SKD4 as complete at East’s branch choice and transitions to post-script after it', () => {
+    const history = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'D4'];
+    const replay = replayArticleHistory(doubleDummy01, history, history.length);
+
+    expect(resolveArticleScriptLength(doubleDummy01Script, { 7: 'D4' })).toBe(history.length);
+    expect(replay.playedCardIds).toEqual(history);
+    expect(replay.state.turn).toBe('S');
+    expect(deriveArticleScriptState(doubleDummy01Script, '1', history, history.length)).toBe('in-script');
+
+    const postScriptHistory = [...history, 'DQ'];
+    expect(deriveArticleScriptState(doubleDummy01Script, '1', postScriptHistory, postScriptHistory.length)).toBe('post-script');
+  });
+
+  it('keeps SKDJ in-script when West follows South’s diamond with DK', () => {
+    const history = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ', 'D4', 'DQ', 'DK'];
+
+    expect(deriveWidgetStyleArticleScriptState(history, 10)).toBe('in-script');
+    expect(deriveWidgetStyleArticleScriptState(history, history.length)).toBe('in-script');
+  });
+
+  it('keeps SKDJ in-script through DK for every asserted South diamond', () => {
+    for (const southDiamond of ['DQ', 'D8', 'D7', 'D2'] as const) {
+      const history = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ', 'D4', southDiamond, 'DK'];
+      expect(deriveWidgetStyleArticleScriptState(history, history.length)).toBe('in-script');
+    }
+  });
+
+  it('asserts the expected option set for the first SKDJ any-slot', () => {
+    const matched = matchArticleScriptHistory(
+      doubleDummy01Script,
+      '1',
+      ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ', 'D4'],
+      9,
+      {
+        resolveChoiceStep: (step, historyPrefix, stepCursor) => resolveWidgetTestChoiceOptions(step, historyPrefix, stepCursor)
+      }
+    );
+
+    expect(matched.assertionFailure).toBeNull();
+    expect((resolvePendingArticleScriptChoice(doubleDummy01Script, 9, { 7: 'DJ' }) as ArticleScriptChoiceStep).assertedOptions).toEqual(['DQ', 'D8', 'D7', 'D2']);
   });
 });

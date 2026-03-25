@@ -1,10 +1,13 @@
-import { apply, init, legalPlays, type CardId, type Problem, type Seat, type State } from '../core';
+import { apply, init, legalPlays, type CardId, type Problem, type Seat, type State, type Suit } from '../core';
 import { toCardId } from '../ai/threatModel';
 import {
   clampArticleScriptCursor,
   resolveArticleScriptCardAtCursor,
   resolveArticleScriptCheckpoint,
-  resolveArticleScriptCheckpointEndCursor,
+  resolveArticleScriptLength,
+  resolvePendingArticleScriptChoice,
+  resolveArticleScriptStepAtCursor,
+  type ArticleScriptChoiceStep,
   type ArticleScriptSpec
 } from './articleScripts';
 
@@ -16,6 +19,23 @@ export type ArticleScriptReplayResult = {
 
 export type ArticleScriptChoiceSelections = Record<number, CardId>;
 export type ArticleScriptStateId = 'pre-script' | 'in-script' | 'off-script' | 'post-script';
+export type ArticleScriptAssertionFailure = {
+  cursor: number;
+  kind: 'choice-options';
+  expected: CardId[];
+  actual: CardId[];
+};
+export type ArticleScriptHistoryMatcher = {
+  resolveChoiceStep?: (step: ArticleScriptChoiceStep, historyPrefix: CardId[], cursor: number) => ArticleScriptChoiceStep;
+  matchDerivedPlay?: (history: CardId[], cursor: number, seat: Seat, suit?: Suit) => boolean;
+  matchFlexSegment?: (history: CardId[], cursor: number) => boolean;
+};
+export type ArticleScriptHistoryMatchResult = {
+  stateId: ArticleScriptStateId;
+  choiceSelections: ArticleScriptChoiceSelections;
+  endCursor: number;
+  assertionFailure: ArticleScriptAssertionFailure | null;
+};
 
 const SCRIPTED_USER_CONTROLS: Seat[] = ['N', 'E', 'S', 'W'];
 
@@ -36,20 +56,84 @@ export function deriveArticleScriptState(
   history: CardId[],
   cursor: number
 ): ArticleScriptStateId {
+  return matchArticleScriptHistory(spec, checkpointId, history, cursor).stateId;
+}
+
+export function matchArticleScriptHistory(
+  spec: ArticleScriptSpec,
+  checkpointId: string | null | undefined,
+  history: CardId[],
+  cursor: number,
+  matcher: ArticleScriptHistoryMatcher = {}
+): ArticleScriptHistoryMatchResult {
   const checkpoint = resolveArticleScriptCheckpoint(spec, checkpointId);
-  const endCursor = resolveArticleScriptCheckpointEndCursor(spec, checkpointId);
   const boundedCursor = Math.max(0, Math.min(cursor, history.length));
 
-  if (boundedCursor < checkpoint.cursor) return 'pre-script';
-
-  for (let i = 0; i < Math.min(boundedCursor, endCursor); i += 1) {
-    const played = history[i];
-    const expected = resolveArticleScriptCardAtCursor(spec, i, history as unknown as ArticleScriptChoiceSelections);
-    if (!expected || !played || played !== expected) return 'off-script';
+  if (boundedCursor < checkpoint.cursor) {
+    return { stateId: 'pre-script', choiceSelections: {}, endCursor: resolveArticleScriptLength(spec), assertionFailure: null };
   }
 
-  if (boundedCursor > endCursor) return 'post-script';
-  return 'in-script';
+  const workingSelections: ArticleScriptChoiceSelections = {};
+  for (let i = 0; i < boundedCursor; i += 1) {
+    const endCursor = resolveArticleScriptLength(spec, workingSelections);
+    if (i >= endCursor) break;
+    const pendingStep = resolvePendingArticleScriptChoice(spec, i, workingSelections);
+    const pending = pendingStep
+      ? (matcher.resolveChoiceStep?.(pendingStep, history.slice(0, i), i) ?? pendingStep)
+      : null;
+    if (pending) {
+      if (pendingStep?.assertedOptions && pending.options) {
+        const actual = [...(pending.options ?? [])].sort();
+        const expected = [...pendingStep.assertedOptions].sort();
+        if (actual.length !== expected.length || actual.some((cardId, idx) => cardId !== expected[idx])) {
+          return {
+            stateId: 'off-script',
+            choiceSelections: workingSelections,
+            endCursor,
+            assertionFailure: {
+              cursor: i,
+              kind: 'choice-options',
+              expected: pendingStep.assertedOptions,
+              actual: pending.options ?? []
+            }
+          };
+        }
+      }
+      const played = history[i];
+      if (!played) return { stateId: 'off-script', choiceSelections: workingSelections, endCursor, assertionFailure: null };
+      if (pending.options && pending.options.length > 0 && !pending.options.includes(played)) {
+        return { stateId: 'off-script', choiceSelections: workingSelections, endCursor, assertionFailure: null };
+      }
+      workingSelections[i] = played;
+      continue;
+    }
+    const played = history[i];
+    const expected = resolveArticleScriptCardAtCursor(spec, i, workingSelections);
+    if (expected) {
+      if (!played || played !== expected) return { stateId: 'off-script', choiceSelections: workingSelections, endCursor, assertionFailure: null };
+      continue;
+    }
+    const step = resolveArticleScriptStepAtCursor(spec, i, workingSelections);
+    if (step?.kind === 'derived-play') {
+      const matches = matcher.matchDerivedPlay?.(history, i, step.seat, step.suit);
+      if (!matches) return { stateId: 'off-script', choiceSelections: workingSelections, endCursor, assertionFailure: null };
+      continue;
+    }
+    if (step?.kind === 'flex-segment') {
+      const matches = matcher.matchFlexSegment?.(history, i) ?? false;
+      if (!matches) return { stateId: 'off-script', choiceSelections: workingSelections, endCursor, assertionFailure: null };
+      continue;
+    }
+    return { stateId: 'off-script', choiceSelections: workingSelections, endCursor, assertionFailure: null };
+  }
+
+  const endCursor = resolveArticleScriptLength(spec, workingSelections);
+  return {
+    stateId: boundedCursor > endCursor ? 'post-script' : 'in-script',
+    choiceSelections: workingSelections,
+    endCursor,
+    assertionFailure: null
+  };
 }
 
 export function replayArticleScript(
