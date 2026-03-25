@@ -665,6 +665,44 @@ function chooseLowestCardId(options: CardId[]): CardId | null {
   return sorted[0] ?? null;
 }
 
+function chooseCurrentArticleScriptBranchOption(): CardId | null {
+  const choicePresentation = currentArticleScriptChoicePresentation();
+  if (!choicePresentation) return null;
+  const authoredExplicit = (choicePresentation.rawChoice.optionMode ?? 'explicit') === 'explicit'
+    && (choicePresentation.rawChoice.branchRole ?? 'authored') === 'authored';
+  const preferredOptions = authoredExplicit
+    ? (choicePresentation.unresolvedOptions.length > 0 ? choicePresentation.unresolvedOptions : (choicePresentation.rawChoice.options ?? []))
+    : (choicePresentation.choice.options ?? []);
+  return chooseLowestCardId(preferredOptions);
+}
+
+function seatAtHistoryCursor(history: CardId[], cursor: number): Seat | null {
+  const replayed = replayArticleHistory(withDdSource(currentProblem), history, cursor, currentSeed);
+  return replayed.cursor === cursor ? replayed.state.turn : null;
+}
+
+function articleScriptUndoTargetCursor(): number {
+  if (!articleScriptState) return 0;
+  const history = articleScriptState.history;
+  let target = articleScriptState.cursor;
+  let removedSignificant = false;
+  while (target > 0) {
+    const stepCursor = target - 1;
+    const seat = seatAtHistoryCursor(history, stepCursor);
+    target = stepCursor;
+    if (!seat) break;
+    if (currentProblem.userControls.includes(seat)) {
+      removedSignificant = true;
+      break;
+    }
+    if (!autoplayEw) {
+      removedSignificant = true;
+      break;
+    }
+  }
+  return removedSignificant ? target : Math.max(0, articleScriptState.cursor - 1);
+}
+
 function currentArticleScriptResolvedBranchName(): string {
   if (!articleScriptState) return '';
   return resolveArticleScriptAuthoredBranchName(
@@ -2047,6 +2085,16 @@ function chooseHintAdvanceCard(bestCards: CardId[]): CardId | null {
 function chooseSingleDefenderAdvancePlay(): Play | null {
   const seat = state.turn;
   if (seat !== 'E' && seat !== 'W') return null;
+  if (articleScriptModeEnabled()) {
+    const choicePresentation = currentArticleScriptChoicePresentation();
+    const scriptedChoice = choicePresentation?.choice ?? null;
+    if (scriptedChoice && scriptedChoice.seat === seat) {
+      const chosenCardId = chooseCurrentArticleScriptBranchOption();
+      if (!chosenCardId) return null;
+      const legal = legalPlays(state).filter((candidate) => candidate.seat === seat);
+      return legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId) ?? null;
+    }
+  }
   const legal = legalPlays(state).filter((candidate) => candidate.seat === seat);
   if (legal.length === 0) return null;
   if (legal.length === 1) return legal[0] ?? null;
@@ -4147,7 +4195,7 @@ function syncSingletonAutoplay(): void {
           clearSingletonAutoplayTimer();
           const moved = advanceOneWidgetCard();
           if (!moved) render();
-        }, 350);
+        }, 150);
       }
       return;
     }
@@ -5678,6 +5726,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   const articleScriptAtEnd = widgetArticleScript && articleScriptEndCursor !== null ? widgetArticleScript.cursor >= articleScriptEndCursor : false;
   const articleScriptHasRememberedTail = widgetArticleScript ? currentArticleScriptHasRememberedTail() : false;
   const articleScriptStateLabel = widgetArticleScript ? currentArticleScriptStateLabel() : null;
+  const articleScriptTerminalLabel = widgetArticleScript ? currentArticleScriptTerminalLabel() : null;
   const scriptedPrefix = articleScriptStateLabel ? `${articleScriptStateLabel} · ` : '';
   const articleScriptUserAdvanceBlocked = Boolean(
     widgetArticleScript
@@ -5688,7 +5737,15 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   );
 
   const outcome = document.createElement('div');
-  outcome.className = `outcome-module ${runStatus === 'success' ? 'ok' : runStatus === 'failure' ? 'fail' : warningStatusActive ? 'warn' : 'neutral'}`;
+  const outcomeTone =
+    runStatus === 'success' || articleScriptTerminalLabel === 'Complete'
+      ? 'ok'
+      : runStatus === 'failure'
+        ? 'fail'
+        : warningStatusActive
+          ? 'warn'
+          : 'neutral';
+  outcome.className = `outcome-module ${outcomeTone}`;
   const canonicalStatus = canonicalRunStatusText(runStatus);
   const terminalCanonical = runStatus === 'success' || runStatus === 'failure';
   if (isWidgetShellMode && terminalCanonical) {
@@ -5835,7 +5892,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   else if (!isWidgetShellMode) undoBtn.disabled = undoStack.length === 0;
   undoBtn.onclick = () => {
     if (widgetArticleScript) {
-      replayArticleScriptToCursor(Math.max(0, widgetArticleScript.cursor - 1));
+      replayArticleScriptToCursor(articleScriptUndoTargetCursor());
       render();
       return;
     }
@@ -5881,7 +5938,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
         const unresolvedOptions = scriptedChoicePresentation.unresolvedOptions;
         if (unresolvedOptions.length > 1) {
           if (articleScriptFollowPromptCursor === widgetArticleScript.cursor) {
-            const chosenCardId = chooseLowestCardId(unresolvedOptions);
+            const chosenCardId = chooseCurrentArticleScriptBranchOption();
             const legal = legalPlays(state).filter((candidate) => candidate.seat === state.turn);
             const play = chosenCardId
               ? legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId)
@@ -5902,7 +5959,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
           return;
         }
         if (unresolvedOptions.length === 1) {
-          const chosenCardId = unresolvedOptions[0];
+          const chosenCardId = chooseCurrentArticleScriptBranchOption() ?? unresolvedOptions[0];
           const legal = legalPlays(state).filter((candidate) => candidate.seat === state.turn);
           const play = legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId);
           if (play) {
