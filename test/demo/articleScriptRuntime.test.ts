@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { experimentalDraft01 } from '../../src/puzzles/experimental_draft';
+import { doubleDummy01 } from '../../src/puzzles/double_dummy_01';
 import {
   ARTICLE_SCRIPT_NAVIGATION_MODE,
+  ArticleScriptChoiceStep,
+  doubleDummy01Script,
   experimentalDraftIntroScript,
+  resolveArticleScriptCardAtCursor,
   resolveArticleScriptCheckpointEndCursor,
   resolveArticleScriptLength,
   resolvePendingArticleScriptChoice,
@@ -127,5 +131,37 @@ describe('article script runtime', () => {
     expect(replay.playedCardIds).toEqual(history.slice(0, replay.playedCardIds.length));
     expect(replay.cursor).toBe(history.length);
     expect(replay.playedCardIds).toHaveLength(history.length - 1);
+  });
+
+  it('does not treat SKDJ as complete immediately after the first branch choice', () => {
+    const history = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ'] as const;
+    const stateAtChoice = deriveArticleScriptState(doubleDummy01Script, '1', [...history], history.length);
+    const replayAfterChoice = replayArticleHistory(doubleDummy01, [...history], history.length);
+
+    expect(stateAtChoice).toBe('in-script');
+    expect(resolveArticleScriptLength(doubleDummy01Script, { 7: 'DJ' })).toBeGreaterThan(history.length);
+    expect(replayAfterChoice.state.turn).toBe('E');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, history.length, { 7: 'DJ' })).toBe('D4');
+  });
+
+  it('pins down SKDJ through trick 3 and the start of trick 4', () => {
+    const selections = { 7: 'DJ' as const };
+
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 8, selections)).toBe('D4');
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 9, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      prompt: "Pick South's play"
+    });
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 10, selections)).toBe('DK');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 11, selections)).toBe('DA');
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 12, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play"
+    });
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 13, selections)).toBe('H5');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 14, selections)).toBe('HQ');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 15, selections)).toBe('H7');
   });
 });

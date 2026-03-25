@@ -30,7 +30,7 @@ let loadAttempted = false;
 const scriptLoadBySrc = new Map<string, Promise<void>>();
 let ddsRuntimeStatus: 'idle' | 'loading' | 'ready' | 'failed' = 'idle';
 let ddsRuntimePromise: Promise<boolean> | null = null;
-const DDS_TOTAL_MEMORY = 64 * 1024 * 1024;
+const DDS_TOTAL_MEMORY = 128 * 1024 * 1024;
 
 function resetDdsRuntimeState(): void {
   ddsRuntimePromise = null;

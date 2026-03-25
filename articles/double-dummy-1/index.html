@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Double Dummy 1</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #f5f7fb;
+        color: #18212f;
+        font-family: Georgia, "Times New Roman", serif;
+        line-height: 1.55;
+      }
+      .site-header {
+        border-bottom: 1px solid #e2e8f0;
+        background: #f8fafc;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      .site-header-inner {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 12px 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .site-title {
+        text-decoration: none;
+        color: #0f172a;
+        font-weight: 700;
+        font-size: 1rem;
+      }
+      .site-nav {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .site-nav a {
+        text-decoration: none;
+        color: #334155;
+        font-size: 0.95rem;
+      }
+      .site-nav a.active {
+        color: #0f172a;
+        font-weight: 600;
+      }
+      .article {
+        max-width: 780px;
+        margin: 0 auto;
+        padding: 28px 18px 40px;
+      }
+      .crumbs {
+        margin: 0 0 12px;
+        font-size: 0.92rem;
+        color: #64748b;
+      }
+      .crumbs a {
+        color: #64748b;
+        text-decoration: none;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: clamp(1.55rem, 2.8vw, 2.1rem);
+        line-height: 1.2;
+      }
+      p {
+        margin: 0 0 12px;
+      }
+      figure.widget {
+        margin: 10px 0 14px;
+      }
+      figure.widget iframe {
+        display: block;
+        width: 100%;
+        max-width: 470px;
+        height: 364px;
+        border: 0;
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-title" href="/">DeepSqueeze</a>
+        <nav class="site-nav" aria-label="Site">
+          <a href="/workbench/">Workbench</a>
+          <a href="/practice/">Practice</a>
+          <a class="active" href="/articles/">Articles</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="article">
+      <p class="crumbs"><a href="/">Home</a> / <a href="/articles/">Articles</a> / Double Dummy 1</p>
+      <h1>Double Dummy 1</h1>
+      <p>Contract: 5NT by South. Opening lead: ♠K.</p>
+      <figure class="widget"><iframe src="/workbench/?mode=widget&amp;problem=double_dummy_01&amp;articleScript=double-dummy-01&amp;checkpoint=1" aria-label="Double Dummy 1"></iframe></figure>
+    </main>
+  </body>
+</html>

@@ -11,6 +11,7 @@ import { p010 } from '../puzzles/p010';
 import { p011 } from '../puzzles/p011';
 import { p012 } from '../puzzles/p012';
 import { p013 } from '../puzzles/p013';
+import { doubleDummy01 } from '../puzzles/double_dummy_01';
 import { squeezeSelf01 } from '../puzzles/squeeze_self_01';
 import { experimentalDraft01, experimentalDraft01a, experimentalDraft01b } from '../puzzles/experimental_draft';
 import {
@@ -112,6 +113,13 @@ const encapsulationDemoProblems: DemoProblem[] = listEncapsulationWorkbenchEntri
 }));
 
 export const demoProblems: DemoProblem[] = [
+  {
+    id: 'double_dummy_01',
+    label: 'double_dummy_01',
+    problem: doubleDummy01,
+    practiceEligible: false,
+    articlePath: 'articles/double-dummy-1/'
+  },
   {
     id: 'squeeze_self_01',
     label: 'Focus on the squeeze against yourself',

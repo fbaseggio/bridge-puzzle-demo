@@ -10,6 +10,7 @@ export default defineConfig({
         workbench: resolve(__dirname, 'workbench/index.html'),
         practice: resolve(__dirname, 'practice/index.html'),
         articles: resolve(__dirname, 'articles/index.html'),
+        doubleDummy1: resolve(__dirname, 'articles/double-dummy-1/index.html'),
         experimentalDraft: resolve(__dirname, 'articles/experimental-draft/index.html'),
         squeezeSelf: resolve(__dirname, 'articles/squeeze-self/index.html'),
         sureTricksDemo: resolve(__dirname, 'articles/sure-tricks-demo/index.html'),
