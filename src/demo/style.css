@@ -716,6 +716,32 @@ html.mode-widget {
   border-radius: 3px;
 }
 
+.rank-text.script-choice {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+.rank-text.script-choice-complete {
+  position: relative;
+  outline: 2px solid #16a34a;
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+.rank-text.script-choice-complete::after {
+  content: '✓';
+  position: absolute;
+  top: -0.55em;
+  right: -0.45em;
+  font-size: 0.68em;
+  line-height: 1;
+  color: #16a34a;
+  background: #f8fafc;
+  border-radius: 999px;
+  padding: 0 0.12em;
+}
+
 .rank-text.dd-error-good {
   outline: 2px solid #3aa657;
   outline-offset: 1px;

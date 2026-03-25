@@ -8,9 +8,12 @@ import {
   ArticleScriptChoiceStep,
   doubleDummy01Script,
   experimentalDraftIntroScript,
+  resolveArticleScriptAuthoredBranchName,
   resolveArticleScriptCardAtCursor,
   resolveArticleScriptCheckpointEndCursor,
   resolveArticleScriptLength,
+  resolveArticleScriptTerminalState,
+  resolvePreviousArticleScriptAuthoredChoiceCursor,
   resolvePendingArticleScriptChoice,
   resolveArticleScriptCheckpoint,
   resolveArticleScriptStepAtCursor
@@ -22,6 +25,10 @@ import {
   replayArticleHistory,
   replayArticleScript
 } from '../../src/demo/articleScriptRuntime';
+
+function suitStrengthForTest(cardId: CardId): number {
+  return { C: 0, D: 1, H: 2, S: 3 }[cardId[0] as Suit];
+}
 
 function resolveWidgetTestChoiceOptions(
   step: ArticleScriptChoiceStep,
@@ -37,10 +44,31 @@ function resolveWidgetTestChoiceOptions(
   return { ...step, options: filteredLegal };
 }
 
-function resolveWidgetTestDerivedPlayCard(step: { seat: Seat; suit?: Suit }, view: State): CardId | null {
+function resolveWidgetTestDerivedPlayCard(
+  step: { seat: Seat; suit?: Suit; rule?: 'lowest' | 'dd-min' | 'dd-max' },
+  view: State,
+  playedCardIds: CardId[] = []
+): CardId | null {
+  if (step.rule === 'dd-min' || step.rule === 'dd-max') {
+    const options = resolveWidgetTestChoiceOptions(
+      { kind: 'choice', seat: step.seat, optionMode: 'dd-accurate', suit: step.suit },
+      playedCardIds,
+      playedCardIds.length
+    ).options ?? [];
+    const sortedOptions = [...options].sort((a, b) => {
+      const rankDelta = '23456789TJQKA'.indexOf(a[1] ?? '') - '23456789TJQKA'.indexOf(b[1] ?? '');
+      if (rankDelta !== 0) return rankDelta;
+      return suitStrengthForTest(a) - suitStrengthForTest(b);
+    });
+    return step.rule === 'dd-max' ? (sortedOptions.at(-1) ?? null) : (sortedOptions[0] ?? null);
+  }
   const legal = legalPlays(view).filter((candidate) => candidate.seat === step.seat && (!step.suit || candidate.suit === step.suit));
   if (legal.length === 0) return null;
-  legal.sort((a, b) => '23456789TJQKA'.indexOf(a.rank) - '23456789TJQKA'.indexOf(b.rank));
+  legal.sort((a, b) => {
+    const rankDelta = '23456789TJQKA'.indexOf(a.rank) - '23456789TJQKA'.indexOf(b.rank);
+    if (rankDelta !== 0) return rankDelta;
+    return suitStrengthForTest(toCardId(a.suit, a.rank) as CardId) - suitStrengthForTest(toCardId(b.suit, b.rank) as CardId);
+  });
   const chosen = legal[0];
   return chosen ? (toCardId(chosen.suit, chosen.rank) as CardId) : null;
 }
@@ -48,11 +76,12 @@ function resolveWidgetTestDerivedPlayCard(step: { seat: Seat; suit?: Suit }, vie
 function deriveWidgetStyleArticleScriptState(history: CardId[], cursor: number): 'pre-script' | 'in-script' | 'off-script' | 'post-script' {
   return matchArticleScriptHistory(doubleDummy01Script, '1', history, cursor, {
     resolveChoiceStep: (step, historyPrefix, stepCursor) => resolveWidgetTestChoiceOptions(step, historyPrefix, stepCursor),
-    matchDerivedPlay: (matchHistory, stepCursor, seat, suit) => {
+    matchDerivedPlay: (matchHistory, stepCursor, step) => {
       const replayed = replayArticleHistory(doubleDummy01, matchHistory, stepCursor, doubleDummy01.rngSeed >>> 0);
-      const expectedDerived = resolveWidgetTestDerivedPlayCard({ seat, suit }, replayed.state);
+      const expectedDerived = resolveWidgetTestDerivedPlayCard(step, replayed.state, replayed.playedCardIds);
       return Boolean(expectedDerived && matchHistory[stepCursor] === expectedDerived);
-    }
+    },
+    replayHistory: (matchHistory, replayCursor) => replayArticleHistory(doubleDummy01, matchHistory, replayCursor, doubleDummy01.rngSeed >>> 0)
   }).stateId;
 }
 
@@ -201,10 +230,10 @@ describe('article script runtime', () => {
     expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 13, selections)).toBe('H5');
     expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 14, selections)).toBe('HQ');
     expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 15, selections)).toBe('H7');
-    expect(resolveArticleScriptLength(doubleDummy01Script, selections)).toBe(20);
+    expect(resolveArticleScriptLength(doubleDummy01Script, selections)).toBe(28);
   });
 
-  it('extends SKDJ into the authored trick 5 sequence', () => {
+  it('extends SKDJ into the authored trick 5 and trick 6 sequences', () => {
     const selections = { 7: 'DJ' as const };
     expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 16, selections) as ArticleScriptChoiceStep).toMatchObject({
       seat: 'S',
@@ -227,7 +256,242 @@ describe('article script runtime', () => {
       seat: 'E',
       rule: 'lowest'
     });
-    expect(resolveArticleScriptLength(doubleDummy01Script, selections)).toBe(20);
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 20, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      prompt: "Pick South's play"
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 21, selections)).toMatchObject({
+      kind: 'derived-play',
+      seat: 'W',
+      rule: 'lowest',
+      suit: 'C'
+    });
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 22, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play"
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 23, selections)).toMatchObject({
+      kind: 'derived-play',
+      seat: 'E',
+      rule: 'lowest'
+    });
+    expect(resolveArticleScriptLength(doubleDummy01Script, selections)).toBe(28);
+  });
+
+  it('extends SKDJ to the next explicit branch with the asserted trick-7 shape', () => {
+    const selections = { 7: 'DJ' as const };
+
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 24, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      assertedSuits: ['D'],
+      prompt: "Pick South's play"
+    });
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 25, selections)).toBe('S2');
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 26, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play"
+    });
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 27, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'E',
+      options: ['S6', 'H6', 'CJ'],
+      assertedWinner: 'S',
+      prompt: "Pick East's play"
+    });
+  });
+
+  it('routes authored branches for SKDJCJ, SKDJH6, and SKDJS6', () => {
+    expect(resolveArticleScriptAuthoredBranchName(doubleDummy01Script, { 7: 'DJ', 27: 'CJ' })).toBe('SKDJCJ');
+    expect(resolveArticleScriptAuthoredBranchName(doubleDummy01Script, { 7: 'DJ', 27: 'H6' })).toBe('SKDJH6');
+    expect(resolveArticleScriptAuthoredBranchName(doubleDummy01Script, { 7: 'DJ', 27: 'S6' })).toBe('SKDJS6');
+    expect(resolveArticleScriptAuthoredBranchName(doubleDummy01Script, { 7: 'DJ', 9: 'D8', 27: 'CJ', 28: 'DA', 30: 'HK' })).toBe('SKDJCJ');
+  });
+
+  it('encodes the SKDJCJ continuation without changing the earlier line', () => {
+    const selections = { 7: 'DJ' as const, 27: 'CJ' as const };
+
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 28, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      prompt: "Pick South's play"
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 29, selections)).toMatchObject({
+      kind: 'derived-play',
+      seat: 'W',
+      rule: 'lowest'
+    });
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 30, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play"
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 31, selections)).toMatchObject({
+      kind: 'derived-play',
+      seat: 'E',
+      rule: 'lowest',
+      assertedWinner: 'N'
+    });
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 32, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play"
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 33, selections)).toMatchObject({
+      kind: 'derived-play',
+      seat: 'E',
+      rule: 'lowest'
+    });
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 34, selections)).toBe('S5');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 35, selections)).toBe('S3');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 36, selections)).toBe('CQ');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 37, selections)).toBe('CK');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 38, selections)).toBe('CA');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 39, selections)).toBe('C6');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 40, selections)).toBe('SJ');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 41, selections)).toBe('SQ');
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 42, selections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'N',
+      optionMode: 'dd-accurate'
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 43, selections)).toMatchObject({
+      kind: 'derived-play',
+      seat: 'E',
+      rule: 'lowest'
+    });
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 44, selections)).toBe('C7');
+  });
+
+  it('encodes the SKDJH6 and SKDJS6 authored continuations', () => {
+    const heartSelections = { 7: 'DJ' as const, 27: 'H6' as const };
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 28, heartSelections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'S',
+      optionMode: 'dd-accurate'
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 29, heartSelections)).toMatchObject({
+      kind: 'derived-play',
+      seat: 'W',
+      rule: 'lowest'
+    });
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 30, heartSelections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'N',
+      optionMode: 'dd-accurate'
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 31, heartSelections)).toMatchObject({
+      kind: 'derived-play',
+      seat: 'E',
+      rule: 'lowest',
+      assertedWinner: 'N'
+    });
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 32, heartSelections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'N',
+      optionMode: 'dd-accurate'
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 33, heartSelections)).toMatchObject({
+      kind: 'derived-play',
+      seat: 'E',
+      rule: 'lowest'
+    });
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 34, heartSelections)).toBe('C8');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 35, heartSelections)).toBe('C6');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 36, heartSelections)).toBe('HT');
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 37, heartSelections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'E',
+      options: ['S6', 'CJ'],
+      prompt: "Pick East's play"
+    });
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 38, { ...heartSelections, 37: 'S6' })).toBe('CT');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 39, { ...heartSelections, 37: 'S6' })).toBe('C7');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 40, { ...heartSelections, 37: 'S6' })).toBe('S4');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 41, { ...heartSelections, 37: 'S6' })).toBe('ST');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 42, { ...heartSelections, 37: 'S6' })).toBe('SJ');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 43, { ...heartSelections, 37: 'S6' })).toBe('SQ');
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 38, { ...heartSelections, 37: 'CJ' }) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'S',
+      optionMode: 'dd-accurate'
+    });
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 39, { ...heartSelections, 37: 'CJ' })).toBe('C7');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 40, { ...heartSelections, 37: 'CJ' })).toBe('CQ');
+
+    const spadeSelections = { 7: 'DJ' as const, 27: 'S6' as const };
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 28, spadeSelections)).toBe('SJ');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 29, spadeSelections)).toBe('SQ');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 30, spadeSelections)).toBe('S9');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 31, spadeSelections)).toBe('ST');
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 32, spadeSelections) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'W',
+      options: ['H9', 'C6'],
+      prompt: "Pick West's play"
+    });
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 33, { ...spadeSelections, 32: 'H9' }) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'N',
+      optionMode: 'dd-accurate'
+    });
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 34, { ...spadeSelections, 32: 'H9' })).toMatchObject({
+      kind: 'derived-play',
+      seat: 'E',
+      rule: 'dd-min'
+    });
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 35, { ...spadeSelections, 32: 'H9' }) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'S',
+      optionMode: 'dd-accurate'
+    });
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 36, { ...spadeSelections, 32: 'H9' }) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'N',
+      optionMode: 'dd-accurate'
+    });
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 37, { ...spadeSelections, 32: 'H9' })).toBe('H8');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 38, { ...spadeSelections, 32: 'H9' })).toBe('S5');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 39, { ...spadeSelections, 32: 'H9' })).toBe('S3');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 40, { ...spadeSelections, 32: 'H9' })).toBe('S4');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 41, { ...spadeSelections, 32: 'H9' })).toBe('CJ');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 42, { ...spadeSelections, 32: 'H9' })).toBe('C8');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 43, { ...spadeSelections, 32: 'H9' })).toBe('C6');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 44, { ...spadeSelections, 32: 'H9' })).toBe('CQ');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 45, { ...spadeSelections, 32: 'H9' })).toBe('CK');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 46, { ...spadeSelections, 32: 'H9' })).toBe('CA');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 47, { ...spadeSelections, 32: 'H9' })).toBe('C7');
+    expect(resolveArticleScriptStepAtCursor(doubleDummy01Script, 34, { ...spadeSelections, 32: 'C6' })).toMatchObject({
+      kind: 'derived-play',
+      seat: 'E',
+      rule: 'dd-max'
+    });
+    expect(resolvePendingArticleScriptChoice(doubleDummy01Script, 35, { ...spadeSelections, 32: 'C6' }) as ArticleScriptChoiceStep).toMatchObject({
+      seat: 'S',
+      optionMode: 'dd-accurate'
+    });
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 36, { ...spadeSelections, 32: 'C6' })).toBe('S5');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 37, { ...spadeSelections, 32: 'C6' })).toBe('S3');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 38, { ...spadeSelections, 32: 'C6' })).toBe('S4');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 39, { ...spadeSelections, 32: 'C6' })).toBe('H6');
+    expect(resolveArticleScriptCardAtCursor(doubleDummy01Script, 40, { ...spadeSelections, 32: 'C6' })).toBe('H4');
+    expect(resolveArticleScriptLength(doubleDummy01Script, { ...spadeSelections, 32: 'H9' })).toBe(48);
+    expect(resolveArticleScriptLength(doubleDummy01Script, { ...spadeSelections, 32: 'C6' })).toBe(41);
+  });
+
+  it('marks only explicit successful branch ends as complete', () => {
+    expect(resolveArticleScriptTerminalState(doubleDummy01Script, { 7: 'DJ', 27: 'S6', 32: 'H9' })).toBe('complete');
+    expect(resolveArticleScriptTerminalState(doubleDummy01Script, { 7: 'DJ', 27: 'S6', 32: 'C6' })).toBe('complete');
+    expect(resolveArticleScriptTerminalState(doubleDummy01Script, { 7: 'DJ', 27: 'CJ' })).toBe('complete');
+    expect(resolveArticleScriptTerminalState(doubleDummy01Script, { 7: 'DJ', 27: 'H6', 37: 'S6' })).toBe('complete');
+    expect(resolveArticleScriptTerminalState(doubleDummy01Script, { 7: 'DJ', 27: 'H6', 37: 'CJ' })).toBe('complete');
+    expect(resolveArticleScriptTerminalState(doubleDummy01Script, { 7: 'DJ' })).toBeNull();
+    expect(resolveArticleScriptTerminalState(doubleDummy01Script, { 7: 'D4' })).toBeNull();
+  });
+
+  it('finds the previous authored branch cursor for transport rewind', () => {
+    expect(resolvePreviousArticleScriptAuthoredChoiceCursor(doubleDummy01Script, 0, {})).toBeNull();
+    expect(resolvePreviousArticleScriptAuthoredChoiceCursor(doubleDummy01Script, 20, { 7: 'DJ' })).toBe(7);
+    expect(resolvePreviousArticleScriptAuthoredChoiceCursor(doubleDummy01Script, 35, { 7: 'DJ', 27: 'S6', 32: 'H9' })).toBe(32);
+    expect(resolvePreviousArticleScriptAuthoredChoiceCursor(doubleDummy01Script, 29, { 7: 'DJ', 27: 'S6' })).toBe(27);
+  });
+
+  it('uses only explicit choices in the authored branch name', () => {
+    expect(resolveArticleScriptAuthoredBranchName(doubleDummy01Script, {})).toBe('SK');
+    expect(resolveArticleScriptAuthoredBranchName(doubleDummy01Script, { 7: 'DJ' })).toBe('SKDJ');
+    expect(resolveArticleScriptAuthoredBranchName(doubleDummy01Script, { 7: 'DJ', 9: 'D8', 12: 'HA', 16: 'CT', 18: 'CQ' })).toBe('SKDJ');
   });
 
   it('keeps the authored SKDJ line in-script through the end of trick 4', () => {

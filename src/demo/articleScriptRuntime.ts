@@ -7,6 +7,7 @@ import {
   resolveArticleScriptLength,
   resolvePendingArticleScriptChoice,
   resolveArticleScriptStepAtCursor,
+  type ArticleScriptDerivedPlayStep,
   type ArticleScriptChoiceStep,
   type ArticleScriptSpec
 } from './articleScripts';
@@ -21,14 +22,15 @@ export type ArticleScriptChoiceSelections = Record<number, CardId>;
 export type ArticleScriptStateId = 'pre-script' | 'in-script' | 'off-script' | 'post-script';
 export type ArticleScriptAssertionFailure = {
   cursor: number;
-  kind: 'choice-options';
-  expected: CardId[];
-  actual: CardId[];
+  kind: 'choice-options' | 'choice-suits' | 'trick-winner';
+  expected: string[];
+  actual: string[];
 };
 export type ArticleScriptHistoryMatcher = {
   resolveChoiceStep?: (step: ArticleScriptChoiceStep, historyPrefix: CardId[], cursor: number) => ArticleScriptChoiceStep;
-  matchDerivedPlay?: (history: CardId[], cursor: number, seat: Seat, suit?: Suit) => boolean;
+  matchDerivedPlay?: (history: CardId[], cursor: number, step: ArticleScriptDerivedPlayStep) => boolean;
   matchFlexSegment?: (history: CardId[], cursor: number) => boolean;
+  replayHistory?: (history: CardId[], cursor: number) => ArticleScriptReplayResult | null;
 };
 export type ArticleScriptHistoryMatchResult = {
   stateId: ArticleScriptStateId;
@@ -38,6 +40,33 @@ export type ArticleScriptHistoryMatchResult = {
 };
 
 const SCRIPTED_USER_CONTROLS: Seat[] = ['N', 'E', 'S', 'W'];
+
+function assertionFailure(
+  cursor: number,
+  kind: ArticleScriptAssertionFailure['kind'],
+  expected: string[],
+  actual: string[]
+): ArticleScriptAssertionFailure {
+  return {
+    cursor,
+    kind,
+    expected: [...expected],
+    actual: [...actual]
+  };
+}
+
+function resolveWinnerAssertionFailure(
+  matcher: ArticleScriptHistoryMatcher,
+  history: CardId[],
+  cursor: number,
+  assertedWinner: Seat
+): ArticleScriptAssertionFailure | null {
+  const replayed = matcher.replayHistory?.(history, cursor) ?? null;
+  if (!replayed) return null;
+  const actualWinner = replayed.state.trick.length === 0 ? replayed.state.turn : null;
+  if (actualWinner === assertedWinner) return null;
+  return assertionFailure(cursor - 1, 'trick-winner', [assertedWinner], actualWinner ? [actualWinner] : []);
+}
 
 export function defaultArticleScriptHistory(spec: ArticleScriptSpec, cursor: number): CardId[] {
   const history: CardId[] = [];
@@ -90,12 +119,19 @@ export function matchArticleScriptHistory(
             stateId: 'off-script',
             choiceSelections: workingSelections,
             endCursor,
-            assertionFailure: {
-              cursor: i,
-              kind: 'choice-options',
-              expected: pendingStep.assertedOptions,
-              actual: pending.options ?? []
-            }
+            assertionFailure: assertionFailure(i, 'choice-options', pendingStep.assertedOptions, pending.options ?? [])
+          };
+        }
+      }
+      if (pendingStep?.assertedSuits && pending.options) {
+        const actual = [...new Set((pending.options ?? []).map((cardId) => cardId[0] as Suit))].sort();
+        const expected = [...pendingStep.assertedSuits].sort();
+        if (actual.length !== expected.length || actual.some((suit, idx) => suit !== expected[idx])) {
+          return {
+            stateId: 'off-script',
+            choiceSelections: workingSelections,
+            endCursor,
+            assertionFailure: assertionFailure(i, 'choice-suits', expected, actual)
           };
         }
       }
@@ -105,18 +141,52 @@ export function matchArticleScriptHistory(
         return { stateId: 'off-script', choiceSelections: workingSelections, endCursor, assertionFailure: null };
       }
       workingSelections[i] = played;
+      if (pendingStep?.assertedWinner) {
+        const winnerFailure = resolveWinnerAssertionFailure(matcher, history, i + 1, pendingStep.assertedWinner);
+        if (winnerFailure) {
+          return {
+            stateId: 'off-script',
+            choiceSelections: workingSelections,
+            endCursor,
+            assertionFailure: winnerFailure
+          };
+        }
+      }
       continue;
     }
     const played = history[i];
     const expected = resolveArticleScriptCardAtCursor(spec, i, workingSelections);
     if (expected) {
       if (!played || played !== expected) return { stateId: 'off-script', choiceSelections: workingSelections, endCursor, assertionFailure: null };
+      if (stepWithWinner(spec, i, workingSelections)?.assertedWinner) {
+        const assertedWinner = stepWithWinner(spec, i, workingSelections)?.assertedWinner;
+        const winnerFailure = assertedWinner ? resolveWinnerAssertionFailure(matcher, history, i + 1, assertedWinner) : null;
+        if (winnerFailure) {
+          return {
+            stateId: 'off-script',
+            choiceSelections: workingSelections,
+            endCursor,
+            assertionFailure: winnerFailure
+          };
+        }
+      }
       continue;
     }
     const step = resolveArticleScriptStepAtCursor(spec, i, workingSelections);
     if (step?.kind === 'derived-play') {
-      const matches = matcher.matchDerivedPlay?.(history, i, step.seat, step.suit);
+      const matches = matcher.matchDerivedPlay?.(history, i, step);
       if (!matches) return { stateId: 'off-script', choiceSelections: workingSelections, endCursor, assertionFailure: null };
+      if (step.assertedWinner) {
+        const winnerFailure = resolveWinnerAssertionFailure(matcher, history, i + 1, step.assertedWinner);
+        if (winnerFailure) {
+          return {
+            stateId: 'off-script',
+            choiceSelections: workingSelections,
+            endCursor,
+            assertionFailure: winnerFailure
+          };
+        }
+      }
       continue;
     }
     if (step?.kind === 'flex-segment') {
@@ -134,6 +204,16 @@ export function matchArticleScriptHistory(
     endCursor,
     assertionFailure: null
   };
+}
+
+function stepWithWinner(
+  spec: ArticleScriptSpec,
+  cursor: number,
+  choiceSelections: Partial<Record<number, CardId>>
+) {
+  const step = resolveArticleScriptStepAtCursor(spec, cursor, choiceSelections);
+  if (!step) return null;
+  return 'assertedWinner' in step ? step : null;
 }
 
 export function replayArticleScript(
