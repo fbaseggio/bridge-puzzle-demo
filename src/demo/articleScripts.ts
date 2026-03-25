@@ -15,7 +15,7 @@ export type ArticleScriptStep = {
 export type ArticleScriptDerivedPlayStep = {
   kind: 'derived-play';
   seat: Seat;
-  rule: 'lowest' | 'dd-min' | 'dd-max';
+  rule: 'lowest' | 'dd-min' | 'dd-max' | 'cover';
   suit?: Suit;
   branchPrefix?: string;
   assertedWinner?: Seat;
@@ -27,6 +27,7 @@ export type ArticleScriptChoiceStep = {
   seat: Seat;
   options?: CardId[];
   optionMode?: 'explicit' | 'dd-accurate';
+  branchRole?: 'authored' | 'internal' | 'none';
   suit?: Suit;
   assertedOptions?: CardId[];
   assertedSuits?: Suit[];
@@ -114,8 +115,101 @@ export const doubleDummy01Script: ArticleScriptSpec = {
       options: ['DJ', 'D4'],
       prompt: "Pick East's play"
     },
+    { kind: 'play', cardId: 'D4', branchPrefix: 'SKDJ' },
     {
-      kind: 'play', cardId: 'D4', branchPrefix: 'SKDJ' },
+      kind: 'choice',
+      seat: 'S',
+      options: ['CA', 'D8', 'D7', 'D2'],
+      branchRole: 'internal',
+      prompt: "Pick South's play",
+      branchPrefix: 'SKD4'
+    },
+    { kind: 'derived-play', seat: 'W', rule: 'lowest', branchPrefix: 'SKD4CA' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play",
+      branchPrefix: 'SKD4CA'
+    },
+    { kind: 'derived-play', seat: 'E', rule: 'lowest', branchPrefix: 'SKD4CA', assertedWinner: 'S' },
+    {
+      kind: 'choice',
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      suit: 'D',
+      prompt: "Pick South's play",
+      branchPrefix: 'SKD4CA'
+    },
+    { kind: 'derived-play', seat: 'W', rule: 'lowest', branchPrefix: 'SKD4CA' },
+    { kind: 'play', cardId: 'DA', branchPrefix: 'SKD4CA' },
+    { kind: 'derived-play', seat: 'E', rule: 'lowest', branchPrefix: 'SKD4CA', assertedWinner: 'N' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play",
+      branchPrefix: 'SKD4CA'
+    },
+    { kind: 'play', cardId: 'CK', branchPrefix: 'SKD4CA' },
+    { kind: 'play', cardId: 'C8', branchPrefix: 'SKD4CA' },
+    { kind: 'derived-play', seat: 'W', rule: 'lowest', branchPrefix: 'SKD4CA', assertedWinner: 'E' },
+    { kind: 'derived-play', seat: 'W', rule: 'lowest', branchPrefix: 'SKD4D' },
+    { kind: 'play', cardId: 'DA', branchPrefix: 'SKD4D' },
+    { kind: 'derived-play', seat: 'E', rule: 'lowest', branchPrefix: 'SKD4D', assertedWinner: 'N' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play",
+      branchPrefix: 'SKD4D'
+    },
+    { kind: 'derived-play', seat: 'E', rule: 'lowest', branchPrefix: 'SKD4D' },
+    { kind: 'play', cardId: 'CA', branchPrefix: 'SKD4D' },
+    { kind: 'derived-play', seat: 'W', rule: 'lowest', branchPrefix: 'SKD4D', assertedWinner: 'S' },
+    { kind: 'play', cardId: 'C8', branchPrefix: 'SKD4D' },
+    { kind: 'derived-play', seat: 'W', rule: 'lowest', branchPrefix: 'SKD4D' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play",
+      branchPrefix: 'SKD4D'
+    },
+    { kind: 'play', cardId: 'CK', branchPrefix: 'SKD4D', assertedWinner: 'E' },
+    { kind: 'play', cardId: 'ST', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'SJ', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'SQ', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'S4', branchPrefix: 'SKD4', assertedWinner: 'W' },
+    { kind: 'play', cardId: 'H9', branchPrefix: 'SKD4' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play",
+      branchPrefix: 'SKD4'
+    },
+    { kind: 'derived-play', seat: 'E', rule: 'cover', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'HQ', branchPrefix: 'SKD4', assertedWinner: 'S' },
+    { kind: 'play', cardId: 'DQ', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'C6', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'CQ', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'D6', branchPrefix: 'SKD4', assertedWinner: 'S' },
+    { kind: 'play', cardId: 'CT', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'C7', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'S9', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'S6', branchPrefix: 'SKD4', assertedWinner: 'S' },
+    { kind: 'play', cardId: 'S5', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'S2', branchPrefix: 'SKD4' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play",
+      branchPrefix: 'SKD4'
+    },
+    { kind: 'play', cardId: 'H6', branchPrefix: 'SKD4' },
+    { kind: 'play', cardId: 'H4', branchPrefix: 'SKD4', terminalState: 'complete' },
     {
       kind: 'choice',
       seat: 'S',
@@ -373,7 +467,41 @@ function maxChoiceContinuationLength(step: ArticleScriptChoiceStep): number {
 }
 
 function isAuthoredBranchChoice(step: ArticleScriptChoiceStep): boolean {
-  return (step.optionMode ?? 'explicit') === 'explicit';
+  return (step.optionMode ?? 'explicit') === 'explicit' && (step.branchRole ?? 'authored') === 'authored';
+}
+
+function isRouteBranchChoice(step: ArticleScriptChoiceStep): boolean {
+  if ((step.optionMode ?? 'explicit') !== 'explicit') return false;
+  return (step.branchRole ?? 'authored') !== 'none';
+}
+
+function resolveArticleScriptRouteKey(
+  spec: ArticleScriptSpec,
+  choiceSelections: Partial<Record<number, CardId>>,
+  maxCursor: number = Number.POSITIVE_INFINITY
+): string {
+  const parts: CardId[] = [];
+  const firstStep = spec.steps[0];
+  if (firstStep?.kind === 'play') parts.push(firstStep.cardId);
+  let cursor = 0;
+  for (const step of spec.steps) {
+    const routeKey = parts.join('');
+    if (!stepMatchesBranch(step, routeKey)) continue;
+    if (step.kind === 'play' || step.kind === 'derived-play') {
+      cursor += 1;
+      continue;
+    }
+    if (step.kind === 'flex-segment') {
+      cursor += step.plays;
+      continue;
+    }
+    const choiceCursor = cursor;
+    cursor += 1;
+    const selected = choiceSelections[choiceCursor];
+    if (selected && choiceCursor < maxCursor && isRouteBranchChoice(step)) parts.push(selected);
+    cursor += selected ? selectedContinuation(step, selected).length : maxChoiceContinuationLength(step);
+  }
+  return parts.join('');
 }
 
 export function resolveArticleScriptAuthoredBranchName(
@@ -386,8 +514,8 @@ export function resolveArticleScriptAuthoredBranchName(
   if (firstStep?.kind === 'play') parts.push(firstStep.cardId);
   let cursor = 0;
   for (const step of spec.steps) {
-    const branchName = parts.join('');
-    if (!stepMatchesBranch(step, branchName)) continue;
+    const routeKey = resolveArticleScriptRouteKey(spec, choiceSelections, maxCursor);
+    if (!stepMatchesBranch(step, routeKey)) continue;
     if (step.kind === 'play' || step.kind === 'derived-play') {
       cursor += 1;
       continue;
@@ -424,8 +552,8 @@ function logicalScriptCursorForStepIndex(
   for (let i = 0; i < stepIndex; i += 1) {
     const step = spec.steps[i];
     if (!step) break;
-    const branchName = resolveArticleScriptAuthoredBranchName(spec, choiceSelections);
-    if (!stepMatchesBranch(step, branchName)) continue;
+    const routeKey = resolveArticleScriptRouteKey(spec, choiceSelections);
+    if (!stepMatchesBranch(step, routeKey)) continue;
     if (step.kind === 'play' || step.kind === 'derived-play') {
       cursor += 1;
       continue;
@@ -456,8 +584,8 @@ export function resolvePendingArticleScriptChoice(
 ): ArticleScriptChoiceStep | null {
   let logicalCursor = 0;
   for (const step of spec.steps) {
-    const branchName = resolveArticleScriptAuthoredBranchName(spec, choiceSelections);
-    if (!stepMatchesBranch(step, branchName)) continue;
+    const routeKey = resolveArticleScriptRouteKey(spec, choiceSelections);
+    if (!stepMatchesBranch(step, routeKey)) continue;
     if (step.kind === 'play') {
       if (logicalCursor === cursor) return null;
       logicalCursor += 1;
@@ -493,8 +621,8 @@ export function resolveArticleScriptCardAtCursor(
 ): CardId | null {
   let logicalCursor = 0;
   for (const step of spec.steps) {
-    const branchName = resolveArticleScriptAuthoredBranchName(spec, choiceSelections);
-    if (!stepMatchesBranch(step, branchName)) continue;
+    const routeKey = resolveArticleScriptRouteKey(spec, choiceSelections);
+    if (!stepMatchesBranch(step, routeKey)) continue;
     if (step.kind === 'play') {
       if (logicalCursor === cursor) return step.cardId;
       logicalCursor += 1;
@@ -534,8 +662,8 @@ export function resolveArticleScriptStepAtCursor(
 ): ArticleScriptStep | ArticleScriptDerivedPlayStep | ArticleScriptChoiceStep | ArticleScriptFlexSegmentStep | null {
   let logicalCursor = 0;
   for (const step of spec.steps) {
-    const branchName = resolveArticleScriptAuthoredBranchName(spec, choiceSelections);
-    if (!stepMatchesBranch(step, branchName)) continue;
+    const routeKey = resolveArticleScriptRouteKey(spec, choiceSelections);
+    if (!stepMatchesBranch(step, routeKey)) continue;
     if (step.kind === 'play' || step.kind === 'derived-play') {
       if (logicalCursor === cursor) return step;
       logicalCursor += 1;

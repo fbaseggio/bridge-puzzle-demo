@@ -420,6 +420,13 @@ function resolveArticleScriptDerivedPlayCard(step: ArticleScriptDerivedPlayStep,
     });
     return step.rule === 'dd-max' ? (sortedOptions.at(-1) ?? null) : (sortedOptions[0] ?? null);
   }
+  if (step.rule === 'cover') {
+    const coverHeartTen = view.trick.some((played) => toCardId(played.suit, played.rank) === 'HT');
+    if (coverHeartTen) {
+      const jackCover = legal.find((candidate) => candidate.suit === 'H' && candidate.rank === 'J');
+      if (jackCover) return toCardId(jackCover.suit, jackCover.rank) as CardId;
+    }
+  }
   legal.sort((a, b) => {
     const rankDelta = rankStrengthForAdvance(a.rank) - rankStrengthForAdvance(b.rank);
     if (rankDelta !== 0) return rankDelta;
@@ -673,6 +680,7 @@ function explicitChoiceStepForBranch(branchName: string): ArticleScriptChoiceSte
   for (const step of articleScriptState.spec.steps) {
     if (step.kind !== 'choice') continue;
     if ((step.optionMode ?? 'explicit') !== 'explicit') continue;
+    if ((step.branchRole ?? 'authored') !== 'authored') continue;
     const stepBranch = step.branchPrefix ?? rootBranch;
     if (stepBranch === branchName) return step;
   }
@@ -699,7 +707,7 @@ function currentArticleScriptChoicePresentation():
   const pending = resolvePendingArticleScriptChoice(articleScriptState.spec, articleScriptState.cursor, matched?.choiceSelections ?? {});
   if (!pending) return null;
   const rawChoice = resolveArticleScriptChoiceOptions(pending, articleScriptState.history.slice(0, articleScriptState.cursor), articleScriptState.cursor);
-  if ((rawChoice.optionMode ?? 'explicit') !== 'explicit') {
+  if ((rawChoice.optionMode ?? 'explicit') !== 'explicit' || (rawChoice.branchRole ?? 'authored') !== 'authored') {
     return {
       choice: rawChoice,
       rawChoice,
@@ -1443,7 +1451,7 @@ function renderSettingsToggles(context: 'analysis' | 'practice' | 'widget'): HTM
     renderSettingsToggle('Autoplay E/W', autoplayEw, (checked) => {
       autoplayEw = checked;
       syncConfiguredUserControls();
-      if (autoplayEw && !trickFrozen && state.phase !== 'end' && !state.userControls.includes(state.turn)) {
+      if (autoplayEw && !trickFrozen && state.phase !== 'end' && !currentProblem.userControls.includes(state.turn)) {
         advanceAutoplayFromCurrentState();
       }
       syncSingletonAutoplay();
@@ -4114,7 +4122,7 @@ function syncSingletonAutoplay(): void {
     const scriptedChoice = pendingArticleScriptChoice();
     const canAutoplayScript =
       autoplayEw
-      && !state.userControls.includes(state.turn)
+      && !currentProblem.userControls.includes(state.turn)
       && state.phase !== 'end'
       && (!trickFrozen || canLeadDismiss)
       && (!(scriptedChoice && (scriptedChoice.optionMode ?? 'explicit') === 'explicit') || currentArticleScriptHasRememberedTail());
@@ -4126,7 +4134,7 @@ function syncSingletonAutoplay(): void {
         clearSingletonAutoplayTimer();
         singletonAutoplayKey = key;
         singletonAutoplayTimer = setTimeout(() => {
-          if (!articleScriptModeEnabled() || !autoplayEw || state.userControls.includes(state.turn) || state.phase === 'end') {
+          if (!articleScriptModeEnabled() || !autoplayEw || currentProblem.userControls.includes(state.turn) || state.phase === 'end') {
             clearSingletonAutoplayTimer();
             return;
           }
