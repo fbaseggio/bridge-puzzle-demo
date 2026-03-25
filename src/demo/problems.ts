@@ -59,7 +59,7 @@ import { listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } 
 export type DemoProblem = {
   id: string;
   label: string;
-  puzzleModeId?: 'standard' | 'single-dummy' | 'multi-ew' | 'draft';
+  puzzleModeId?: 'standard' | 'single-dummy' | 'multi-ew' | 'scripted' | 'draft';
   problem?: Problem;
   loadProblem?: () => Problem;
   variants?: DemoProblemVariant[];

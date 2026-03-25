@@ -63,11 +63,23 @@ import {
   ARTICLE_SCRIPT_NAVIGATION_MODE,
   clampArticleScriptCursor,
   resolveArticleScript,
+  resolveArticleScriptCardAtCursor,
   resolveArticleScriptCheckpoint,
+  resolveArticleScriptCheckpointEndCursor,
+  resolveArticleScriptLength,
+  resolvePendingArticleScriptChoice,
   type ArticleScriptNavigationMode,
+  type ArticleScriptChoiceStep,
   type ArticleScriptSpec
 } from './articleScripts';
-import { replayArticleScript } from './articleScriptRuntime';
+import {
+  defaultArticleScriptHistory,
+  deriveArticleScriptState,
+  replayArticleHistory,
+  replayArticleScript,
+  type ArticleScriptChoiceSelections,
+  type ArticleScriptStateId
+} from './articleScriptRuntime';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -86,12 +98,13 @@ const busyBranchingLabel: Record<'strict' | 'sameLevel' | 'allBusy', string> = {
   sameLevel: 'Same level',
   allBusy: 'All busy'
 };
-type PuzzleModeId = 'standard' | 'single-dummy' | 'multi-ew' | 'draft';
+type PuzzleModeId = 'standard' | 'single-dummy' | 'multi-ew' | 'scripted' | 'draft';
 type AssistLevelId = 'sd' | 'puzzle' | 'light' | 'guided' | 'solution';
 const PUZZLE_MODE_LABEL: Record<PuzzleModeId, string> = {
   standard: 'Double Dummy',
   'single-dummy': 'Single Dummy',
   'multi-ew': 'Multi-EW',
+  scripted: 'Scripted',
   draft: 'Draft'
 };
 const ASSIST_LEVELS_BY_MODE: Record<PuzzleModeId, Array<{ id: AssistLevelId; label: string }>> = {
@@ -110,6 +123,12 @@ const ASSIST_LEVELS_BY_MODE: Record<PuzzleModeId, Array<{ id: AssistLevelId; lab
   ],
   'multi-ew': [
     { id: 'puzzle', label: 'None' },
+    { id: 'light', label: 'Light' },
+    { id: 'guided', label: 'Guided' },
+    { id: 'solution', label: 'Solution' }
+  ],
+  scripted: [
+    { id: 'puzzle', label: 'DD' },
     { id: 'light', label: 'Light' },
     { id: 'guided', label: 'Guided' },
     { id: 'solution', label: 'Solution' }
@@ -142,6 +161,12 @@ const ASSIST_CONTROL_PRESETS: Record<PuzzleModeId, Partial<Record<AssistLevelId,
     solution: { showEw: true, cardColoring: true, alwaysHint: true, narrate: true }
   },
   'multi-ew': {
+    puzzle: { showEw: true, cardColoring: false, alwaysHint: false, narrate: false },
+    light: { showEw: true, cardColoring: true, alwaysHint: false, narrate: false },
+    guided: { showEw: true, cardColoring: true, alwaysHint: true, narrate: false },
+    solution: { showEw: true, cardColoring: true, alwaysHint: true, narrate: true }
+  },
+  scripted: {
     puzzle: { showEw: true, cardColoring: false, alwaysHint: false, narrate: false },
     light: { showEw: true, cardColoring: true, alwaysHint: false, narrate: false },
     guided: { showEw: true, cardColoring: true, alwaysHint: true, narrate: false },
@@ -372,6 +397,65 @@ function articleScriptModeEnabled(): boolean {
   return currentNavigationMode() === ARTICLE_SCRIPT_NAVIGATION_MODE;
 }
 
+function pendingArticleScriptChoice(): ArticleScriptChoiceStep | null {
+  if (!articleScriptState) return null;
+  if (currentArticleScriptStateId() !== 'in-script') return null;
+  return resolvePendingArticleScriptChoice(articleScriptState.spec, articleScriptState.cursor, articleScriptState.choiceSelections);
+}
+
+function currentArticleScriptEndCursor(): number | null {
+  if (!articleScriptState) return null;
+  return resolveArticleScriptCheckpointEndCursor(articleScriptState.spec, articleScriptState.checkpointId);
+}
+
+function currentArticleScriptStateId(): ArticleScriptStateId | null {
+  if (!articleScriptState) return null;
+  return deriveArticleScriptState(
+    articleScriptState.spec,
+    articleScriptState.checkpointId,
+    articleScriptState.history,
+    articleScriptState.cursor
+  );
+}
+
+function currentArticleScriptStateLabel(): string | null {
+  const stateId = currentArticleScriptStateId();
+  if (!stateId) return null;
+  if (stateId === 'pre-script') return 'Pre';
+  if (stateId === 'in-script') return 'In';
+  if (stateId === 'off-script') return 'Off';
+  return 'Post';
+}
+
+function currentArticleScriptReplayCard(): CardId | null {
+  if (!articleScriptState) return null;
+  if (articleScriptState.cursor < articleScriptState.history.length) {
+    return articleScriptState.history[articleScriptState.cursor] ?? null;
+  }
+  if (currentArticleScriptStateId() !== 'in-script') return null;
+  return resolveArticleScriptCardAtCursor(articleScriptState.spec, articleScriptState.cursor, articleScriptState.choiceSelections);
+}
+
+function advanceArticleScriptToNextPauseOrEnd(): void {
+  if (!articleScriptState) return;
+  const scriptState = currentArticleScriptStateId();
+  if (scriptState !== 'in-script' && scriptState !== 'pre-script') return;
+  const endCursor = currentArticleScriptEndCursor() ?? resolveArticleScriptLength(articleScriptState.spec, articleScriptState.choiceSelections);
+  let cursor = articleScriptState.cursor;
+  while (cursor < endCursor) {
+    if (resolvePendingArticleScriptChoice(articleScriptState.spec, cursor, articleScriptState.choiceSelections)) break;
+    const nextCardId = resolveArticleScriptCardAtCursor(articleScriptState.spec, cursor, articleScriptState.choiceSelections);
+    if (!nextCardId) break;
+    if (articleScriptState.cursor <= articleScriptState.history.length) {
+      articleScriptState.history = articleScriptState.history.slice(0, cursor);
+      articleScriptState.history.push(nextCardId);
+    }
+    cursor += 1;
+    if (resolvePendingArticleScriptChoice(articleScriptState.spec, cursor, articleScriptState.choiceSelections)) break;
+  }
+  replayArticleScriptToCursor(cursor);
+}
+
 function resolveProblemById(problemId: string, variantId?: string | null): ProblemWithThreats {
   const override = practiceProblemOverrides.get(problemId);
   if (override) return override;
@@ -429,15 +513,25 @@ let assistLevelByMode: Record<PuzzleModeId, AssistLevelId> = {
   standard: displayMode === 'practice' ? 'puzzle' : 'solution',
   'single-dummy': 'sd',
   'multi-ew': 'puzzle',
+  scripted: 'puzzle',
   draft: displayMode === 'practice' ? 'puzzle' : 'solution'
 };
-let articleScriptState: { spec: ArticleScriptSpec; checkpointId: string | null; initialCursor: number; cursor: number } | null =
+let articleScriptState: {
+  spec: ArticleScriptSpec;
+  checkpointId: string | null;
+  initialCursor: number;
+  cursor: number;
+  history: CardId[];
+  choiceSelections: ArticleScriptChoiceSelections;
+} | null =
   initialArticleScriptSpec
     ? {
         spec: initialArticleScriptSpec,
         checkpointId: resolveArticleScriptCheckpoint(initialArticleScriptSpec, initialArticleCheckpointIdFromUrl).id,
         initialCursor: initialArticleCursor,
-        cursor: initialArticleCursor
+        cursor: initialArticleCursor,
+        history: defaultArticleScriptHistory(initialArticleScriptSpec, initialArticleCursor),
+        choiceSelections: {}
       }
     : null;
 let alwaysHint = displayMode === 'widget';
@@ -490,7 +584,7 @@ function applyWidgetProblemDefaults(): void {
   narrate = true;
 }
 type WidgetStatusType = 'hint' | 'narration' | 'message' | 'default';
-type WidgetStatus = { type: WidgetStatusType; text: string };
+type WidgetStatus = { type: WidgetStatusType; text: string; html?: boolean };
 let widgetStatus: WidgetStatus = { type: 'default', text: '' };
 type WidgetNarrationEntry = { text: string; lines: string[]; seat: Seat | null; seq: number };
 let widgetNarrationEntries: WidgetNarrationEntry[] = [];
@@ -726,6 +820,7 @@ function currentEntryIsDraft(problemId = currentProblemId): boolean {
 }
 
 function currentPuzzleModeId(problemId = currentProblemId): PuzzleModeId {
+  if (articleScriptModeEnabled() && problemId === currentProblemId) return 'scripted';
   if (widgetUiMode === 'sd-puzzle') return 'single-dummy';
   const entry = demoProblems.find((problem) => problem.id === problemId);
   if (entry?.variants && entry.variants.length > 0) return 'multi-ew';
@@ -1564,6 +1659,127 @@ function classifyDdErrorForUserPlay(
   }
 }
 
+function rankStrengthForAdvance(rank: Rank): number {
+  return { '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, T: 10, J: 11, Q: 12, K: 13, A: 14 }[rank];
+}
+
+function chooseHintAdvanceCard(bestCards: CardId[]): CardId | null {
+  if (bestCards.length === 0) return null;
+  const suits = [...new Set(bestCards.map((cardId) => cardId[0] as Suit))].sort();
+  const key = hintPositionKey() ?? `${currentSeed}:${ddsPlayHistory.join(',')}:${state.turn}`;
+  let hash = currentSeed >>> 0;
+  for (let i = 0; i < key.length; i += 1) hash = ((hash * 33) ^ key.charCodeAt(i)) >>> 0;
+  const chosenSuit = suits[hash % suits.length] ?? suits[0];
+  const suitCards = bestCards.filter((cardId) => (cardId[0] as Suit) === chosenSuit);
+  suitCards.sort((a, b) => rankStrengthForAdvance(parseCardId(a).rank) - rankStrengthForAdvance(parseCardId(b).rank));
+  return suitCards[0] ?? null;
+}
+
+function chooseSingleDefenderAdvancePlay(): Play | null {
+  const seat = state.turn;
+  if (seat !== 'E' && seat !== 'W') return null;
+  const legal = legalPlays(state).filter((candidate) => candidate.seat === seat);
+  if (legal.length === 0) return null;
+  if (legal.length === 1) return legal[0] ?? null;
+  const policy = state.policies[seat];
+  if (!policy) return legal[0] ?? null;
+  const evaluated = evaluatePolicy({
+    policy,
+    seat,
+    problemId: currentProblem.id,
+    contractStrain: state.contract.strain,
+    hands: state.hands,
+    trick: state.trick,
+    threat: state.threat as ThreatContext | null,
+    resource: state.resource as any,
+    threatLabels: state.threatLabels as DefenderLabels | null,
+    ewVariantState: state.ewVariantState,
+    rng: state.rng
+  });
+  const chosenCardId = evaluated.chosenCardId;
+  if (!chosenCardId) return legal[0] ?? null;
+  return legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId) ?? legal[0] ?? null;
+}
+
+function advanceOneWidgetCard(): boolean {
+  if (trickFrozen) {
+    unfreezeTrick(true);
+  }
+  if (state.phase === 'end') {
+    render();
+    return false;
+  }
+  if (articleScriptModeEnabled()) {
+    const scriptedChoice = pendingArticleScriptChoice();
+    if (scriptedChoice) {
+      render();
+      return false;
+    }
+    const nextCard = currentArticleScriptReplayCard();
+    if (!nextCard || !articleScriptState) {
+      render();
+      return false;
+    }
+    articleScriptState.history = articleScriptState.history.slice(0, articleScriptState.cursor);
+    articleScriptState.history.push(nextCard);
+    replayArticleScriptToCursor(articleScriptState.cursor + 1);
+    render();
+    return true;
+  }
+
+  syncConfiguredUserControls();
+  const userTurn = state.userControls.includes(state.turn);
+  if (!userTurn) {
+    const play = chooseSingleDefenderAdvancePlay();
+    if (!play) {
+      render();
+      return false;
+    }
+    runTurn(play);
+    return true;
+  }
+
+  const hint = classifyHintForCurrentPosition();
+  if (!hint || hint.bestCards.length === 0) {
+    requestHint();
+    return false;
+  }
+  const chosenCardId = chooseHintAdvanceCard(hint.bestCards);
+  if (!chosenCardId) {
+    render();
+    return false;
+  }
+  const legal = legalPlays(state).filter((candidate) => candidate.seat === state.turn);
+  const play = legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId);
+  if (!play) {
+    render();
+    return false;
+  }
+  runTurn(play);
+  return true;
+}
+
+function advanceWidgetToNextPauseBoundary(): void {
+  if (articleScriptModeEnabled()) {
+    advanceArticleScriptToNextPauseOrEnd();
+    render();
+    return;
+  }
+  let advanced = false;
+  if (trickFrozen) {
+    unfreezeTrick(true);
+    advanced = true;
+  }
+  const guard = 32;
+  for (let i = 0; i < guard; i += 1) {
+    if (state.phase === 'end') break;
+    const moved = advanceOneWidgetCard();
+    advanced = advanced || moved;
+    if (!moved || trickFrozen) break;
+  }
+  if (!advanced) render();
+}
+
 function encodeUserHistoryForUrl(history: CardId[]): string {
   return history.map((card) => `${card[0]}${card.slice(1) === 'T' ? '10' : card.slice(1)}`).join('.');
 }
@@ -1806,7 +2022,11 @@ function withHintPrompt(text: string, view: State): string {
     state.userControls.includes(view.turn) &&
     (!trickFrozen || canLeadDismiss) &&
     (displayMode === 'practice' || isWidgetShellMode);
-  return shouldPrompt ? `${text} Press 💡 for hint` : text;
+  if (!shouldPrompt) return text;
+  if (displayMode === 'practice' && practiceSession?.solutionMode) {
+    return `${text} Press 💡 for hint or > to advance one card`;
+  }
+  return `${text} Press 💡 for hint`;
 }
 
 function positionEncapsulationForLog(view: State): string {
@@ -3759,6 +3979,28 @@ function runTurn(play: Play): void {
   clearSingletonAutoplayTimer();
   clearHint();
   clearWidgetMessage();
+  const scriptedChoice = pendingArticleScriptChoice();
+  const articleScriptStateId = currentArticleScriptStateId();
+  if (scriptedChoice) {
+    const chosenCardId = toCardId(play.suit, play.rank) as CardId;
+    if (play.seat !== scriptedChoice.seat || !scriptedChoice.options.includes(chosenCardId)) return;
+    const choiceMessage = scriptedChoice.choiceMessages?.[chosenCardId];
+    if (articleScriptState) {
+      articleScriptState.history = articleScriptState.history.slice(0, articleScriptState.cursor);
+      articleScriptState.history.push(chosenCardId);
+      articleScriptState.choiceSelections[articleScriptState.cursor] = chosenCardId;
+      articleScriptState.cursor = clampArticleScriptCursor(articleScriptState.spec, articleScriptState.cursor + 1);
+    }
+    if (choiceMessage) widgetStatus = { type: 'message', text: choiceMessage, html: true };
+  } else if (articleScriptState) {
+    const chosenCardId = toCardId(play.suit, play.rank) as CardId;
+    articleScriptState.history = articleScriptState.history.slice(0, articleScriptState.cursor);
+    articleScriptState.history.push(chosenCardId);
+    articleScriptState.cursor = articleScriptState.history.length;
+    if (articleScriptStateId === 'in-script' && articleScriptState.cursor <= (currentArticleScriptEndCursor() ?? resolveArticleScriptLength(articleScriptState.spec, articleScriptState.choiceSelections))) {
+      delete articleScriptState.choiceSelections[articleScriptState.cursor - 1];
+    }
+  }
   if (state.replay.enabled && state.replay.transcript && (play.seat === 'N' || play.seat === 'S')) {
     const playId = toCardId(play.suit, play.rank) as CardId;
     const actualClass = getImmutableUserEqClass(play.seat, playId);
@@ -4299,7 +4541,8 @@ function renderSuitRow(
   legalSet: Set<string>,
   canAct: boolean,
   hintBestSet: Set<CardId>,
-  ddErrorGoodSet: Set<CardId>
+  ddErrorGoodSet: Set<CardId>,
+  scriptedNextSet: Set<CardId>
 ): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'suit-row';
@@ -4338,6 +4581,7 @@ function renderSuitRow(
         rankBtn.type = 'button';
         rankBtn.className = 'rank-text legal';
         if (hintBestSet.has(cardId)) rankBtn.classList.add('hint-best');
+        if (scriptedNextSet.has(cardId)) rankBtn.classList.add('script-next');
         if (ddErrorGoodSet.has(cardId)) rankBtn.classList.add('dd-error-good');
         if ((pulseUntilByCardKey.get(cardPulseKey(seat, cardId)) ?? 0) > Date.now()) {
           rankBtn.classList.add('card-pulse');
@@ -4348,6 +4592,7 @@ function renderSuitRow(
       } else {
         const rankEl = document.createElement('span');
         rankEl.className = 'rank-text muted';
+        if (scriptedNextSet.has(cardId)) rankEl.classList.add('script-next');
         if (ddErrorGoodSet.has(cardId)) rankEl.classList.add('dd-error-good');
         if ((pulseUntilByCardKey.get(cardPulseKey(seat, cardId)) ?? 0) > Date.now()) {
           rankEl.classList.add('card-pulse');
@@ -4398,6 +4643,8 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   const canAct = !trickFrozen && !startBlocked && view.phase !== 'end' && view.userControls.includes(seat) && active;
   const hintBestSet = new Set<CardId>();
   const ddErrorGoodSet = new Set<CardId>();
+  const scriptedChoiceBestSet = new Set<CardId>();
+  const scriptedNextSet = new Set<CardId>();
 
   if (trickFrozen && canLeadDismiss && state.userControls.includes(state.turn) && seat === state.turn) {
     const leadLegal = legalPlays(state);
@@ -4416,13 +4663,24 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   if (ddErrorVisual && ddErrorVisual.seat === seat) {
     for (const card of ddErrorVisual.goodCards) ddErrorGoodSet.add(card);
   }
+  const scriptedChoice = pendingArticleScriptChoice();
+  if (scriptedChoice && scriptedChoice.seat === seat && seat === view.turn) {
+    for (const card of scriptedChoice.options) scriptedChoiceBestSet.add(card);
+  }
+  const scriptedNextCard = currentArticleScriptReplayCard();
+  if (!scriptedChoice && scriptedNextCard && seat === view.turn) {
+    scriptedNextSet.add(scriptedNextCard);
+  }
 
   for (const suit of suitOrder) {
     const displayRanks =
       versionUnknownModeEnabled() && (seat === 'E' || seat === 'W')
         ? fixedRanksForSeatSuit(view.ewVariantState, seat, suit)
         : sortRanksDesc(view.hands[seat][suit]);
-    content.appendChild(renderSuitRow(view, seat, suit, displayRanks, legalSet, effectiveCanAct, hintBestSet, ddErrorGoodSet));
+    const effectiveLegalSet = scriptedChoiceBestSet.size > 0 ? scriptedChoiceBestSet : legalSet;
+    const effectiveHintBestSet = new Set<CardId>([...hintBestSet, ...scriptedChoiceBestSet]);
+    const effectiveScriptNextSet = new Set<CardId>([...scriptedNextSet]);
+    content.appendChild(renderSuitRow(view, seat, suit, displayRanks, effectiveLegalSet, effectiveCanAct, effectiveHintBestSet, ddErrorGoodSet, effectiveScriptNextSet));
   }
 
   if (seat === 'W') {
@@ -4478,27 +4736,40 @@ function renderBoardMeta(view: State): HTMLElement {
     }
   }
 
-  const strainLine = document.createElement('div');
-  strainLine.className = 'board-meta-line';
-  strainLine.appendChild(document.createTextNode('Strain: '));
-  const strainValue = document.createElement('span');
-  strainValue.className = `board-meta-strain${view.contract.strain === 'NT' ? '' : ` suit-${view.contract.strain}`}`;
-  strainValue.textContent = formatStrainText(view.contract.strain);
-  strainLine.appendChild(strainValue);
-  meta.appendChild(strainLine);
+  const initialTricksInDeal = seatOrder
+    .filter((seat) => seat === 'N' || seat === 'S')
+    .map((seat) => suitOrder.reduce((sum, suit) => sum + currentProblem.hands[seat][suit].length, 0))
+    .reduce((max, count) => Math.max(max, count), 0);
+  const showContractLine = view.goal.type === 'minTricks' && initialTricksInDeal === 13;
 
-  const goalLine = document.createElement('div');
-  goalLine.className = 'board-meta-line';
-  if (view.goal.type === 'minTricks') {
-    const initialTricksInDeal = seatOrder
-      .filter((seat) => seat === 'N' || seat === 'S')
-      .map((seat) => suitOrder.reduce((sum, suit) => sum + currentProblem.hands[seat][suit].length, 0))
-      .reduce((max, count) => Math.max(max, count), 0);
-    goalLine.textContent = `Goal: ${view.goal.n}/${initialTricksInDeal}`;
+  if (showContractLine) {
+    const contractLine = document.createElement('div');
+    contractLine.className = 'board-meta-line';
+    contractLine.appendChild(document.createTextNode('Contract: '));
+    const levelValue = document.createElement('span');
+    levelValue.className = `board-meta-strain${view.contract.strain === 'NT' ? '' : ` suit-${view.contract.strain}`}`;
+    levelValue.textContent = `${Math.max(0, view.goal.n - 6)}${formatStrainText(view.contract.strain)}`;
+    contractLine.appendChild(levelValue);
+    meta.appendChild(contractLine);
   } else {
-    goalLine.textContent = `Goal: ${formatGoal(view)}`;
+    const strainLine = document.createElement('div');
+    strainLine.className = 'board-meta-line';
+    strainLine.appendChild(document.createTextNode('Strain: '));
+    const strainValue = document.createElement('span');
+    strainValue.className = `board-meta-strain${view.contract.strain === 'NT' ? '' : ` suit-${view.contract.strain}`}`;
+    strainValue.textContent = formatStrainText(view.contract.strain);
+    strainLine.appendChild(strainValue);
+    meta.appendChild(strainLine);
+
+    const goalLine = document.createElement('div');
+    goalLine.className = 'board-meta-line';
+    if (view.goal.type === 'minTricks') {
+      goalLine.textContent = `Goal: ${view.goal.n}/${initialTricksInDeal}`;
+    } else {
+      goalLine.textContent = `Goal: ${formatGoal(view)}`;
+    }
+    meta.appendChild(goalLine);
   }
-  meta.appendChild(goalLine);
 
   const tricksLine = document.createElement('div');
   tricksLine.className = 'board-meta-line';
@@ -4602,12 +4873,15 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
 
   const sourceTrick = trickFrozen && lastCompletedTrick ? lastCompletedTrick : view.trick;
   const bySeat = new Map(sourceTrick.map((p) => [p.seat, p] as const));
+  const resolvedWinner = trickFrozen && lastCompletedTrick ? view.turn : null;
 
   for (const seat of seatOrder) {
     const slot = document.createElement('div');
     slot.className = `trick-slot slot-${seat}`;
     const play = bySeat.get(seat);
     if (play) {
+      if (resolvedWinner === seat) slot.classList.add('resolved-winner');
+      else if (resolvedWinner) slot.classList.add('resolved-nonwinner');
       const text = document.createElement('span');
       text.className = 'played-text';
       const regularDisplay = buildRegularPlayedCardDisplay(view, play, teachingMode, cardColoringEnabled);
@@ -4902,6 +5176,14 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   section.className = `board-navigation-area mode-${displayMode}${showGuides ? ' show-guides' : ''}`;
   const practicePuzzleMode = displayMode === 'practice' && !!practiceSession && !practiceSession.solutionMode;
   const warningStatusActive = inevitableFailureAlert && runStatus !== 'success' && runStatus !== 'failure';
+  const scriptedChoice = pendingArticleScriptChoice();
+  const widgetArticleScript = displayMode === 'widget' ? articleScriptState : null;
+  const articleScriptEndCursor = widgetArticleScript ? currentArticleScriptEndCursor() ?? resolveArticleScriptLength(widgetArticleScript.spec, widgetArticleScript.choiceSelections) : null;
+  const articleScriptAtCheckpointStart = widgetArticleScript ? widgetArticleScript.cursor <= widgetArticleScript.initialCursor : false;
+  const articleScriptAtAbsoluteStart = widgetArticleScript ? widgetArticleScript.cursor === 0 : false;
+  const articleScriptAtEnd = widgetArticleScript && articleScriptEndCursor !== null ? widgetArticleScript.cursor >= articleScriptEndCursor : false;
+  const articleScriptStateLabel = widgetArticleScript ? currentArticleScriptStateLabel() : null;
+  const scriptedPrefix = articleScriptStateLabel ? `${articleScriptStateLabel} · ` : '';
 
   const outcome = document.createElement('div');
   outcome.className = `outcome-module ${runStatus === 'success' ? 'ok' : runStatus === 'failure' ? 'fail' : warningStatusActive ? 'warn' : 'neutral'}`;
@@ -4953,14 +5235,24 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     if (widgetStatus.type === 'hint') {
       widgetStatus = { type: 'default', text: '' };
     }
-    if (narrate && widgetNarrationLatest?.text) {
+    if (!widgetArticleScript && narrate && widgetNarrationLatest?.text) {
       widgetStatus = { type: 'narration', text: widgetNarrationLatest.text };
-    } else if (!narrate && widgetStatus.type === 'narration') {
+    } else if ((!narrate || widgetArticleScript) && widgetStatus.type === 'narration') {
       widgetStatus = { type: 'default', text: '' };
     }
-    if (widgetStatus.type === 'narration' && widgetStatus.text) {
-      outcome.textContent = widgetStatus.text;
+    if (widgetArticleScript && scriptedChoice?.prompt) {
+      outcome.textContent = `${scriptedPrefix}${scriptedChoice.prompt}`;
     } else if (widgetStatus.type === 'message' && widgetStatus.text) {
+      outcome.classList.add('article-script-message');
+      if (widgetStatus.html) outcome.innerHTML = widgetStatus.text;
+      else outcome.textContent = widgetStatus.text;
+    } else if (widgetArticleScript && articleScriptStateLabel) {
+      if (state.userControls.includes(view.turn) && (!trickFrozen || canLeadDismiss)) {
+        outcome.textContent = `${scriptedPrefix}${withHintPrompt(`${seatName[view.turn]} to play.`, view)}`;
+      } else {
+        outcome.textContent = articleScriptStateLabel;
+      }
+    } else if (widgetStatus.type === 'narration' && widgetStatus.text) {
       outcome.textContent = widgetStatus.text;
     } else if (state.userControls.includes(view.turn) && (!trickFrozen || canLeadDismiss)) {
       outcome.textContent = withHintPrompt(`${seatName[view.turn]} to play.`, view);
@@ -4970,6 +5262,14 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   } else {
     if (terminalCanonical) {
       outcome.textContent = canonicalStatus;
+    } else if (scriptedChoice?.prompt) {
+      outcome.textContent = `${scriptedPrefix}${scriptedChoice.prompt}`;
+    } else if (articleScriptStateLabel) {
+      if (state.userControls.includes(view.turn) && (!trickFrozen || canLeadDismiss)) {
+        outcome.textContent = `${scriptedPrefix}${withHintPrompt(`${seatName[view.turn]} to play.`, view)}`;
+      } else {
+        outcome.textContent = articleScriptStateLabel;
+      }
     } else if (state.userControls.includes(view.turn) && (!trickFrozen || canLeadDismiss)) {
       outcome.textContent = withHintPrompt(`${seatName[view.turn]} to play.`, view);
     } else {
@@ -4980,14 +5280,18 @@ function renderBoardNavigationArea(view: State): HTMLElement {
 
   const transport = document.createElement('div');
   transport.className = `transport-bar mode-${displayMode}`;
-  const widgetArticleScript = displayMode === 'widget' ? articleScriptState : null;
+  const widgetTransport = isWidgetShellMode;
+  const practiceAdvanceTransport = displayMode === 'practice';
+  const compactAdvanceTransport = widgetTransport || practiceAdvanceTransport;
 
   const restartBtn = document.createElement('button');
   restartBtn.type = 'button';
-  restartBtn.textContent = isWidgetShellMode ? '⏮' : 'Restart';
+  restartBtn.textContent = widgetTransport ? '|<<' : 'Restart';
   restartBtn.title = 'Restart';
   restartBtn.setAttribute('aria-label', 'Restart');
   if (isWidgetShellMode) restartBtn.classList.add('icon-btn');
+  if (widgetTransport) restartBtn.classList.add('script-transport-btn');
+  if (widgetArticleScript) restartBtn.disabled = widgetArticleScript.cursor === widgetArticleScript.initialCursor;
   restartBtn.onclick = () => {
     if (widgetArticleScript) {
       resetToCurrentArticleCheckpoint();
@@ -5000,15 +5304,16 @@ function renderBoardNavigationArea(view: State): HTMLElement {
 
   const undoBtn = document.createElement('button');
   undoBtn.type = 'button';
-  undoBtn.textContent = isWidgetShellMode ? '↩' : 'Undo';
+  undoBtn.textContent = widgetTransport ? '<' : 'Undo';
   undoBtn.title = 'Undo';
   undoBtn.setAttribute('aria-label', 'Undo');
   if (isWidgetShellMode) undoBtn.classList.add('icon-btn', 'undo-btn');
-  if (widgetArticleScript) undoBtn.disabled = widgetArticleScript.cursor === 0;
+  if (widgetTransport) undoBtn.classList.add('script-transport-btn');
+  if (widgetArticleScript) undoBtn.disabled = articleScriptAtAbsoluteStart;
   else if (!isWidgetShellMode) undoBtn.disabled = undoStack.length === 0;
   undoBtn.onclick = () => {
     if (widgetArticleScript) {
-      replayArticleScriptToCursor(widgetArticleScript.cursor - 1);
+      replayArticleScriptToCursor(Math.max(0, widgetArticleScript.cursor - 1));
       render();
       return;
     }
@@ -5017,19 +5322,42 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   };
   transport.appendChild(undoBtn);
 
-  if (widgetArticleScript) {
+  if (compactAdvanceTransport) {
     const forwardBtn = document.createElement('button');
     forwardBtn.type = 'button';
-    forwardBtn.textContent = '⏭';
+    forwardBtn.textContent = '>';
     forwardBtn.title = 'Forward';
     forwardBtn.setAttribute('aria-label', 'Forward');
     forwardBtn.classList.add('icon-btn');
-    forwardBtn.disabled = widgetArticleScript.cursor >= widgetArticleScript.spec.steps.length;
+    forwardBtn.classList.add('script-transport-btn');
+    forwardBtn.disabled = widgetArticleScript
+      ? articleScriptAtEnd || scriptedChoice !== null || (!currentArticleScriptReplayCard() && currentArticleScriptStateId() !== 'in-script' && currentArticleScriptStateId() !== 'pre-script')
+      : practiceAdvanceTransport && !practiceSession?.solutionMode
+        ? true
+      : state.phase === 'end' && !trickFrozen;
     forwardBtn.onclick = () => {
-      replayArticleScriptToCursor(widgetArticleScript.cursor + 1);
-      render();
+      if (practiceAdvanceTransport && !practiceSession?.solutionMode) return;
+      advanceOneWidgetCard();
     };
     transport.appendChild(forwardBtn);
+
+    const jumpBtn = document.createElement('button');
+    jumpBtn.type = 'button';
+    jumpBtn.textContent = '>>|';
+    jumpBtn.title = 'Advance to end';
+    jumpBtn.setAttribute('aria-label', 'Advance to end');
+    jumpBtn.classList.add('icon-btn');
+    jumpBtn.classList.add('script-transport-btn');
+    jumpBtn.disabled = widgetArticleScript
+      ? (currentArticleScriptStateId() !== 'in-script' && currentArticleScriptStateId() !== 'pre-script') || articleScriptAtEnd
+      : practiceAdvanceTransport && !practiceSession?.solutionMode
+        ? true
+      : state.phase === 'end' && !trickFrozen;
+    jumpBtn.onclick = () => {
+      if (practiceAdvanceTransport && !practiceSession?.solutionMode) return;
+      advanceWidgetToNextPauseBoundary();
+    };
+    transport.appendChild(jumpBtn);
   }
 
   if (displayMode === 'analysis') {
@@ -5468,9 +5796,9 @@ function launchStartSequence(): void {
 
 function replayArticleScriptToCursor(cursor: number): void {
   if (!articleScriptState) return;
-  const bounded = clampArticleScriptCursor(articleScriptState.spec, cursor);
+  const bounded = Math.max(0, Math.min(cursor, articleScriptState.history.length));
   articleScriptState.cursor = bounded;
-  const replayed = replayArticleScript(withDdSource(currentProblem), articleScriptState.spec, bounded, currentSeed);
+  const replayed = replayArticleHistory(withDdSource(currentProblem), articleScriptState.history, bounded, currentSeed);
   state = replayed.state;
   syncConfiguredUserControls();
   resetSemanticStreams();
@@ -5487,6 +5815,50 @@ function replayArticleScriptToCursor(cursor: number): void {
   unfreezeTrick(false);
   runStatus = 'running';
   runPlayCounter = bounded;
+  let frozenShadowForReplay: State | null = null;
+  let completedTrickForReplay: Play[] | null = null;
+  let replayCanLeadDismiss = false;
+  if (bounded > 0) {
+    let semanticReplayState = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+    semanticReplayState.userControls = ['N', 'E', 'S', 'W'];
+    for (let i = 0; i < bounded; i += 1) {
+      const expectedCardId = articleScriptState.history[i];
+      if (!expectedCardId) break;
+      const legal = legalPlays(semanticReplayState).filter((p) => p.seat === semanticReplayState.turn);
+      const play = legal.find((p) => (toCardId(p.suit, p.rank) as CardId) === expectedCardId);
+      if (!play) break;
+      const before = semanticReplayState;
+      const result = apply({ ...semanticReplayState, userControls: ['N', 'E', 'S', 'W'] }, play, { eventCollector: semanticCollector });
+      semanticReplayState = result.state;
+      semanticReplayState.userControls = ['N', 'E', 'S', 'W'];
+      if (i === bounded - 1) {
+        const trickCompleteIndex = result.events.findIndex((event) => event.type === 'trickComplete');
+        if (trickCompleteIndex >= 0) {
+          const visibleEvents = result.events.slice(0, trickCompleteIndex + 1);
+          const visibleShadow = cloneStateForLog(before);
+          for (const event of visibleEvents) applyEventToShadow(visibleShadow, event);
+          frozenShadowForReplay = visibleShadow;
+          const trickEvent = visibleEvents[visibleEvents.length - 1];
+          if (trickEvent.type === 'trickComplete') {
+            completedTrickForReplay = trickEvent.trick.map((p) => ({ ...p }));
+          }
+          replayCanLeadDismiss =
+            semanticReplayState.phase !== 'end'
+            && semanticReplayState.trick.length === 0
+            && semanticReplayState.userControls.includes(semanticReplayState.turn);
+        }
+      }
+    }
+    semanticCollector.clear();
+    rawSemanticReducer.reset();
+    teachingReducer.clearEntries();
+  }
+  if (frozenShadowForReplay && completedTrickForReplay) {
+    trickFrozen = true;
+    frozenViewState = frozenShadowForReplay;
+    lastCompletedTrick = completedTrickForReplay;
+    canLeadDismiss = replayCanLeadDismiss;
+  }
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
   refreshThreatModel(currentProblemId, false);
@@ -5494,6 +5866,10 @@ function replayArticleScriptToCursor(cursor: number): void {
 
 function resetToCurrentArticleCheckpoint(): void {
   if (!articleScriptState) return;
+  for (const key of Object.keys(articleScriptState.choiceSelections)) {
+    if (Number(key) >= articleScriptState.initialCursor) delete articleScriptState.choiceSelections[Number(key)];
+  }
+  articleScriptState.history = defaultArticleScriptHistory(articleScriptState.spec, articleScriptState.initialCursor);
   replayArticleScriptToCursor(articleScriptState.initialCursor);
 }
 
@@ -5505,5 +5881,5 @@ if (articleScriptModeEnabled()) {
   resetToCurrentArticleCheckpoint();
 }
 replayInitialUserHistoryIfPresent();
-warmDdsRuntime();
+if (!articleScriptModeEnabled()) warmDdsRuntime();
 render();

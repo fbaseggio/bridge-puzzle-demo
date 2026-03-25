@@ -68,24 +68,29 @@ function cardWithRole(card: string, role: string | undefined): string {
   return shown;
 }
 
-function summarizePlayVerb(fact: TeachingFact, cardText: string, plainCardText: string): string {
+function summarizePlayVerb(fact: TeachingFact, cardText: string, plainCardText: string, trumpSuit: Suit | null): string {
   const position = fact.trickPosition ?? 0;
   const iWTT = fact.inevitablyWinningThisTrick === true;
+  const cardSuit = fact.card?.[0] as Suit | undefined;
   if (position === 1) {
     if (iWTT && fact.role === 'promotedWinner') return `cashes promoted ${plainCardText}.`;
     return iWTT ? `cashes ${cardText}.` : `leads ${cardText}.`;
   }
   if (position >= 2 && position <= 4) {
-    if (iWTT) return `wins ${cardText}.`;
     if (fact.followsSuit === true) return `follows with ${cardText}.`;
-    if (fact.followsSuit === false) return `discards ${cardText}.`;
+    if (fact.followsSuit === false) {
+      if (trumpSuit && cardSuit === trumpSuit) return `ruffs with ${cardText}.`;
+      return `discards ${cardText}.`;
+    }
+    if (iWTT) return `wins ${cardText}.`;
   }
   const bucket = fact.bucket;
-  if (bucket === 'preferred') return `discards ${cardText}.`;
-  if (bucket?.startsWith('tier1')) return `discards ${cardText}.`;
-  if (bucket === 'tier2') return `discards ${cardText}.`;
-  if (bucket?.startsWith('tier3') || bucket?.startsWith('tier4')) return `discards ${cardText}.`;
-  if (bucket?.startsWith('tier5')) return `discards ${cardText}.`;
+  const discardVerb = trumpSuit && cardSuit === trumpSuit ? `ruffs with ${cardText}.` : `discards ${cardText}.`;
+  if (bucket === 'preferred') return discardVerb;
+  if (bucket?.startsWith('tier1')) return discardVerb;
+  if (bucket === 'tier2') return discardVerb;
+  if (bucket?.startsWith('tier3') || bucket?.startsWith('tier4')) return discardVerb;
+  if (bucket?.startsWith('tier5')) return discardVerb;
   return `plays ${cardText}.`;
 }
 
@@ -207,9 +212,15 @@ function formatEffect(fact: TeachingFact): string | null {
 export class TeachingReducer implements SemanticReducer {
   private readonly entries: TeachingEntry[] = [];
   private readonly builder = new ExplanationBuilder();
+  private trumpSuit: Suit | null = null;
 
   setTrumpSuit(trumpSuit: Suit | null): void {
+    this.trumpSuit = trumpSuit;
     this.builder.setTrumpSuit(trumpSuit);
+  }
+
+  clearEntries(): void {
+    this.entries.length = 0;
   }
 
   apply(event: SemanticEvent): void {
@@ -220,8 +231,8 @@ export class TeachingReducer implements SemanticReducer {
         const shownCard = cardWithRole(fact.card, fact.role);
         let summary =
           fact.source === 'user'
-            ? `${actor} ${summarizePlayVerb(fact, prettyCard(fact.card), prettyCard(fact.card))}`
-            : `${actor} ${summarizePlayVerb(fact, shownCard, prettyCard(fact.card))}`;
+            ? `${actor} ${summarizePlayVerb(fact, prettyCard(fact.card), prettyCard(fact.card), this.trumpSuit)}`
+            : `${actor} ${summarizePlayVerb(fact, shownCard, prettyCard(fact.card), this.trumpSuit)}`;
         if (fact.source === 'user' && fact.ddError) summary = `${summary} DD Error.`;
         this.entries.push({
           seq: fact.seq,

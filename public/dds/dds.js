@@ -10,17 +10,36 @@
  *   <script src="dds.js"></script>
  */
 (function() {
-var _solveBoard = Module.cwrap('solve',
-                              'string',
-                              ['string', 'string', 'number', 'number']);
-var _calcDDTable = Module.cwrap('generateDDTable', 'string', ['string']);
+var _solveBoard = null;
+var _calcDDTable = null;
+
+function runtimeModule() {
+  return globalThis.e || globalThis.Module || Module;
+}
+
+function solveBoardFn() {
+  if (!_solveBoard) {
+    _solveBoard = runtimeModule().cwrap('solve',
+                                        'string',
+                                        ['string', 'string', 'number', 'number']);
+  }
+  return _solveBoard;
+}
+
+function calcDDTableFn() {
+  if (!_calcDDTable) {
+    _calcDDTable = runtimeModule().cwrap('generateDDTable', 'string', ['string']);
+  }
+  return _calcDDTable;
+}
 
 var SUITS = {'S': 0, 'H': 1, 'D': 2, 'C': 3};
 var RANKS = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
              '7': 7, '8': 8, '9': 9, 'T': 10, 'J': 11,
              'Q': 12, 'K': 13, 'A': 14};
 function packPlays(plays) {
-  var buf = Module._malloc(8 * plays.length);
+  var module = runtimeModule();
+  var buf = module._malloc(8 * plays.length);
   for (var i = 0; i < plays.length; i++) {
     var p = plays[i];
     if (p.length != 2) {
@@ -28,8 +47,8 @@ function packPlays(plays) {
     }
     var suit = SUITS[p[1]],
         rank = RANKS[p[0]];
-    Module.setValue(buf + i * 8, suit, 'i32');
-    Module.setValue(buf + i * 8 + 4, rank, 'i32');
+    module.setValue(buf + i * 8, suit, 'i32');
+    module.setValue(buf + i * 8 + 4, rank, 'i32');
   }
   return buf;
 }
@@ -47,7 +66,7 @@ function nextPlays(board, trump, plays) {
 
   console.time('SolveBoard');
   var playsPtr = packPlays(plays);
-  var o = JSON.parse(_solveBoard(board, trump, plays.length, playsPtr));
+  var o = JSON.parse(solveBoardFn()(board, trump, plays.length, playsPtr));
   console.timeEnd('SolveBoard');
   // ... free(playsPtr)
   nextPlays.cache[cacheKey] = o;
@@ -65,7 +84,7 @@ function calcDDTable(board) {
   var v = calcDDTable.cache[board];
   if (v) return v;
   console.time('CalcDDTable');
-  v = JSON.parse(_calcDDTable(board));
+  v = JSON.parse(calcDDTableFn()(board));
   console.timeEnd('CalcDDTable');
   calcDDTable.cache[board] = v;
   return v;

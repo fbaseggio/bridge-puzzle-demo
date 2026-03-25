@@ -30,6 +30,28 @@ let loadAttempted = false;
 const scriptLoadBySrc = new Map<string, Promise<void>>();
 let ddsRuntimeStatus: 'idle' | 'loading' | 'ready' | 'failed' = 'idle';
 let ddsRuntimePromise: Promise<boolean> | null = null;
+const DDS_TOTAL_MEMORY = 64 * 1024 * 1024;
+
+function resetDdsRuntimeState(): void {
+  ddsRuntimePromise = null;
+  ddsRuntimeStatus = 'idle';
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  delete window.nextPlays;
+  delete window.e;
+  window.Module = { TOTAL_MEMORY: DDS_TOTAL_MEMORY };
+  for (const script of Array.from(document.querySelectorAll('script[data-dds-src]'))) script.remove();
+  scriptLoadBySrc.clear();
+}
+
+function ensureModuleGlobalBinding(): void {
+  if (typeof document === 'undefined') return;
+  const existing = document.querySelector('script[data-dds-module-bridge="1"]');
+  if (existing) return;
+  const bridge = document.createElement('script');
+  bridge.dataset.ddsModuleBridge = '1';
+  bridge.text = 'var Module = globalThis.Module || globalThis.e || {}; globalThis.Module = Module;';
+  document.head.appendChild(bridge);
+}
 
 function rotateSeatsFromLeader(leader: Seat): Seat[] {
   const idx = SEAT_ORDER.indexOf(leader);
@@ -59,6 +81,7 @@ function toDdsPlay(cardId: string): string {
 function startDdsRuntimeLoad(): Promise<boolean> {
   if (typeof window === 'undefined') return Promise.resolve(false);
   if (ddsRuntimeStatus === 'ready') return Promise.resolve(true);
+  if (ddsRuntimeStatus === 'failed') resetDdsRuntimeState();
   if (ddsRuntimePromise) return ddsRuntimePromise;
   loadAttempted = true;
   ddsRuntimeStatus = 'loading';
@@ -67,9 +90,13 @@ function startDdsRuntimeLoad(): Promise<boolean> {
   const ddsSrc = `${base}dds/dds.js`;
   console.info(`[DDS-LOAD] start base=${base}`);
   if (!window.Module) {
-    window.Module = {};
+    window.Module = { TOTAL_MEMORY: DDS_TOTAL_MEMORY };
     console.info('[DDS-LOAD] initialized window.Module');
+  } else if (typeof window.Module.TOTAL_MEMORY !== 'number') {
+    window.Module.TOTAL_MEMORY = DDS_TOTAL_MEMORY;
+    console.info(`[DDS-LOAD] set window.Module.TOTAL_MEMORY=${DDS_TOTAL_MEMORY}`);
   }
+  ensureModuleGlobalBinding();
 
   const loadScript = (src: string): Promise<void> => {
     const existing = scriptLoadBySrc.get(src);
@@ -89,7 +116,7 @@ function startDdsRuntimeLoad(): Promise<boolean> {
 
       const script = document.createElement('script');
       script.src = src;
-      script.async = true;
+      script.async = false;
       script.dataset.ddsSrc = src;
       script.onload = () => {
         script.dataset.ddsLoaded = '1';
@@ -111,6 +138,7 @@ function startDdsRuntimeLoad(): Promise<boolean> {
     .then(() => {
       if (window.e && typeof window.e === 'object') {
         window.Module = window.e;
+        ensureModuleGlobalBinding();
         console.info('[DDS-LOAD] aliased window.Module <- window.e');
       } else {
         console.info('[DDS-LOAD] window.e missing after out.js load');
@@ -127,6 +155,7 @@ function startDdsRuntimeLoad(): Promise<boolean> {
     .catch(() => {
       console.info('[DDS-LOAD] optional runtime unavailable');
       ddsRuntimeStatus = 'failed';
+      ddsRuntimePromise = null;
       return false;
     });
   return ddsRuntimePromise;

@@ -27,6 +27,28 @@ function replayWithDdFlags(problem: Problem, plays: Array<{ cardId: string; ddEr
 }
 
 describe('teaching DD-error narration', () => {
+  it('uses "ruffs with" when a player discards in the trump suit', () => {
+    const problem: Problem = {
+      id: 'ruff-wording',
+      contract: { strain: 'H' },
+      leader: 'N',
+      userControls: ['N', 'E', 'S', 'W'],
+      goal: { type: 'minTricks', side: 'NS', n: 1 },
+      hands: {
+        N: { S: ['2'], H: [], D: [], C: [] },
+        E: { S: ['3'], H: [], D: [], C: [] },
+        S: { S: ['4'], H: [], D: [], C: [] },
+        W: { S: [], H: ['2'], D: [], C: [] }
+      },
+      policies: {},
+      rngSeed: 1
+    };
+
+    const summaries = replayWithDdFlags(problem, [{ cardId: 'S2' }, { cardId: 'S3' }, { cardId: 'S4' }, { cardId: 'H2' }]);
+
+    expect(summaries.at(-1)).toBe('West ruffs with ♥2.');
+  });
+
   it('can mark the same user play as a DD error in both concrete sure-tricks variants', () => {
     const entry = demoProblems.find((problem) => problem.id === 'sure_tricks_demo');
     expect(entry).toBeTruthy();
