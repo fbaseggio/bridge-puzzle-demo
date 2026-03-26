@@ -1553,6 +1553,9 @@ html.mode-widget {
 
 .hand-diagram-nav-slot {
   position: relative;
+  display: grid;
+  gap: 10px;
+  justify-items: center;
   width: calc(var(--hand-box-w) * 2 + var(--trick-box-w) + var(--table-gap-x, 8px) * 2);
   min-height: 58px;
   overflow: visible;

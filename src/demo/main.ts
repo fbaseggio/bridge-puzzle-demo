@@ -101,6 +101,8 @@ import {
   shouldBlockArticleScriptUserAdvance
 } from './articleScriptInteractionPolicy';
 import {
+  clearNarration as clearSessionNarration,
+  clearNarrationFeed,
   clearDismissedOutcomeIfChanged,
   clearFollowPrompt,
   clearMessage,
@@ -110,8 +112,16 @@ import {
   resetArticleScriptTracking,
   resetReadingReveal,
   setMessage,
+  type HandDiagramNarrationEntry,
   type HandDiagramStatus
 } from './handDiagramSession';
+import {
+  closeSettingsPanel,
+  createSettingsPanelSession,
+  setSettingsNestedOptionsOpen,
+  toggleSettingsPanel as toggleSettingsPanelSession,
+  type SettingsPanelContext
+} from './settingsPanelSession';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -1058,8 +1068,7 @@ if (articleScriptModeEnabled()) {
   autoplayEw = true;
 }
 let showWidgetTeachingPane = false;
-let settingsPanelContext: 'analysis' | 'practice' | 'widget' | null = null;
-let settingsNestedOptionsOpen = false;
+const settingsPanelSession = createSettingsPanelSession();
 let ddsPlayHistory: string[] = [];
 let ddsTeachingSummaries: string[] = [];
 let activeHint: HintState | null = null;
@@ -1087,12 +1096,6 @@ function applyWidgetProblemDefaults(): void {
   }
   narrate = true;
 }
-type WidgetNarrationEntry = { text: string; lines: string[]; seat: Seat | null; seq: number };
-let widgetNarrationEntries: WidgetNarrationEntry[] = [];
-let widgetNarrationLatest: WidgetNarrationEntry | null = null;
-let widgetNarrationBySeat: Partial<Record<Seat, WidgetNarrationEntry>> = {};
-let lastNarratedSeq = 0;
-let settingsOutsideDismissBound = false;
 let inversePrimaryBySuit: Partial<Record<Suit, 'N' | 'S'>> = {};
 let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
@@ -1320,17 +1323,11 @@ function clearDdErrorVisual(): void {
 }
 
 function clearNarration(): void {
-  if (handDiagramSession.status.type === 'narration') handDiagramSession.status = { type: 'default', text: '' };
-  widgetNarrationLatest = null;
-  widgetNarrationBySeat = {};
+  clearSessionNarration(handDiagramSession);
 }
 
 function clearWidgetNarrationFeed(): void {
-  widgetNarrationEntries = [];
-  widgetNarrationLatest = null;
-  widgetNarrationBySeat = {};
-  lastNarratedSeq = 0;
-  if (handDiagramSession.status.type === 'narration') handDiagramSession.status = { type: 'default', text: '' };
+  clearNarrationFeed(handDiagramSession);
 }
 
 function resetSemanticStreams(): void {
@@ -1500,27 +1497,20 @@ function renderAssistLevelControl(context: 'analysis' | 'practice' | 'widget'): 
   return wrap;
 }
 
-function toggleSettingsPanel(context: 'analysis' | 'practice' | 'widget'): void {
-  if (settingsPanelContext === context) {
-    settingsPanelContext = null;
-    settingsNestedOptionsOpen = false;
-  } else {
-    settingsPanelContext = context;
-    settingsNestedOptionsOpen = false;
-  }
+function toggleSettingsPanel(context: SettingsPanelContext): void {
+  toggleSettingsPanelSession(settingsPanelSession, context);
   render();
 }
 
 function ensureSettingsOutsideDismiss(): void {
-  if (settingsOutsideDismissBound || typeof document === 'undefined') return;
-  settingsOutsideDismissBound = true;
+  if (settingsPanelSession.outsideDismissBound || typeof document === 'undefined') return;
+  settingsPanelSession.outsideDismissBound = true;
   document.addEventListener('pointerdown', (event) => {
-    if (!settingsPanelContext) return;
+    if (!settingsPanelSession.context) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
     if (target.closest('.settings-wrap')) return;
-    settingsPanelContext = null;
-    settingsNestedOptionsOpen = false;
+    closeSettingsPanel(settingsPanelSession);
     render();
   });
 }
@@ -1544,7 +1534,7 @@ function renderSettingsToggle(
   return row;
 }
 
-function renderSettingsToggles(context: 'analysis' | 'practice' | 'widget'): HTMLElement {
+function renderSettingsToggles(context: SettingsPanelContext): HTMLElement {
   const body = document.createElement('div');
   body.className = 'advanced-body';
 
@@ -1634,7 +1624,7 @@ function renderSettingsToggles(context: 'analysis' | 'practice' | 'widget'): HTM
   return body;
 }
 
-function renderSettingsButton(context: 'analysis' | 'practice' | 'widget'): HTMLElement {
+function renderSettingsButton(context: SettingsPanelContext): HTMLElement {
   ensureSettingsOutsideDismiss();
   const wrap = document.createElement('div');
   wrap.className = `advanced-wrap settings-wrap context-${context}`;
@@ -1648,7 +1638,7 @@ function renderSettingsButton(context: 'analysis' | 'practice' | 'widget'): HTML
   button.onclick = () => toggleSettingsPanel(context);
   wrap.appendChild(button);
 
-  if (settingsPanelContext === context) {
+  if (settingsPanelSession.context === context) {
     const panel = document.createElement('section');
     panel.className = `advanced-panel settings-panel settings-primary-panel settings-panel-${context}`;
 
@@ -1656,16 +1646,16 @@ function renderSettingsButton(context: 'analysis' | 'practice' | 'widget'): HTML
     const moreBtn = document.createElement('button');
     moreBtn.type = 'button';
     moreBtn.className = 'settings-more-row';
-    moreBtn.textContent = settingsNestedOptionsOpen ? 'Hide options…' : 'More options…';
+    moreBtn.textContent = settingsPanelSession.nestedOptionsOpen ? 'Hide options…' : 'More options…';
     moreBtn.onclick = (event) => {
       event.preventDefault();
       event.stopPropagation();
-      settingsNestedOptionsOpen = !settingsNestedOptionsOpen;
+      setSettingsNestedOptionsOpen(settingsPanelSession, !settingsPanelSession.nestedOptionsOpen);
       render();
     };
     panel.appendChild(moreBtn);
 
-    if (settingsNestedOptionsOpen) {
+    if (settingsPanelSession.nestedOptionsOpen) {
       const secondary = document.createElement('section');
       secondary.className = `advanced-panel settings-panel settings-secondary-panel settings-panel-${context}${context === 'analysis' ? '' : ' settings-secondary-inline'}`;
       const secondaryTitle = document.createElement('strong');
@@ -1686,9 +1676,9 @@ function renderSettingsButton(context: 'analysis' | 'practice' | 'widget'): HTML
 }
 
 function applyInlineSettingsPlacement(): void {
-  if (typeof document === 'undefined' || !settingsNestedOptionsOpen) return;
+  if (typeof document === 'undefined' || !settingsPanelSession.nestedOptionsOpen) return;
   for (const context of ['widget', 'practice'] as const) {
-    if (settingsPanelContext !== context) continue;
+    if (settingsPanelSession.context !== context) continue;
     const wrap = root.querySelector<HTMLElement>(`.settings-wrap.context-${context}`);
     const primary = wrap?.querySelector<HTMLElement>(`.settings-primary-panel.settings-panel-${context}`);
     const secondary = wrap?.querySelector<HTMLElement>(`.settings-secondary-inline.settings-panel-${context}`);
@@ -1904,16 +1894,18 @@ function syncWidgetNarrationFeedFromTeaching(): void {
     seq: entry.seq ?? 0
   }));
   for (const entry of entries) {
-    if (entry.seq <= lastNarratedSeq) continue;
-    const narr: WidgetNarrationEntry = entry;
-    widgetNarrationEntries.push(narr);
-    if (widgetNarrationEntries.length > 500) widgetNarrationEntries = widgetNarrationEntries.slice(-500);
-    widgetNarrationLatest = narr;
-    if (entry.seat) widgetNarrationBySeat[entry.seat] = narr;
-    lastNarratedSeq = entry.seq;
+    if (entry.seq <= handDiagramSession.lastNarratedSeq) continue;
+    const narr: HandDiagramNarrationEntry = entry;
+    handDiagramSession.narrationEntries.push(narr);
+    if (handDiagramSession.narrationEntries.length > 500) {
+      handDiagramSession.narrationEntries = handDiagramSession.narrationEntries.slice(-500);
+    }
+    handDiagramSession.narrationLatest = narr;
+    if (entry.seat) handDiagramSession.narrationBySeat[entry.seat] = narr;
+    handDiagramSession.lastNarratedSeq = entry.seq;
   }
-  if (narrate && !activeHint && widgetNarrationLatest) {
-    handDiagramSession.status = { type: 'narration', text: widgetNarrationLatest.text };
+  if (narrate && !activeHint && handDiagramSession.narrationLatest) {
+    handDiagramSession.status = { type: 'narration', text: handDiagramSession.narrationLatest.text };
   }
 }
 
@@ -5303,10 +5295,10 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   header.innerHTML = `<strong class="seat-name${active ? ' active-seat-name' : ''}">${seatName[seat]}</strong>`;
   content.appendChild(header);
   if (isWidgetShellMode && narrate) {
-    const entry = widgetNarrationBySeat[seat];
+    const entry = handDiagramSession.narrationBySeat[seat];
     if (entry?.text) {
       const bubble = document.createElement('aside');
-      bubble.className = `narration-bubble seat-${seat}${widgetNarrationLatest?.seq === entry.seq ? ' is-latest' : ' is-stale'}`;
+      bubble.className = `narration-bubble seat-${seat}${handDiagramSession.narrationLatest?.seq === entry.seq ? ' is-latest' : ' is-stale'}`;
       bubble.textContent = entry.text;
       card.appendChild(bubble);
     }
@@ -6074,7 +6066,6 @@ function render(): void {
     hintDiag,
     handDiagramSession,
     narrate,
-    widgetNarrationLatest,
     currentArticleScriptStatusMessage,
     withHintPrompt,
     seatName,

@@ -1,10 +1,18 @@
 import type { CardId } from '../ai/threatModel';
+import type { Seat } from '../core';
 
 export type HandDiagramStatus =
   | { type: 'default'; text: string; html?: false | undefined }
   | { type: 'hint'; text: string; html?: false | undefined }
   | { type: 'narration'; text: string; html?: false | undefined }
   | { type: 'message'; text: string; html?: boolean | undefined };
+
+export type HandDiagramNarrationEntry = {
+  text: string;
+  lines: string[];
+  seat: Seat | null;
+  seq: number;
+};
 
 export type HandDiagramSession = {
   status: HandDiagramStatus;
@@ -16,6 +24,10 @@ export type HandDiagramSession = {
   triedBranchOptions: Map<string, Set<CardId>>;
   hintCount: number;
   mistakeCount: number;
+  narrationEntries: HandDiagramNarrationEntry[];
+  narrationLatest: HandDiagramNarrationEntry | null;
+  narrationBySeat: Partial<Record<Seat, HandDiagramNarrationEntry>>;
+  lastNarratedSeq: number;
 };
 
 export function createHandDiagramSession(): HandDiagramSession {
@@ -28,7 +40,11 @@ export function createHandDiagramSession(): HandDiagramSession {
     completedBranches: new Set<string>(),
     triedBranchOptions: new Map<string, Set<CardId>>(),
     hintCount: 0,
-    mistakeCount: 0
+    mistakeCount: 0,
+    narrationEntries: [],
+    narrationLatest: null,
+    narrationBySeat: {},
+    lastNarratedSeq: 0
   };
 }
 
@@ -82,4 +98,18 @@ export function resetArticleScriptTracking(session: HandDiagramSession): void {
   session.triedBranchOptions.clear();
   session.hintCount = 0;
   session.mistakeCount = 0;
+}
+
+export function clearNarration(session: HandDiagramSession): void {
+  if (session.status.type === 'narration') session.status = { type: 'default', text: '' };
+  session.narrationLatest = null;
+  session.narrationBySeat = {};
+}
+
+export function clearNarrationFeed(session: HandDiagramSession): void {
+  session.narrationEntries = [];
+  session.narrationLatest = null;
+  session.narrationBySeat = {};
+  session.lastNarratedSeq = 0;
+  if (session.status.type === 'narration') session.status = { type: 'default', text: '' };
 }
