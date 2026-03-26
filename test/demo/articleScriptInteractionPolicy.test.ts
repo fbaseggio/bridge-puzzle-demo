@@ -129,6 +129,17 @@ describe('article script interaction policy', () => {
         phase: 'play'
       })
     ).toBe(false);
+
+    expect(
+      shouldBlockArticleScriptUserAdvance({
+        profile: 'solution-viewing',
+        isUserTurn: true,
+        hasRememberedTail: false,
+        trickFrozen: false,
+        canLeadDismiss: false,
+        phase: 'play'
+      })
+    ).toBe(false);
   });
 
   it('only auto-advances non-explicit scripted choices in story-viewing', () => {
@@ -152,6 +163,13 @@ describe('article script interaction policy', () => {
         choice: { kind: 'choice', seat: 'N', optionMode: 'dd-accurate', prompt: "Pick North's play" }
       })
     ).toBe(false);
+
+    expect(
+      shouldAutoAdvanceNonExplicitChoiceForProfile({
+        profile: 'solution-viewing',
+        choice: { kind: 'choice', seat: 'N', optionMode: 'dd-accurate', prompt: "Pick North's play" }
+      })
+    ).toBe(true);
   });
 
   it('distinguishes first-click prompt from second-click explicit branch auto-choice', () => {

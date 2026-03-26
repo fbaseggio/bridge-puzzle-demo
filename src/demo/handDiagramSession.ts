@@ -14,8 +14,15 @@ export type HandDiagramNarrationEntry = {
   seq: number;
 };
 
+export type HandDiagramCompanionContent = {
+  title?: string;
+  text: string;
+  html?: boolean;
+};
+
 export type HandDiagramSession = {
   status: HandDiagramStatus;
+  companionContent: HandDiagramCompanionContent | null;
   dismissedOutcomeKey: string | null;
   readingControlsRevealed: boolean;
   followPromptCursor: number | null;
@@ -33,6 +40,7 @@ export type HandDiagramSession = {
 export function createHandDiagramSession(): HandDiagramSession {
   return {
     status: { type: 'default', text: '' },
+    companionContent: null,
     dismissedOutcomeKey: null,
     readingControlsRevealed: false,
     followPromptCursor: null,
@@ -52,6 +60,17 @@ export function setMessage(session: HandDiagramSession, text: string, html = fal
   session.status = html
     ? { type: 'message', text, html: true }
     : { type: 'message', text };
+}
+
+export function setCompanionContent(
+  session: HandDiagramSession,
+  content: HandDiagramCompanionContent | null
+): void {
+  session.companionContent = content;
+}
+
+export function clearCompanionContent(session: HandDiagramSession): void {
+  session.companionContent = null;
 }
 
 export function clearMessage(session: HandDiagramSession): void {
@@ -98,6 +117,7 @@ export function resetArticleScriptTracking(session: HandDiagramSession): void {
   session.triedBranchOptions.clear();
   session.hintCount = 0;
   session.mistakeCount = 0;
+  session.companionContent = null;
 }
 
 export function clearNarration(session: HandDiagramSession): void {

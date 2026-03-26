@@ -5,8 +5,8 @@ import {
   type ArticleScriptChoiceStep,
   type ArticleScriptSpec
 } from './articleScripts';
+import { canGuidedAdvanceByProfile, type InteractionProfile } from './interactionProfiles';
 
-type InteractionProfile = 'story-viewing' | 'puzzle-solving';
 type ScriptPhase = 'play' | 'end';
 
 export type ArticleScriptChoicePresentationLike = {
@@ -48,7 +48,7 @@ export function chooseArticleScriptBranchOptionForProfile(args: {
   const preferredOptions = authoredExplicit
     ? (choicePresentation.unresolvedOptions.length > 0 ? choicePresentation.unresolvedOptions : (choicePresentation.rawChoice.options ?? []))
     : (choicePresentation.choice.options ?? []);
-  if (profile === 'story-viewing' && authoredExplicit) {
+  if (canGuidedAdvanceByProfile(profile) && authoredExplicit) {
     const tried = branchName ? triedBranchOptions.get(branchName) : null;
     const untriedOptions = tried ? preferredOptions.filter((cardId) => !tried.has(cardId)) : preferredOptions;
     return chooseLowestCardId(untriedOptions.length > 0 ? untriedOptions : preferredOptions);
@@ -113,7 +113,7 @@ export function shouldBlockArticleScriptUserAdvance(args: {
   phase: ScriptPhase;
 }): boolean {
   const { profile, isUserTurn, hasRememberedTail, trickFrozen, canLeadDismiss, phase } = args;
-  return profile !== 'story-viewing'
+  return profile === 'puzzle-solving'
     && isUserTurn
     && !hasRememberedTail
     && (!trickFrozen || canLeadDismiss)
@@ -125,7 +125,7 @@ export function shouldAutoAdvanceNonExplicitChoiceForProfile(args: {
   choice: ArticleScriptChoiceStep | null;
 }): boolean {
   const { profile, choice } = args;
-  return profile === 'story-viewing' && Boolean(choice) && (choice?.optionMode ?? 'explicit') !== 'explicit';
+  return canGuidedAdvanceByProfile(profile) && Boolean(choice) && (choice?.optionMode ?? 'explicit') !== 'explicit';
 }
 
 export function resolveExplicitBranchAdvanceAction(args: {

@@ -13,8 +13,8 @@ It is meant to replace longer implementation-history prompts with:
 
 For fuller background, see:
 
-- [article_script_interaction_architecture.md](/Users/edgar/Documents/Codex/docs/article_script_interaction_architecture.md)
-- [hand_diagram_session_refactor_plan.md](/Users/edgar/Documents/Codex/docs/hand_diagram_session_refactor_plan.md)
+- [article_script_interaction_architecture.md](docs/article_script_interaction_architecture.md)
+- [hand_diagram_session_refactor_plan.md](docs/hand_diagram_session_refactor_plan.md)
 
 ## Current Stable Architecture
 
@@ -33,19 +33,19 @@ The current working stack is:
 Current code alignment:
 
 - script data:
-  - `/Users/edgar/Documents/Codex/src/demo/articleScripts.ts`
+  - `src/demo/articleScripts.ts`
 - script runtime:
-  - `/Users/edgar/Documents/Codex/src/demo/articleScriptRuntime.ts`
+  - `src/demo/articleScriptRuntime.ts`
 - interaction policy:
-  - `/Users/edgar/Documents/Codex/src/demo/articleScriptInteractionPolicy.ts`
+  - `src/demo/articleScriptInteractionPolicy.ts`
 - hand-diagram session:
-  - `/Users/edgar/Documents/Codex/src/demo/handDiagramSession.ts`
+  - `src/demo/handDiagramSession.ts`
 - settings-panel session:
-  - `/Users/edgar/Documents/Codex/src/demo/settingsPanelSession.ts`
+  - `src/demo/settingsPanelSession.ts`
 - shared diagram-adjacent UI:
-  - `/Users/edgar/Documents/Codex/src/demo/handDiagramNavigation.ts`
+  - `src/demo/handDiagramNavigation.ts`
 - app coordinator:
-  - `/Users/edgar/Documents/Codex/src/demo/main.ts`
+  - `src/demo/main.ts`
 
 Important architectural point:
 
@@ -122,7 +122,7 @@ Important:
 
 ### Extracted policy layer
 
-`/Users/edgar/Documents/Codex/src/demo/articleScriptInteractionPolicy.ts` exists and is tested.
+`src/demo/articleScriptInteractionPolicy.ts` exists and is tested.
 
 It currently owns pure decisions for:
 
@@ -136,11 +136,11 @@ It currently owns pure decisions for:
 
 Tests:
 
-- `/Users/edgar/Documents/Codex/test/demo/articleScriptInteractionPolicy.test.ts`
+- `test/demo/articleScriptInteractionPolicy.test.ts`
 
 ### Extracted diagram navigation
 
-`/Users/edgar/Documents/Codex/src/demo/handDiagramNavigation.ts` exists and is the shared diagram-adjacent UI module.
+`src/demo/handDiagramNavigation.ts` exists and is the shared diagram-adjacent UI module.
 
 It currently renders:
 
@@ -160,7 +160,7 @@ It is still controller-heavy, but it is no longer just a raw extraction from `ma
 
 ### Extracted session state
 
-`/Users/edgar/Documents/Codex/src/demo/handDiagramSession.ts` now owns most diagram-local mutable state:
+`src/demo/handDiagramSession.ts` now owns most diagram-local mutable state:
 
 - widget status/outcome
 - dismissed outcome key
@@ -171,7 +171,7 @@ It is still controller-heavy, but it is no longer just a raw extraction from `ma
 - hint/mistake counters
 - diagram-local narration state
 
-`/Users/edgar/Documents/Codex/src/demo/settingsPanelSession.ts` now owns settings panel UI state:
+`src/demo/settingsPanelSession.ts` now owns settings panel UI state:
 
 - open context
 - nested-options open state
@@ -179,7 +179,7 @@ It is still controller-heavy, but it is no longer just a raw extraction from `ma
 
 ### `main.ts`
 
-`/Users/edgar/Documents/Codex/src/demo/main.ts` is still large.
+`src/demo/main.ts` is still large.
 
 It still mixes:
 

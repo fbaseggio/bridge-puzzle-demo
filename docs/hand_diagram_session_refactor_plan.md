@@ -19,7 +19,7 @@ This is a planning note only. It does not propose changing product behavior imme
 
 We now have a small extracted policy layer in:
 
-- `/Users/edgar/Documents/Codex/src/demo/articleScriptInteractionPolicy.ts`
+- `src/demo/articleScriptInteractionPolicy.ts`
 
 This module currently owns pure decisions for article-script interaction such as:
 
@@ -37,7 +37,7 @@ This is good progress. It gives us a real policy seam and tests for it.
 
 We also now have:
 
-- `/Users/edgar/Documents/Codex/src/demo/handDiagramNavigation.ts`
+- `src/demo/handDiagramNavigation.ts`
 
 This module renders:
 
@@ -50,7 +50,7 @@ This is the first shared consumer of the new interaction-policy layer.
 
 ### Remaining app coordinator
 
-`/Users/edgar/Documents/Codex/src/demo/main.ts` is still large and still owns too much.
+`src/demo/main.ts` is still large and still owns too much.
 
 Current size:
 
@@ -231,7 +231,7 @@ Create a small session-oriented helper module for hand-diagram interaction state
 
 Candidate name:
 
-- `/Users/edgar/Documents/Codex/src/demo/handDiagramSession.ts`
+- `src/demo/handDiagramSession.ts`
 
 Initial scope:
 

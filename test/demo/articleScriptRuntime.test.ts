@@ -18,6 +18,8 @@ import {
   resolvePreviousArticleScriptLandmarkCursor,
   resolvePendingArticleScriptChoice,
   resolveArticleScriptCheckpoint,
+  resolveArticleScriptPlayStepCompanionAtCursor,
+  resolveArticleScriptPlayStepMessageAtCursor,
   resolveArticleScriptStepAtCursor
 } from '../../src/demo/articleScripts';
 import {
@@ -114,6 +116,56 @@ describe('article script runtime', () => {
     expect(replay.playedCardIds).toHaveLength(24);
     expect(replay.playedCardIds.slice(-4)).toEqual(['CA', 'C7', 'C4', 'C5']);
     expect(replay.state.turn).toBe('S');
+  });
+
+  it('resolves authored play-step companion content for matching scripted cards', () => {
+    expect(
+      resolveArticleScriptPlayStepMessageAtCursor({
+        spec: doubleDummy01Script,
+        cursor: 1,
+        choiceSelections: {},
+        playedCardId: 'S7'
+      })
+    ).toBeNull();
+
+    expect(
+      resolveArticleScriptPlayStepCompanionAtCursor({
+        spec: doubleDummy01Script,
+        cursor: 1,
+        choiceSelections: {},
+        playedCardId: 'S7',
+        activeProfile: 'solution-viewing'
+      })
+    ).toEqual({ title: 'Solution note', text: 'S7 is a key play, we will see why later.', html: false });
+
+    expect(
+      resolveArticleScriptPlayStepCompanionAtCursor({
+        spec: doubleDummy01Script,
+        cursor: 1,
+        choiceSelections: {},
+        playedCardId: 'S7',
+        activeProfile: 'puzzle-solving'
+      })
+    ).toBeNull();
+
+    expect(
+      resolveArticleScriptPlayStepMessageAtCursor({
+        spec: doubleDummy01Script,
+        cursor: 1,
+        choiceSelections: {},
+        playedCardId: 'S8'
+      })
+    ).toBeNull();
+
+    expect(
+      resolveArticleScriptPlayStepCompanionAtCursor({
+        spec: doubleDummy01Script,
+        cursor: 1,
+        choiceSelections: {},
+        playedCardId: 'S8',
+        activeProfile: 'solution-viewing'
+      })
+    ).toBeNull();
   });
 
   it('supports one-card forward, backward, and checkpoint reset by replay', () => {

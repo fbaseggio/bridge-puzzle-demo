@@ -3,11 +3,17 @@ import type { CardId, Seat, Suit } from '../core';
 export const ARTICLE_SCRIPT_NAVIGATION_MODE = 'article-script';
 
 export type ArticleScriptNavigationMode = typeof ARTICLE_SCRIPT_NAVIGATION_MODE;
-export type ArticleScriptInteractionProfile = 'story-viewing' | 'puzzle-solving';
+export type ArticleScriptInteractionProfile = 'story-viewing' | 'puzzle-solving' | 'solution-viewing';
 
 export type ArticleScriptStep = {
   kind: 'play';
   cardId: CardId;
+  onPlayMessage?: string;
+  onPlayMessageHtml?: boolean;
+  onPlayCompanionTitle?: string;
+  onPlayCompanionText?: string;
+  onPlayCompanionHtml?: boolean;
+  onPlayCompanionProfiles?: ArticleScriptInteractionProfile[];
   branchPrefix?: string;
   assertedWinner?: Seat;
   terminalState?: 'complete';
@@ -108,7 +114,13 @@ export const doubleDummy01Script: ArticleScriptSpec = {
   checkpoints: [{ id: '1', cursor: 0 }],
   steps: [
     { kind: 'play', cardId: 'SK' },
-    { kind: 'play', cardId: 'S7' },
+    {
+      kind: 'play',
+      cardId: 'S7',
+      onPlayCompanionTitle: 'Solution note',
+      onPlayCompanionText: 'S7 is a key play, we will see why later.',
+      onPlayCompanionProfiles: ['solution-viewing']
+    },
     { kind: 'play', cardId: 'S8' },
     { kind: 'play', cardId: 'SA' },
     { kind: 'play', cardId: 'DT' },
@@ -699,6 +711,40 @@ export function resolveArticleScriptStepAtCursor(
     if (!selected) logicalCursor += maxChoiceContinuationLength(step);
   }
   return null;
+}
+
+export function resolveArticleScriptPlayStepMessageAtCursor(args: {
+  spec: ArticleScriptSpec;
+  cursor: number;
+  choiceSelections?: Partial<Record<number, CardId>>;
+  playedCardId: CardId;
+}): { text: string; html: boolean } | null {
+  const { spec, cursor, choiceSelections = {}, playedCardId } = args;
+  const step = resolveArticleScriptStepAtCursor(spec, cursor, choiceSelections);
+  if (!step || step.kind !== 'play') return null;
+  if (step.cardId !== playedCardId) return null;
+  if (!step.onPlayMessage) return null;
+  return { text: step.onPlayMessage, html: step.onPlayMessageHtml === true };
+}
+
+export function resolveArticleScriptPlayStepCompanionAtCursor(args: {
+  spec: ArticleScriptSpec;
+  cursor: number;
+  choiceSelections?: Partial<Record<number, CardId>>;
+  playedCardId: CardId;
+  activeProfile: ArticleScriptInteractionProfile;
+}): { title?: string; text: string; html: boolean } | null {
+  const { spec, cursor, choiceSelections = {}, playedCardId, activeProfile } = args;
+  const step = resolveArticleScriptStepAtCursor(spec, cursor, choiceSelections);
+  if (!step || step.kind !== 'play') return null;
+  if (step.cardId !== playedCardId) return null;
+  if (!step.onPlayCompanionText) return null;
+  if (step.onPlayCompanionProfiles?.length && !step.onPlayCompanionProfiles.includes(activeProfile)) return null;
+  return {
+    title: step.onPlayCompanionTitle,
+    text: step.onPlayCompanionText,
+    html: step.onPlayCompanionHtml === true
+  };
 }
 
 export function resolveArticleScriptCheckpointEndCursor(spec: ArticleScriptSpec, checkpointId?: string | null): number {

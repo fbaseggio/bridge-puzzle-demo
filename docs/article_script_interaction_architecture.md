@@ -28,8 +28,8 @@ It includes things like:
 
 Examples:
 
-- `/Users/edgar/Documents/Codex/src/puzzles/double_dummy_01.ts`
-- `/Users/edgar/Documents/Codex/src/puzzles/experimental_draft.ts`
+- `src/puzzles/double_dummy_01.ts`
+- `src/puzzles/experimental_draft.ts`
 
 ### 2. Optional authored behavior layer
 
@@ -57,7 +57,7 @@ A script is authored data attached to one specific problem definition.
 
 Current location:
 
-- `/Users/edgar/Documents/Codex/src/demo/articleScripts.ts`
+- `src/demo/articleScripts.ts`
 
 Current relationship:
 
@@ -75,8 +75,8 @@ The script runtime is the matching / replay / progression engine that interprets
 
 Current locations:
 
-- `/Users/edgar/Documents/Codex/src/demo/articleScriptRuntime.ts`
-- parts of `/Users/edgar/Documents/Codex/src/demo/main.ts`
+- `src/demo/articleScriptRuntime.ts`
+- parts of `src/demo/main.ts`
 
 Runtime responsibilities include:
 
@@ -188,7 +188,7 @@ Session includes:
 
 Current implementation is scattered, mostly in:
 
-- `/Users/edgar/Documents/Codex/src/demo/main.ts`
+- `src/demo/main.ts`
 
 ## Interpreted State
 
@@ -218,8 +218,8 @@ There are currently two broad sources of meaning above raw card state:
 
 Current engine / semantic pipeline:
 
-- collector / reducer / teaching event flow in `/Users/edgar/Documents/Codex/src/demo/main.ts`
-- core semantic machinery in `/Users/edgar/Documents/Codex/src/core/semanticReducer.ts`
+- collector / reducer / teaching event flow in `src/demo/main.ts`
+- core semantic machinery in `src/core/semanticReducer.ts`
 
 These derive meaning from gameplay and policy behavior.
 
@@ -284,9 +284,9 @@ Interaction behavior is currently encoded implicitly in shared UI/runtime logic 
 
 The code mostly has one script architecture already:
 
-- script data in `/Users/edgar/Documents/Codex/src/demo/articleScripts.ts`
-- runtime matching/replay in `/Users/edgar/Documents/Codex/src/demo/articleScriptRuntime.ts`
-- UI and session glue in `/Users/edgar/Documents/Codex/src/demo/main.ts`
+- script data in `src/demo/articleScripts.ts`
+- runtime matching/replay in `src/demo/articleScriptRuntime.ts`
+- UI and session glue in `src/demo/main.ts`
 
 But it does not yet cleanly separate:
 

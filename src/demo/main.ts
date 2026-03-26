@@ -59,7 +59,10 @@ import {
   type UnknownModeTeachingEntry,
   type UnknownModeVariantReplay
 } from './unknownModeReplay';
-import { renderHandDiagramNavigationArea } from './handDiagramNavigation';
+import {
+  renderHandDiagramNavigationArea,
+  type HandDiagramSecondaryActionRow
+} from './handDiagramNavigation';
 import {
   ARTICLE_SCRIPT_NAVIGATION_MODE,
   clampArticleScriptCursor,
@@ -71,6 +74,8 @@ import {
   resolveNextArticleScriptCheckpoint,
   resolveArticleScriptLength,
   resolveArticleScriptTerminalState,
+  resolveArticleScriptPlayStepCompanionAtCursor,
+  resolveArticleScriptPlayStepMessageAtCursor,
   resolvePreviousArticleScriptLandmarkCursor,
   resolvePendingArticleScriptChoice,
   resolveArticleScriptStepAtCursor,
@@ -101,6 +106,14 @@ import {
   shouldBlockArticleScriptUserAdvance
 } from './articleScriptInteractionPolicy';
 import {
+  isSolutionViewingProfile,
+  resolveNonStandardPracticeAssistToggles,
+  resolveStandardPracticeAssistLevel,
+  shouldScorePracticeProfile,
+  type InteractionProfile,
+  type PracticeInteractionProfile
+} from './interactionProfiles';
+import {
   clearNarration as clearSessionNarration,
   clearNarrationFeed,
   clearDismissedOutcomeIfChanged,
@@ -111,7 +124,9 @@ import {
   markBranchOptionTried,
   resetArticleScriptTracking,
   resetReadingReveal,
+  setCompanionContent,
   setMessage,
+  type HandDiagramCompanionContent,
   type HandDiagramNarrationEntry,
   type HandDiagramStatus
 } from './handDiagramSession';
@@ -282,7 +297,7 @@ type PracticeSession = {
   perPuzzleUndoCount: Record<string, number>;
   isTerminal: boolean;
   terminalOutcome: 'success' | 'failure' | null;
-  solutionMode: boolean;
+  interactionProfile: PracticeInteractionProfile;
   scoredThisRun: boolean;
 };
 type ClaimDebugSnapshot = {
@@ -302,7 +317,7 @@ type ClaimDebugSnapshot = {
   ewTricks: number;
   runStatus: RunStatus;
   terminal: boolean;
-  solutionMode: boolean;
+  interactionProfile: PracticeInteractionProfile;
 };
 type ProblemWithThreats = Problem & { threatCardIds?: CardId[] };
 const displayMode: DisplayMode = (() => {
@@ -328,6 +343,12 @@ const widgetReadingProfileEnabledFromUrl = (() => {
   if (typeof window === 'undefined') return false;
   const raw = (new URLSearchParams(window.location.search).get('reading') ?? '').trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes';
+})();
+const widgetCompanionPanelEnabledFromUrl = (() => {
+  if (typeof window === 'undefined') return false;
+  const raw = (new URLSearchParams(window.location.search).get('companionPanel') ?? '').trim().toLowerCase();
+  if (!raw) return false;
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on' || raw === 'enabled' || raw === 'dd1';
 })();
 const compactWidgetLayout = displayMode !== 'analysis';
 const isWidgetShellMode = displayMode !== 'analysis';
@@ -817,12 +838,92 @@ function currentArticleScriptResolvedBranchName(): string {
   );
 }
 
-function currentArticleScriptInteractionProfile(): 'story-viewing' | 'puzzle-solving' {
-  return articleScriptState?.spec.interactionProfile ?? 'puzzle-solving';
+function currentArticleScriptInteractionProfile(): InteractionProfile {
+  if (!articleScriptState) return 'puzzle-solving';
+  return articleScriptState.interactionProfileOverride ?? articleScriptState.spec.interactionProfile;
 }
 
 function articleScriptIsStoryViewing(): boolean {
   return currentArticleScriptInteractionProfile() === 'story-viewing';
+}
+
+function currentPracticeInteractionProfile(): PracticeInteractionProfile {
+  return practiceSession?.interactionProfile ?? 'puzzle-solving';
+}
+
+function applyArticleScriptInteractionProfileDefaults(profile: InteractionProfile): void {
+  if (!articleScriptModeEnabled()) return;
+  if (profile === 'solution-viewing') {
+    assistLevelByMode = { ...assistLevelByMode, scripted: 'solution' };
+    applyCurrentAssistLevelToControls();
+    showWidgetTeachingPane = false;
+    return;
+  }
+  if (profile === 'puzzle-solving') {
+    assistLevelByMode = { ...assistLevelByMode, scripted: 'puzzle' };
+    applyCurrentAssistLevelToControls();
+    showWidgetTeachingPane = false;
+  }
+}
+
+function setCurrentArticleScriptInteractionProfile(profile: InteractionProfile, options: { applyDefaults?: boolean } = {}): void {
+  if (!articleScriptState) return;
+  articleScriptState.interactionProfileOverride =
+    profile === articleScriptState.spec.interactionProfile
+      ? null
+      : profile;
+  clearArticleScriptFollowPrompt();
+  if (options.applyDefaults) applyArticleScriptInteractionProfileDefaults(profile);
+}
+
+function applyArticleScriptPlayStepFeedbackAtCursor(cursor: number, playedCardId: CardId): void {
+  if (!articleScriptState) return;
+  const message = resolveArticleScriptPlayStepMessageAtCursor({
+    spec: articleScriptState.spec,
+    cursor,
+    choiceSelections: articleScriptState.choiceSelections,
+    playedCardId
+  });
+  const companion = resolveArticleScriptPlayStepCompanionAtCursor({
+    spec: articleScriptState.spec,
+    cursor,
+    choiceSelections: articleScriptState.choiceSelections,
+    playedCardId,
+    activeProfile: currentArticleScriptInteractionProfile()
+  });
+  if (!message && !companion) return;
+  clearHint();
+  if (message) setMessage(handDiagramSession, message.text, message.html);
+  if (companion) setCompanionContent(handDiagramSession, companion);
+}
+
+type WidgetCompanionPanelState = {
+  enabled: boolean;
+  hidden: boolean;
+  branchName: string | null;
+  content: HandDiagramCompanionContent | null;
+};
+
+function currentWidgetCompanionPanelState(): WidgetCompanionPanelState {
+  if (displayMode !== 'widget') {
+    return { enabled: false, hidden: false, branchName: null, content: null };
+  }
+  const scripted = articleScriptModeEnabled();
+  const scriptedPuzzleProfile = scripted && !articleScriptIsStoryViewing();
+  const content = handDiagramSession.companionContent?.text?.trim()
+    ? handDiagramSession.companionContent
+    : null;
+  const enabled = scriptedPuzzleProfile || (widgetCompanionPanelEnabledFromUrl && Boolean(content));
+  if (!enabled) {
+    return { enabled: false, hidden: false, branchName: null, content: null };
+  }
+  const branchName = scriptedPuzzleProfile ? currentArticleScriptBranchName() : null;
+  return {
+    enabled: true,
+    hidden: widgetCompanionPanelHidden,
+    branchName,
+    content
+  };
 }
 
 function resetWidgetReadingControlsReveal(): void {
@@ -946,9 +1047,11 @@ function advanceArticleScriptToNextPauseOrEnd(): void {
   while (cursor < endCursor) {
     const nextCardId = resolveArticleScriptReplayCardAtCursor(cursor);
     if (nextCardId) {
+      const playCursor = cursor;
       articleScriptState.history = articleScriptState.history.slice(0, cursor);
       articleScriptState.history.push(nextCardId);
       cursor += 1;
+      applyArticleScriptPlayStepFeedbackAtCursor(playCursor, nextCardId);
       if (resolvePendingArticleScriptChoice(articleScriptState.spec, cursor, matchCurrentArticleScriptHistory(cursor)?.choiceSelections ?? {})) break;
       continue;
     }
@@ -1026,6 +1129,7 @@ let articleScriptState: {
   cursor: number;
   history: CardId[];
   choiceSelections: ArticleScriptChoiceSelections;
+  interactionProfileOverride: InteractionProfile | null;
 } | null =
   initialArticleScriptSpec
     ? {
@@ -1034,7 +1138,8 @@ let articleScriptState: {
         initialCursor: initialArticleCursor,
         cursor: initialArticleCursor,
         history: defaultArticleScriptHistory(initialArticleScriptSpec, initialArticleCursor),
-        choiceSelections: {}
+        choiceSelections: {},
+        interactionProfileOverride: null
       }
     : null;
 const handDiagramSession = createHandDiagramSession();
@@ -1068,6 +1173,7 @@ if (articleScriptModeEnabled()) {
   autoplayEw = true;
 }
 let showWidgetTeachingPane = false;
+let widgetCompanionPanelHidden = false;
 const settingsPanelSession = createSettingsPanelSession();
 let ddsPlayHistory: string[] = [];
 let ddsTeachingSummaries: string[] = [];
@@ -1166,7 +1272,7 @@ let practiceSession: PracticeSession | null =
         perPuzzleUndoCount: {},
         isTerminal: false,
         terminalOutcome: null,
-        solutionMode: false,
+        interactionProfile: 'puzzle-solving',
         scoredThisRun: false
       }
     : null;
@@ -2267,10 +2373,12 @@ function advanceOneWidgetCard(): boolean {
     const scriptState = currentArticleScriptStateId();
     const nextCard = currentArticleScriptReplayCard();
     if (nextCard && articleScriptState && (scriptState === 'in-script' || scriptState === 'pre-script')) {
+      const playCursor = articleScriptState.cursor;
       articleScriptState.history = articleScriptState.history.slice(0, articleScriptState.cursor);
       articleScriptState.history.push(nextCard);
       clearArticleScriptFollowPrompt();
       replayArticleScriptToCursor(articleScriptState.cursor + 1);
+      applyArticleScriptPlayStepFeedbackAtCursor(playCursor, nextCard);
       render();
       return true;
     }
@@ -2616,7 +2724,7 @@ function withHintPrompt(text: string, view: State): string {
     (!trickFrozen || canLeadDismiss) &&
     (displayMode === 'practice' || isWidgetShellMode);
   if (!shouldPrompt) return text;
-  if (displayMode === 'practice' && practiceSession?.solutionMode) {
+  if (displayMode === 'practice' && isSolutionViewingProfile(currentPracticeInteractionProfile())) {
     return `${text} Press 💡 for hint or > to advance one card`;
   }
   return `${text} Press 💡 for hint`;
@@ -2694,7 +2802,7 @@ function rebuildPracticeSession(setId: PracticeSetId): void {
   practiceSession.perPuzzleUndoCount = {};
   practiceSession.isTerminal = false;
   practiceSession.terminalOutcome = null;
-  practiceSession.solutionMode = false;
+  practiceSession.interactionProfile = 'puzzle-solving';
   practiceSession.scoredThisRun = false;
 
   const firstId = practiceSession.queue[0];
@@ -2702,34 +2810,27 @@ function rebuildPracticeSession(setId: PracticeSetId): void {
   selectProblem(firstId);
 }
 
-function applyPracticeDisplayDefaults(solutionMode: boolean): void {
+function applyPracticeDisplayDefaults(profile: PracticeInteractionProfile): void {
   if (!practiceSession) return;
   autoplayEw = true;
   autoplaySingletons = true;
   if (currentPuzzleModeId() === 'standard') {
-    assistLevelByMode = { ...assistLevelByMode, standard: solutionMode ? 'solution' : 'puzzle' };
+    assistLevelByMode = { ...assistLevelByMode, standard: resolveStandardPracticeAssistLevel(profile) };
     applyCurrentAssistLevelToControls();
     showWidgetTeachingPane = false;
     return;
   }
-  if (solutionMode) {
-    alwaysHint = true;
-    narrate = true;
-    cardColoringEnabled = true;
-    autoplaySingletons = true;
-    showWidgetTeachingPane = false;
-    return;
-  }
-  alwaysHint = false;
-  narrate = false;
-  cardColoringEnabled = false;
+  const toggles = resolveNonStandardPracticeAssistToggles(profile);
+  alwaysHint = toggles.alwaysHint;
+  narrate = toggles.narrate;
+  cardColoringEnabled = toggles.cardColoring;
   autoplaySingletons = true;
   showWidgetTeachingPane = false;
 }
 
-function beginPracticeRun(solutionMode: boolean): void {
+function beginPracticeRun(profile: PracticeInteractionProfile): void {
   if (!practiceSession) return;
-  practiceSession.solutionMode = solutionMode;
+  practiceSession.interactionProfile = profile;
   practiceSession.isTerminal = false;
   practiceSession.terminalOutcome = null;
   practiceSession.currentUndoCount = 0;
@@ -2738,7 +2839,7 @@ function beginPracticeRun(solutionMode: boolean): void {
   practiceClaimDebug = null;
   clearWidgetMessage();
   resetWidgetReadingControlsReveal();
-  applyPracticeDisplayDefaults(solutionMode);
+  applyPracticeDisplayDefaults(profile);
 }
 
 function onPracticeTerminal(outcome: 'success' | 'failure'): void {
@@ -2747,7 +2848,7 @@ function onPracticeTerminal(outcome: 'success' | 'failure'): void {
   practiceSession.terminalOutcome = outcome;
   if (practiceSession.scoredThisRun) return;
   practiceSession.scoredThisRun = true;
-  if (practiceSession.solutionMode) return;
+  if (!shouldScorePracticeProfile(currentPracticeInteractionProfile())) return;
   practiceSession.attempted += 1;
   if (outcome === 'success') {
     practiceSession.solved += 1;
@@ -2770,7 +2871,7 @@ function goToNextPracticePuzzle(): void {
   if (!practiceSession || practiceSession.queue.length === 0) return;
   practiceSession.queueIndex = (practiceSession.queueIndex + 1) % practiceSession.queue.length;
   const nextId = practiceSession.queue[practiceSession.queueIndex];
-  beginPracticeRun(false);
+  beginPracticeRun('puzzle-solving');
   selectProblem(nextId);
 }
 
@@ -2802,7 +2903,7 @@ function countReachableUserWinnerCards(s: State): number {
 }
 
 function attemptClaim(): void {
-  if (!practiceSession || practiceSession.solutionMode) return;
+  if (!practiceSession || !shouldScorePracticeProfile(currentPracticeInteractionProfile())) return;
   clearHint();
   clearWidgetMessage();
   const userSideOnLead = state.userControls.includes(state.turn);
@@ -2823,7 +2924,7 @@ function attemptClaim(): void {
     ewTricks: state.tricksWon.EW,
     runStatus,
     terminal: runStatus === 'success' || runStatus === 'failure',
-    solutionMode: practiceSession.solutionMode
+    interactionProfile: practiceSession.interactionProfile
   } as const;
   if (!onLead || !needsAllRemaining) {
     const message = 'Claim is only available on lead for the remaining tricks';
@@ -2868,7 +2969,7 @@ function attemptClaim(): void {
 }
 
 function endPracticeRun(): void {
-  if (!practiceSession || practiceSession.solutionMode) return;
+  if (!practiceSession || !shouldScorePracticeProfile(currentPracticeInteractionProfile())) return;
   if (practiceSession.isTerminal || runStatus === 'success' || runStatus === 'failure') return;
   clearHint();
   clearWidgetMessage();
@@ -2907,7 +3008,7 @@ function renderPracticeClaimDebugPanel(): HTMLElement {
       `ewTricks: ${practiceClaimDebug.ewTricks}`,
       `runStatus: ${practiceClaimDebug.runStatus}`,
       `terminal: ${practiceClaimDebug.terminal}`,
-      `solutionMode: ${practiceClaimDebug.solutionMode}`
+      `interactionProfile: ${practiceClaimDebug.interactionProfile}`
     ].join('\n');
   }
   panel.appendChild(body);
@@ -4527,7 +4628,7 @@ function resetGame(seed: number, reason: string): void {
   resetWidgetReadingControlsReveal();
   inversePrimaryBySuit = {};
   startPending = startupGateEnabledFromUrl;
-  if (practiceSession) beginPracticeRun(practiceSession.solutionMode);
+  if (practiceSession) beginPracticeRun(practiceSession.interactionProfile);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
   undoStack.length = 0;
@@ -4580,7 +4681,7 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   clearTeachingEvents();
   inversePrimaryBySuit = {};
   startPending = startupGateEnabledFromUrl;
-  if (practiceSession) beginPracticeRun(practiceSession.solutionMode);
+  if (practiceSession) beginPracticeRun(practiceSession.interactionProfile);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
   lastSuccessfulTranscript = null;
@@ -4655,6 +4756,7 @@ function runTurn(play: Play): void {
     }
   } else if (articleScriptState) {
     const chosenCardId = toCardId(play.suit, play.rank) as CardId;
+    applyArticleScriptPlayStepFeedbackAtCursor(articleScriptState.cursor, chosenCardId);
     articleScriptState.history = articleScriptState.history.slice(0, articleScriptState.cursor);
     articleScriptState.history.push(chosenCardId);
     articleScriptState.cursor = articleScriptState.history.length;
@@ -5049,7 +5151,7 @@ function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   clearWidgetNarrationFeed();
   clearHint();
   clearDdErrorVisual();
-  if (practiceSession) beginPracticeRun(false);
+  if (practiceSession) beginPracticeRun('puzzle-solving');
   if (!lastSuccessfulTranscript) {
     playAgainAvailable = false;
     playAgainUnavailableReason = 'exhausted-all-variations';
@@ -5471,25 +5573,98 @@ function renderDraftNotes(): HTMLElement | null {
   return box;
 }
 
-function renderArticleScriptBranchPanel(): HTMLElement | null {
-  const branchName = currentArticleScriptBranchName();
-  if (!branchName) return null;
-  if (articleScriptIsStoryViewing()) return null;
-
+function renderWidgetCompanionPanel(args: {
+  branchName: string | null;
+  content: HandDiagramCompanionContent | null;
+  onHide: () => void;
+}): HTMLElement {
+  const { branchName, content, onHide } = args;
   const panel = document.createElement('aside');
-  panel.className = 'article-script-branch-panel';
+  panel.className = 'hand-diagram-companion-panel';
 
-  const title = document.createElement('strong');
-  title.className = 'article-script-branch-title';
-  title.textContent = 'BRANCH';
-  panel.appendChild(title);
+  const head = document.createElement('div');
+  head.className = 'hand-diagram-companion-head';
 
-  const value = document.createElement('div');
-  value.className = 'article-script-branch-value';
-  value.textContent = branchName;
-  panel.appendChild(value);
+  const branch = document.createElement('div');
+  branch.className = 'hand-diagram-companion-branch';
+  const branchLabel = document.createElement('strong');
+  branchLabel.className = 'hand-diagram-companion-branch-label';
+  branchLabel.textContent = 'BRANCH';
+  const branchValue = document.createElement('div');
+  branchValue.className = 'hand-diagram-companion-branch-value';
+  branchValue.textContent = branchName || '-';
+  branch.append(branchLabel, branchValue);
+  head.appendChild(branch);
+
+  const hideBtn = document.createElement('button');
+  hideBtn.type = 'button';
+  hideBtn.className = 'hand-diagram-companion-hide';
+  hideBtn.textContent = 'Hide';
+  hideBtn.title = 'Hide companion panel';
+  hideBtn.setAttribute('aria-label', 'Hide companion panel');
+  hideBtn.onclick = () => onHide();
+  head.appendChild(hideBtn);
+  panel.appendChild(head);
+
+  if (content?.title?.trim()) {
+    const title = document.createElement('strong');
+    title.className = 'hand-diagram-companion-title';
+    title.textContent = content.title.trim();
+    panel.appendChild(title);
+  }
+
+  if (content?.text?.trim()) {
+    const body = document.createElement('div');
+    body.className = 'hand-diagram-companion-body';
+    if (content.html) body.innerHTML = content.text;
+    else body.textContent = content.text;
+    panel.appendChild(body);
+  }
 
   return panel;
+}
+
+function currentWidgetSecondaryActionRow(): HandDiagramSecondaryActionRow | null {
+  if (displayMode !== 'widget') return null;
+  if (!articleScriptModeEnabled() || !articleScriptState) return null;
+  if (articleScriptState.spec.id !== 'double-dummy-01') return null;
+  const inSolutionViewing = currentArticleScriptInteractionProfile() === 'solution-viewing';
+  return {
+    className: 'widget-profile-secondary-actions',
+    buttons: [
+      {
+        id: 'widget-replay',
+        label: 'Replay',
+        onClick: () => {
+          dismissTransientWidgetOutcome(currentViewState());
+          clearHint();
+          clearWidgetMessage();
+          setCurrentArticleScriptInteractionProfile('puzzle-solving', { applyDefaults: true });
+          resetCurrentArticleScriptToBeginning();
+          render();
+        }
+      },
+      {
+        id: 'widget-next-puzzle',
+        label: 'Next Puzzle',
+        disabled: true,
+        title: 'Next Puzzle is not available in article widgets yet.'
+      },
+      {
+        id: 'widget-show-solution',
+        label: 'Show Solution',
+        disabled: inSolutionViewing,
+        title: inSolutionViewing ? 'Solution viewing is already active.' : 'Enter solution viewing',
+        onClick: () => {
+          dismissTransientWidgetOutcome(currentViewState());
+          setCurrentArticleScriptInteractionProfile('solution-viewing', { applyDefaults: true });
+          clearHint();
+          clearWidgetMessage();
+          render();
+        }
+      }
+    ]
+  };
 }
 
 function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
@@ -5995,11 +6170,14 @@ function render(): void {
   const view = currentViewState();
   clearDismissedWidgetOutcomeIfChanged(view);
   const isWidgetReadingMode = widgetReadingMode();
+  const widgetCompanionPanel = currentWidgetCompanionPanelState();
+  const widgetCompanionPanelVisible = widgetCompanionPanel.enabled && !widgetCompanionPanel.hidden;
 
   root.innerHTML = '';
   root.classList.toggle('mode-widget', isWidgetShellMode);
   root.classList.toggle('mode-analysis', displayMode === 'analysis');
   root.classList.toggle('mode-practice', displayMode === 'practice');
+  root.classList.toggle('with-companion-panel', widgetCompanionPanelVisible);
   if (typeof document !== 'undefined') {
     document.documentElement.classList.toggle('mode-widget', isWidgetShellMode);
     document.documentElement.classList.toggle('mode-analysis', displayMode === 'analysis');
@@ -6027,8 +6205,6 @@ function render(): void {
   tableCanvas.appendChild(renderBoardMeta(view));
   tableCanvas.appendChild(renderTrickTable(view, isWidgetReadingMode));
   tableCanvas.appendChild(renderSeatHand(view, 'N'));
-  const articleScriptBranchPanel = renderArticleScriptBranchPanel();
-  if (articleScriptBranchPanel) tableCanvas.appendChild(articleScriptBranchPanel);
   tableCanvas.appendChild(renderSeatHand(view, 'W'));
   tableCanvas.appendChild(renderSeatHand(view, 'E'));
   tableCanvas.appendChild(renderSeatHand(view, 'S'));
@@ -6109,16 +6285,51 @@ function render(): void {
     render,
     currentArticleScriptStateId,
     currentArticleScriptReplayCard,
-    resolveExplicitBranchAdvanceAction
+    resolveExplicitBranchAdvanceAction,
+    secondaryActionRow: currentWidgetSecondaryActionRow()
   };
+  const navigationArea = renderHandDiagramNavigationArea(view, handDiagramNavigationDeps);
   if (displayMode === 'practice' || displayMode === 'analysis') {
-    tableHost.appendChild(renderHandDiagramNavigationArea(view, handDiagramNavigationDeps));
+    tableHost.appendChild(navigationArea);
   }
   const draftNotes = renderDraftNotes();
   if (draftNotes) tableHost.appendChild(draftNotes);
   if (displayMode === 'analysis') {
     mainRow.appendChild(tableHost);
     mainRow.appendChild(renderTeachingEventsPane('analysis'));
+  } else if (displayMode === 'widget') {
+    const widgetFrame = document.createElement('section');
+    widgetFrame.className = `hand-diagram-widget-frame${widgetCompanionPanelVisible ? ' with-companion-panel' : ''}`;
+    const widgetStack = document.createElement('div');
+    widgetStack.className = 'hand-diagram-widget-stack';
+    widgetStack.appendChild(tableHost);
+    widgetStack.appendChild(navigationArea);
+    widgetFrame.appendChild(widgetStack);
+    if (widgetCompanionPanelVisible) {
+      widgetFrame.appendChild(
+        renderWidgetCompanionPanel({
+          branchName: widgetCompanionPanel.branchName,
+          content: widgetCompanionPanel.content,
+          onHide: () => {
+            widgetCompanionPanelHidden = true;
+            render();
+          }
+        })
+      );
+    } else if (widgetCompanionPanel.enabled) {
+      const reopenBtn = document.createElement('button');
+      reopenBtn.type = 'button';
+      reopenBtn.className = 'hand-diagram-companion-reopen';
+      reopenBtn.textContent = 'Show Panel';
+      reopenBtn.title = 'Show companion panel';
+      reopenBtn.setAttribute('aria-label', 'Show companion panel');
+      reopenBtn.onclick = () => {
+        widgetCompanionPanelHidden = false;
+        render();
+      };
+      widgetFrame.appendChild(reopenBtn);
+    }
+    mainRow.appendChild(widgetFrame);
   } else {
     mainRow.appendChild(tableHost);
   }
@@ -6126,9 +6337,6 @@ function render(): void {
     mainRow.appendChild(renderTeachingEventsPane('widget'));
   }
   root.appendChild(mainRow);
-  if (displayMode !== 'practice' && displayMode !== 'analysis') {
-    root.appendChild(renderHandDiagramNavigationArea(view, handDiagramNavigationDeps));
-  }
   applyCompactTableAlignment(tableCanvas);
   applyUnknownSlashLinePlacement(tableCanvas);
   applyNarrationBubbleCollisionAvoidance(tableCanvas);
@@ -6337,7 +6545,19 @@ function resetToCurrentArticleCheckpoint(): void {
   replayArticleScriptToCursor(articleScriptState.initialCursor);
 }
 
-if (practiceSession) beginPracticeRun(false);
+function resetCurrentArticleScriptToBeginning(): void {
+  if (!articleScriptState) return;
+  const firstCheckpoint = resolveArticleScriptCheckpoint(articleScriptState.spec, articleScriptState.spec.checkpoints[0]?.id ?? null);
+  articleScriptState.checkpointId = firstCheckpoint.id;
+  articleScriptState.initialCursor = firstCheckpoint.cursor;
+  articleScriptState.choiceSelections = {};
+  articleScriptState.history = defaultArticleScriptHistory(articleScriptState.spec, firstCheckpoint.cursor);
+  resetArticleScriptTracking(handDiagramSession);
+  resetWidgetReadingControlsReveal();
+  replayArticleScriptToCursor(firstCheckpoint.cursor);
+}
+
+if (practiceSession) beginPracticeRun('puzzle-solving');
 refreshThreatModel(currentProblemId, false);
 if (articleScriptModeEnabled()) {
   autoplaySingletons = false;

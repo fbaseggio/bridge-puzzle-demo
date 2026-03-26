@@ -1,11 +1,30 @@
 import type { Rank, State, Suit } from '../core';
 import type { CardId } from '../ai/threatModel';
 import { setMessage, setReadingControlsRevealed, type HandDiagramSession } from './handDiagramSession';
+import {
+  canGuidedAdvanceByProfile,
+  shouldScorePracticeProfile,
+  type InteractionProfile,
+  type PracticeInteractionProfile
+} from './interactionProfiles';
+
+export type HandDiagramSecondaryActionButton = {
+  id: string;
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  title?: string;
+};
+
+export type HandDiagramSecondaryActionRow = {
+  buttons: HandDiagramSecondaryActionButton[];
+  className?: string;
+};
 
 type HandDiagramNavigationDeps = {
   displayMode: string;
   showGuides: boolean;
-  practiceSession: { solutionMode?: boolean; isTerminal?: boolean } | null;
+  practiceSession: { interactionProfile: PracticeInteractionProfile; isTerminal?: boolean } | null;
   inevitableFailureAlert: boolean;
   runStatus: 'idle' | 'success' | 'failure';
   pendingArticleScriptChoice: () => any;
@@ -17,14 +36,14 @@ type HandDiagramNavigationDeps = {
   currentArticleScriptStateLabel: () => string | null;
   currentArticleScriptTerminalLabel: () => string | null;
   shouldBlockArticleScriptUserAdvance: (args: {
-    profile: 'story-viewing' | 'puzzle-solving';
+    profile: InteractionProfile;
     isUserTurn: boolean;
     hasRememberedTail: boolean;
     trickFrozen: boolean;
     canLeadDismiss: boolean;
     phase: 'play' | 'end';
   }) => boolean;
-  currentArticleScriptInteractionProfile: () => 'story-viewing' | 'puzzle-solving';
+  currentArticleScriptInteractionProfile: () => InteractionProfile;
   currentProblem: { userControls: Array<'N' | 'E' | 'S' | 'W'> };
   trickFrozen: boolean;
   canLeadDismiss: boolean;
@@ -78,13 +97,14 @@ type HandDiagramNavigationDeps = {
   currentProblemVariantId: string | null;
   userPlayHistory: unknown[];
   encodeUserHistoryForUrl: (history: unknown[]) => string;
-  beginPracticeRun: (solutionMode: boolean) => void;
+  beginPracticeRun: (profile: PracticeInteractionProfile) => void;
   goToNextPracticePuzzle: () => void;
   readingRevealEnabled: boolean;
   render: () => void;
   currentArticleScriptStateId: () => string | null;
   currentArticleScriptReplayCard: () => CardId | null;
   resolveExplicitBranchAdvanceAction: (args: { unresolvedOptionCount: number; followPromptActive: boolean }) => 'prompt' | 'choose' | 'choose-single' | 'none';
+  secondaryActionRow: HandDiagramSecondaryActionRow | null;
 };
 
 function currentTurnPrompt(view: State, deps: HandDiagramNavigationDeps): string {
@@ -133,6 +153,7 @@ function renderOutcomeModule(args: {
     hintLoading
   } = deps;
   const widgetStatus = handDiagramSession.status;
+  const hasStatusMessage = handDiagramSession.status.type === 'message' && Boolean(handDiagramSession.status.text);
 
   const outcome = document.createElement('div');
   const outcomeTone =
@@ -182,7 +203,7 @@ function renderOutcomeModule(args: {
     return outcome;
   }
 
-  if (activeHint) {
+  if (activeHint && !hasStatusMessage) {
     outcome.classList.add('hint-active');
     const prefix = document.createElement('span');
     prefix.className = 'hint-prefix';
@@ -312,7 +333,7 @@ function renderPracticeSecondaryActions(args: {
   resetGame: HandDiagramNavigationDeps['resetGame'];
   currentSeed: number;
   goToNextPracticePuzzle: HandDiagramNavigationDeps['goToNextPracticePuzzle'];
-}): HTMLElement | null {
+}): HandDiagramSecondaryActionRow | null {
   const {
     displayMode,
     practiceSession,
@@ -321,61 +342,77 @@ function renderPracticeSecondaryActions(args: {
     currentSeed,
     goToNextPracticePuzzle
   } = args;
+  const practiceProfile: PracticeInteractionProfile = practiceSession?.interactionProfile ?? 'puzzle-solving';
 
-  if (displayMode === 'practice' && practiceSession?.solutionMode) {
-    const actions = document.createElement('div');
-    actions.className = 'practice-actions practice-secondary-actions';
-
-    const replayBtn = document.createElement('button');
-    replayBtn.type = 'button';
-    replayBtn.textContent = 'Replay';
-    replayBtn.onclick = () => {
-      beginPracticeRun(false);
-      resetGame(currentSeed, 'practiceReplay');
+  if (displayMode === 'practice' && !shouldScorePracticeProfile(practiceProfile)) {
+    return {
+      className: 'practice-secondary-actions',
+      buttons: [
+        {
+          id: 'practice-replay',
+          label: 'Replay',
+          onClick: () => {
+            beginPracticeRun('puzzle-solving');
+            resetGame(currentSeed, 'practiceReplay');
+          }
+        },
+        {
+          id: 'practice-next',
+          label: 'Next Puzzle',
+          onClick: () => goToNextPracticePuzzle()
+        }
+      ]
     };
-    actions.appendChild(replayBtn);
-
-    const nextBtn = document.createElement('button');
-    nextBtn.type = 'button';
-    nextBtn.textContent = 'Next Puzzle';
-    nextBtn.onclick = () => goToNextPracticePuzzle();
-    actions.appendChild(nextBtn);
-
-    return actions;
   }
 
-  if (displayMode === 'practice' && practiceSession?.isTerminal && !practiceSession.solutionMode) {
-    const actions = document.createElement('div');
-    actions.className = 'practice-actions practice-secondary-actions';
-
-    const replayBtn = document.createElement('button');
-    replayBtn.type = 'button';
-    replayBtn.textContent = 'Replay';
-    replayBtn.onclick = () => {
-      beginPracticeRun(false);
-      resetGame(currentSeed, 'practiceReplay');
+  if (displayMode === 'practice' && practiceSession?.isTerminal && shouldScorePracticeProfile(practiceProfile)) {
+    return {
+      className: 'practice-secondary-actions',
+      buttons: [
+        {
+          id: 'practice-replay',
+          label: 'Replay',
+          onClick: () => {
+            beginPracticeRun('puzzle-solving');
+            resetGame(currentSeed, 'practiceReplay');
+          }
+        },
+        {
+          id: 'practice-show-solution',
+          label: 'Show Solution',
+          onClick: () => {
+            beginPracticeRun('solution-viewing');
+            resetGame(currentSeed, 'practiceSolution');
+          }
+        },
+        {
+          id: 'practice-next',
+          label: 'Next Puzzle',
+          onClick: () => goToNextPracticePuzzle()
+        }
+      ]
     };
-    actions.appendChild(replayBtn);
-
-    const solutionBtn = document.createElement('button');
-    solutionBtn.type = 'button';
-    solutionBtn.textContent = 'Show Solution';
-    solutionBtn.onclick = () => {
-      beginPracticeRun(true);
-      resetGame(currentSeed, 'practiceSolution');
-    };
-    actions.appendChild(solutionBtn);
-
-    const nextBtn = document.createElement('button');
-    nextBtn.type = 'button';
-    nextBtn.textContent = 'Next Puzzle';
-    nextBtn.onclick = () => goToNextPracticePuzzle();
-    actions.appendChild(nextBtn);
-
-    return actions;
   }
 
   return null;
+}
+
+function renderSecondaryActionRow(row: HandDiagramSecondaryActionRow | null): HTMLElement | null {
+  if (!row || row.buttons.length === 0) return null;
+  const actions = document.createElement('div');
+  actions.className = `nav-secondary-actions${row.className ? ` ${row.className}` : ''}`;
+  for (const buttonDef of row.buttons) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = buttonDef.label;
+    btn.disabled = buttonDef.disabled === true;
+    if (buttonDef.title) btn.title = buttonDef.title;
+    if (buttonDef.onClick) {
+      btn.onclick = () => buttonDef.onClick?.();
+    }
+    actions.appendChild(btn);
+  }
+  return actions;
 }
 
 function renderTransportRow(args: {
@@ -448,6 +485,8 @@ function renderTransportRow(args: {
   transport.className = `transport-bar mode-${displayMode}`;
   const widgetTransport = isWidgetShellMode;
   const practiceAdvanceTransport = displayMode === 'practice';
+  const practiceProfile: PracticeInteractionProfile = practiceSession?.interactionProfile ?? 'puzzle-solving';
+  const practiceAdvanceEnabled = !practiceAdvanceTransport || canGuidedAdvanceByProfile(practiceProfile);
   const compactAdvanceTransport = widgetTransport || practiceAdvanceTransport;
 
   const restartBtn = document.createElement('button');
@@ -507,7 +546,7 @@ function renderTransportRow(args: {
       ? ((widgetArticleScript?.spec && ['in-script', 'pre-script'].includes(currentArticleScriptStateId() ?? ''))
           ? articleScriptAtEnd || ((!scriptedChoicePresentation || articleScriptUserAdvanceBlocked) && !currentArticleScriptReplayCard())
           : state.phase === 'end' && !trickFrozen)
-      : practiceAdvanceTransport && !practiceSession?.solutionMode
+      : practiceAdvanceTransport && !practiceAdvanceEnabled
         ? true
         : state.phase === 'end' && !trickFrozen;
     if (widgetArticleScript && articleScriptUserAdvanceBlocked) {
@@ -577,7 +616,7 @@ function renderTransportRow(args: {
           }
         }
       }
-      if (practiceAdvanceTransport && !practiceSession?.solutionMode) return;
+      if (practiceAdvanceTransport && !practiceAdvanceEnabled) return;
       advanceOneWidgetCard();
     };
     transport.appendChild(forwardBtn);
@@ -592,12 +631,12 @@ function renderTransportRow(args: {
       ? ((['in-script', 'pre-script'].includes(currentArticleScriptStateId() ?? ''))
           ? articleScriptAtEnd
           : state.phase === 'end' && !trickFrozen)
-      : practiceAdvanceTransport && !practiceSession?.solutionMode
+      : practiceAdvanceTransport && !practiceAdvanceEnabled
         ? true
         : state.phase === 'end' && !trickFrozen;
     jumpBtn.onclick = () => {
       dismissTransientWidgetOutcome(currentViewState());
-      if (practiceAdvanceTransport && !practiceSession?.solutionMode) return;
+      if (practiceAdvanceTransport && !practiceAdvanceEnabled) return;
       advanceWidgetToNextPauseBoundary();
     };
     transport.appendChild(jumpBtn);
@@ -740,7 +779,8 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     encodeUserHistoryForUrl,
     beginPracticeRun,
     goToNextPracticePuzzle,
-    render
+    render,
+    secondaryActionRow
   } = deps;
 
   const section = document.createElement('section');
@@ -748,7 +788,8 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
   const slot = document.createElement('div');
   slot.className = `hand-diagram-nav-slot mode-${displayMode}`;
   if (deps.readingRevealEnabled) slot.classList.add('reading-profile-nav');
-  const practicePuzzleMode = displayMode === 'practice' && !!practiceSession && !practiceSession.solutionMode;
+  const practiceProfile: PracticeInteractionProfile = practiceSession?.interactionProfile ?? 'puzzle-solving';
+  const practicePuzzleMode = displayMode === 'practice' && !!practiceSession && shouldScorePracticeProfile(practiceProfile);
   const warningStatusActive = inevitableFailureAlert && runStatus !== 'success' && runStatus !== 'failure';
   const scriptedChoice = pendingArticleScriptChoice();
   const scriptedChoicePresentation = currentArticleScriptChoicePresentation();
@@ -802,7 +843,7 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     practicePuzzleMode
   }));
   section.appendChild(slot);
-  const practiceActions = renderPracticeSecondaryActions({
+  const practiceSecondaryActionRow = renderPracticeSecondaryActions({
     displayMode,
     practiceSession,
     beginPracticeRun,
@@ -810,6 +851,7 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     currentSeed,
     goToNextPracticePuzzle
   });
-  if (practiceActions) section.appendChild(practiceActions);
+  const secondaryActions = renderSecondaryActionRow(practiceSecondaryActionRow ?? secondaryActionRow);
+  if (secondaryActions) section.appendChild(secondaryActions);
   return section;
 }
