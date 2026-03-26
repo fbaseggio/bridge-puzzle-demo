@@ -137,3 +137,36 @@ export function resolveExplicitBranchAdvanceAction(args: {
   if (unresolvedOptionCount === 1) return 'choose-single';
   return 'none';
 }
+
+export function canReplayArticleScriptRememberedTail(args: {
+  hasPendingChoice: boolean;
+  cursorInRememberedHistory: boolean;
+}): boolean {
+  const { hasPendingChoice, cursorInRememberedHistory } = args;
+  return !hasPendingChoice && cursorInRememberedHistory;
+}
+
+export function shouldPauseArticleScriptAutoplayAtChoice(args: {
+  choice: ArticleScriptChoiceStep | null;
+  hasRememberedTail: boolean;
+}): boolean {
+  const { choice, hasRememberedTail } = args;
+  return Boolean(choice) && (choice?.optionMode ?? 'explicit') === 'explicit' && !hasRememberedTail;
+}
+
+export function canAutoplayArticleScriptDefender(args: {
+  autoplayEw: boolean;
+  isUserTurn: boolean;
+  phase: ScriptPhase;
+  trickFrozen: boolean;
+  canLeadDismiss: boolean;
+  choice: ArticleScriptChoiceStep | null;
+  hasRememberedTail: boolean;
+}): boolean {
+  const { autoplayEw, isUserTurn, phase, trickFrozen, canLeadDismiss, choice, hasRememberedTail } = args;
+  return autoplayEw
+    && !isUserTurn
+    && phase !== 'end'
+    && (!trickFrozen || canLeadDismiss)
+    && !shouldPauseArticleScriptAutoplayAtChoice({ choice, hasRememberedTail });
+}

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { doubleDummy01Script, experimentalDraftIntroScript } from '../../src/demo/articleScripts';
 import {
+  canAutoplayArticleScriptDefender,
+  canReplayArticleScriptRememberedTail,
   chooseArticleScriptBranchOptionForProfile,
   explicitChoiceStepForBranch,
   isArticleScriptBranchComplete,
   previousUnfinishedArticleScriptBranchCursor,
   resolveExplicitBranchAdvanceAction,
+  shouldPauseArticleScriptAutoplayAtChoice,
   shouldAutoAdvanceNonExplicitChoiceForProfile,
   shouldBlockArticleScriptUserAdvance,
   type ArticleScriptChoicePresentationLike
@@ -156,5 +159,41 @@ describe('article script interaction policy', () => {
     expect(resolveExplicitBranchAdvanceAction({ unresolvedOptionCount: 2, followPromptActive: true })).toBe('choose');
     expect(resolveExplicitBranchAdvanceAction({ unresolvedOptionCount: 1, followPromptActive: false })).toBe('choose-single');
     expect(resolveExplicitBranchAdvanceAction({ unresolvedOptionCount: 0, followPromptActive: false })).toBe('none');
+  });
+
+  it('does not replay remembered tail through a live pending choice', () => {
+    expect(canReplayArticleScriptRememberedTail({ hasPendingChoice: true, cursorInRememberedHistory: true })).toBe(false);
+    expect(canReplayArticleScriptRememberedTail({ hasPendingChoice: false, cursorInRememberedHistory: true })).toBe(true);
+  });
+
+  it('pauses scripted defender autoplay at explicit choices unless the branch is remembered', () => {
+    const explicitChoice = { kind: 'choice', seat: 'E', options: ['DJ', 'ST'], prompt: "Pick East's play" } as const;
+
+    expect(shouldPauseArticleScriptAutoplayAtChoice({ choice: explicitChoice, hasRememberedTail: false })).toBe(true);
+    expect(shouldPauseArticleScriptAutoplayAtChoice({ choice: explicitChoice, hasRememberedTail: true })).toBe(false);
+
+    expect(
+      canAutoplayArticleScriptDefender({
+        autoplayEw: true,
+        isUserTurn: false,
+        phase: 'play',
+        trickFrozen: false,
+        canLeadDismiss: false,
+        choice: explicitChoice,
+        hasRememberedTail: false
+      })
+    ).toBe(false);
+
+    expect(
+      canAutoplayArticleScriptDefender({
+        autoplayEw: true,
+        isUserTurn: false,
+        phase: 'play',
+        trickFrozen: false,
+        canLeadDismiss: false,
+        choice: explicitChoice,
+        hasRememberedTail: true
+      })
+    ).toBe(true);
   });
 });

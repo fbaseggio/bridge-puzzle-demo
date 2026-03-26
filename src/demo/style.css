@@ -1555,14 +1555,70 @@ html.mode-widget {
   overflow: visible;
 }
 
+.board-navigation-area.mode-widget.reading-profile-nav {
+  overflow: hidden;
+}
+
+.board-navigation-area.mode-widget.reading-collapsed .outcome-module,
+.board-navigation-area.mode-widget.reading-collapsed .transport-bar,
+.board-navigation-area.mode-widget.reading-collapsed .practice-actions {
+  display: none;
+}
+
+.reading-reveal-edge {
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0;
+  min-width: 0;
+  width: 216px;
+  border: 0;
+  background: transparent;
+  color: rgba(51, 65, 85, 0.66);
+  cursor: pointer;
+}
+
+.reading-reveal-edge:hover {
+  color: rgba(30, 41, 59, 0.88);
+}
+
+.reading-reveal-line {
+  flex: 1 1 auto;
+  height: 1px;
+  background: rgba(100, 116, 139, 0.52);
+  transition: background-color 100ms ease, opacity 100ms ease;
+}
+
+.reading-reveal-edge:hover .reading-reveal-line {
+  background: rgba(71, 85, 105, 0.72);
+}
+
+.reading-reveal-chevron {
+  font-size: 14px;
+  line-height: 1;
+  transition: color 100ms ease, transform 100ms ease;
+}
+
+.reading-reveal-edge:hover .reading-reveal-chevron {
+  transform: translateY(1px);
+}
+
 .mode-practice .board-navigation-area.mode-practice {
-  margin-top: var(--controls-gap-y, 18px);
-  gap: 10px;
-  width: max-content;
+  margin-top: 0;
+  min-height: 58px;
+  width: calc(var(--hand-box-w) * 2 + var(--trick-box-w) + var(--table-gap-x, 8px) * 2);
   max-width: 100%;
   margin-left: auto;
   margin-right: auto;
   justify-items: center;
+  position: relative;
+  overflow: visible;
 }
 
 .board-navigation-area.show-guides::before {
@@ -1782,7 +1838,8 @@ html.mode-widget {
   background: #f3f6fa;
 }
 
-.mode-widget .outcome-module {
+.mode-widget .outcome-module,
+.mode-practice .outcome-module {
   position: absolute;
   bottom: 30px;
   left: 50%;
@@ -1812,7 +1869,10 @@ html.mode-widget {
 
 .mode-widget .outcome-module.neutral,
 .mode-widget .outcome-module.hint-active,
-.mode-widget .outcome-module.dds-loading {
+.mode-widget .outcome-module.dds-loading,
+.mode-practice .outcome-module.neutral,
+.mode-practice .outcome-module.hint-active,
+.mode-practice .outcome-module.dds-loading {
   border-color: transparent;
   background: transparent;
 }
@@ -1864,7 +1924,8 @@ html.mode-widget {
   font-weight: 700;
 }
 
-.mode-widget .transport-bar {
+.mode-widget .transport-bar,
+.mode-practice .transport-bar {
   position: absolute;
   left: 50%;
   top: 32px;
