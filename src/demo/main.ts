@@ -1039,6 +1039,7 @@ let articleScriptFollowPromptCursor: number | null = null;
 let articleScriptCompletedBranches = new Set<string>();
 let articleScriptTriedBranchOptions = new Map<string, Set<CardId>>();
 let articleScriptStickyMessage = false;
+let dismissedWidgetOutcomeKey: string | null = null;
 let articleScriptDerivedCache:
   | {
       history: CardId[];
@@ -1301,6 +1302,35 @@ function clearWidgetMessage(): void {
   if (widgetStatus.type !== 'message') return;
   widgetStatus = { type: 'default', text: '' };
   articleScriptStickyMessage = false;
+}
+
+function currentDismissibleWidgetOutcomeKey(view: State): string | null {
+  if (widgetStatus.type === 'message' && widgetStatus.text) {
+    return `message:${articleScriptState?.cursor ?? -1}:${widgetStatus.html ? 'html:' : 'text:'}${widgetStatus.text}`;
+  }
+  if (displayMode !== 'widget') return null;
+  if (runStatus === 'success' || runStatus === 'failure') return `run:${runStatus}:${state.phase}`;
+  if (inevitableFailureAlert && runStatus !== 'success' && runStatus !== 'failure') return 'warning:inevitable-failure';
+  if (articleScriptState) {
+    const terminalLabel = currentArticleScriptTerminalLabel();
+    if (terminalLabel === 'Complete') return `script-complete:${articleScriptState.cursor}:${currentArticleScriptStateLabel() ?? ''}`;
+    const statusMessage = currentArticleScriptStatusMessage();
+    if (statusMessage) return `script-status:${articleScriptState.cursor}:${statusMessage}`;
+  }
+  void view;
+  return null;
+}
+
+function dismissTransientWidgetOutcome(view: State): void {
+  clearWidgetMessage();
+  const key = currentDismissibleWidgetOutcomeKey(view);
+  if (key) dismissedWidgetOutcomeKey = key;
+}
+
+function clearDismissedWidgetOutcomeIfChanged(view: State): void {
+  if (!dismissedWidgetOutcomeKey) return;
+  const key = currentDismissibleWidgetOutcomeKey(view);
+  if (key !== dismissedWidgetOutcomeKey) dismissedWidgetOutcomeKey = null;
 }
 
 function clearDdErrorVisual(): void {
@@ -5473,25 +5503,6 @@ function renderArticleScriptBranchPanel(): HTMLElement | null {
   return panel;
 }
 
-function applyWidgetOutcomeLayoutClasses(): void {
-  const outcomes = root.querySelectorAll<HTMLElement>('.board-navigation-area.mode-widget .outcome-module');
-  for (const outcome of outcomes) {
-    outcome.classList.remove('is-short-message', 'is-medium-message', 'is-long-message');
-    const text = (outcome.textContent ?? outcome.innerText ?? '').trim();
-    const styles = getComputedStyle(outcome);
-    const lineHeightPx = Number.parseFloat(styles.lineHeight);
-    const lineHeight = Number.isFinite(lineHeightPx) && lineHeightPx > 0 ? lineHeightPx : 14;
-    const lineCount = Math.max(1, Math.round(outcome.scrollHeight / lineHeight));
-    if (lineCount >= 2) {
-      outcome.classList.add('is-long-message');
-    } else if (text.length > 60) {
-      outcome.classList.add('is-medium-message');
-    } else {
-      outcome.classList.add('is-short-message');
-    }
-  }
-}
-
 function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
   return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
 }
@@ -5557,6 +5568,7 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
       table.title = 'Click to dismiss trick';
     }
     table.onclick = () => {
+      dismissTransientWidgetOutcome(currentViewState());
       unfreezeTrick(true);
       render();
     };
@@ -5595,7 +5607,10 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
     startBtn.type = 'button';
     startBtn.className = 'start-overlay-btn';
     startBtn.textContent = 'Start';
-    startBtn.onclick = () => launchStartSequence();
+    startBtn.onclick = () => {
+      dismissTransientWidgetOutcome(currentViewState());
+      launchStartSequence();
+    };
     table.appendChild(startBtn);
   }
 
@@ -5886,6 +5901,8 @@ function renderBoardNavigationArea(view: State): HTMLElement {
     && (!trickFrozen || canLeadDismiss)
     && state.phase !== 'end'
   );
+  const dismissedOutcomeKey = currentDismissibleWidgetOutcomeKey(view);
+  const suppressDismissedOutcome = dismissedOutcomeKey !== null && dismissedOutcomeKey === dismissedWidgetOutcomeKey;
 
   const outcome = document.createElement('div');
   const outcomeTone =
@@ -5899,7 +5916,15 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   outcome.className = `outcome-module ${outcomeTone}`;
   const canonicalStatus = canonicalRunStatusText(runStatus);
   const terminalCanonical = runStatus === 'success' || runStatus === 'failure';
-  if (isWidgetShellMode && terminalCanonical) {
+  if (suppressDismissedOutcome) {
+    if (state.userControls.includes(view.turn) && (!trickFrozen || canLeadDismiss) && !(widgetArticleScript && articleScriptTerminalLabel === 'Complete')) {
+      outcome.textContent = withHintPrompt(`${seatName[view.turn]} to play.`, view);
+    } else if (!startPending) {
+      outcome.textContent = `${seatName[view.turn]} to play.`;
+    } else {
+      outcome.textContent = 'Press Start';
+    }
+  } else if (isWidgetShellMode && terminalCanonical) {
     outcome.textContent = canonicalStatus;
   } else if (warningStatusActive) {
     outcome.textContent = 'Failure is inevitable';
@@ -6021,6 +6046,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   if (widgetTransport) restartBtn.classList.add('script-transport-btn');
   if (widgetArticleScript) restartBtn.disabled = widgetArticleScript.cursor === widgetArticleScript.initialCursor;
   restartBtn.onclick = () => {
+    dismissTransientWidgetOutcome(currentViewState());
     if (widgetArticleScript) {
       const matched = matchCurrentArticleScriptHistory();
       const choiceSelections = matched?.choiceSelections ?? {};
@@ -6056,6 +6082,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   if (widgetArticleScript) undoBtn.disabled = articleScriptAtAbsoluteStart;
   else if (!isWidgetShellMode) undoBtn.disabled = undoStack.length === 0;
   undoBtn.onclick = () => {
+    dismissTransientWidgetOutcome(currentViewState());
     if (widgetArticleScript) {
       replayArticleScriptToCursor(articleScriptUndoTargetCursor());
       render();
@@ -6088,6 +6115,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
       forwardBtn.disabled = forwardDisabled;
     }
     forwardBtn.onclick = () => {
+      dismissTransientWidgetOutcome(currentViewState());
       if (widgetArticleScript && articleScriptUserAdvanceBlocked) {
         if (articleScriptFollowPromptCursor === widgetArticleScript.cursor && followCurrentArticleScriptUserTurn()) {
           render();
@@ -6167,6 +6195,7 @@ function renderBoardNavigationArea(view: State): HTMLElement {
         ? true
       : state.phase === 'end' && !trickFrozen;
     jumpBtn.onclick = () => {
+      dismissTransientWidgetOutcome(currentViewState());
       if (practiceAdvanceTransport && !practiceSession?.solutionMode) return;
       advanceWidgetToNextPauseBoundary();
     };
@@ -6423,6 +6452,7 @@ function render(): void {
     clearDdErrorVisual();
   }
   const view = currentViewState();
+  clearDismissedWidgetOutcomeIfChanged(view);
   const isWidgetReadingMode = widgetReadingMode();
 
   root.innerHTML = '';
@@ -6490,7 +6520,6 @@ function render(): void {
     root.appendChild(renderDebugSection());
   }
   applyInlineSettingsPlacement();
-  if (isWidgetShellMode) applyWidgetOutcomeLayoutClasses();
   renderingNow = false;
   syncSingletonAutoplay();
   syncAlwaysHint();

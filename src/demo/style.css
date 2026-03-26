@@ -1784,7 +1784,7 @@ html.mode-widget {
 
 .mode-widget .outcome-module {
   position: absolute;
-  top: 2px;
+  bottom: 30px;
   left: 50%;
   transform: translateX(-50%);
   padding: 4px 8px;
@@ -1801,40 +1801,13 @@ html.mode-widget {
   box-sizing: border-box;
   overflow: auto;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
   z-index: 1;
   scrollbar-width: thin;
-}
-
-.mode-widget .outcome-module.is-short-message {
-  top: 2px;
-  width: max-content;
-  max-width: min(420px, calc(100% - 8px));
-  min-height: 24px;
-  max-height: 24px;
-  overflow: hidden;
-}
-
-.mode-widget .outcome-module.is-medium-message {
-  top: 2px;
   width: max-content;
   max-width: min(620px, calc(100vw - 24px));
-  min-height: 24px;
-  max-height: 24px;
-  overflow: hidden;
-}
-
-.mode-widget .outcome-module.is-long-message {
-  top: -10px;
-  width: max-content;
-  max-width: min(620px, calc(100vw - 24px));
-  min-height: 42px;
   max-height: 42px;
-  align-items: flex-start;
-  padding-top: 4px;
-  padding-bottom: 4px;
-  text-wrap: balance;
 }
 
 .mode-widget .outcome-module.neutral,
