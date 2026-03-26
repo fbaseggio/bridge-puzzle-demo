@@ -2713,10 +2713,10 @@ function formatHandInitSummary(s: State, seat: Seat): string {
 }
 
 function rankPalette(colorClass: string): { text: string; background: string } {
-  if (colorClass === 'rank--purple') return { text: '#7d52a4', background: 'rgba(125, 82, 164, 0.08)' };
-  if (colorClass === 'rank--green') return { text: '#1a8750', background: 'rgba(26, 135, 80, 0.08)' };
-  if (colorClass === 'rank--blue') return { text: '#3564c2', background: 'rgba(53, 100, 194, 0.08)' };
-  if (colorClass === 'rank--amber') return { text: '#a86416', background: 'rgba(168, 100, 22, 0.08)' };
+  if (colorClass === 'rank--purple') return { text: '#8a5db5', background: 'rgba(138, 93, 181, 0.06)' };
+  if (colorClass === 'rank--green') return { text: '#197f4b', background: 'rgba(25, 127, 75, 0.06)' };
+  if (colorClass === 'rank--blue') return { text: '#315fb9', background: 'rgba(49, 95, 185, 0.06)' };
+  if (colorClass === 'rank--amber') return { text: '#a86416', background: 'rgba(168, 100, 22, 0.06)' };
   if (colorClass === 'rank--grey') return { text: '#6a655d', background: 'rgba(106, 101, 93, 0.16)' };
   return { text: '#1c1917', background: 'transparent' };
 }

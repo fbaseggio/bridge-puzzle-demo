@@ -1089,18 +1089,18 @@ html.mode-widget {
 .rank.rank--blue,
 .rank.rank--amber,
 .rank.rank--purple {
-  font-weight: 540;
-  font-variation-settings: 'wght' 540;
-  text-shadow: none;
+  font-weight: 533;
+  font-variation-settings: 'wght' 533;
+  text-shadow: 0 0 0.12px rgba(15, 23, 42, 0.22);
 }
 
 .rank.rank--green {
-  color: #1a8750;
+  color: #197f4b;
   background: transparent;
 }
 
 .rank.rank--blue {
-  color: #3564c2;
+  color: #315fb9;
   background: transparent;
 }
 
@@ -1110,7 +1110,7 @@ html.mode-widget {
 }
 
 .rank.rank--purple {
-  color: #7d52a4;
+  color: #8a5db5;
   background: transparent;
 }
 
