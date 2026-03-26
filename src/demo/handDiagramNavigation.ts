@@ -1,13 +1,6 @@
 import type { Rank, State, Suit } from '../core';
 import type { CardId } from '../ai/threatModel';
-
-type WidgetStatusLike =
-  | { type: 'default'; text: string; html?: false | undefined }
-  | { type: 'message'; text: string; html?: boolean | undefined }
-  | { type: 'narration'; text: string; html?: false | undefined }
-  | { type: 'hint'; text: string; html?: false | undefined };
-
-type ArticleScriptRef<T> = { current: T };
+import { setMessage, setReadingControlsRevealed, type HandDiagramSession } from './handDiagramSession';
 
 type HandDiagramNavigationDeps = {
   displayMode: string;
@@ -37,14 +30,13 @@ type HandDiagramNavigationDeps = {
   canLeadDismiss: boolean;
   state: State;
   currentDismissibleWidgetOutcomeKey: (view: State) => string | null;
-  dismissedWidgetOutcomeKey: string | null;
   canonicalRunStatusText: (status: 'idle' | 'success' | 'failure') => string;
   isWidgetShellMode: boolean;
   hintLoading: boolean;
   ddsLoadingForHint: boolean;
   activeHint: { bestCards: CardId[]; textLine: string } | null;
   hintDiag: (message: string) => void;
-  widgetStatus: WidgetStatusLike;
+  handDiagramSession: HandDiagramSession;
   narrate: boolean;
   widgetNarrationLatest: { text: string } | null;
   currentArticleScriptStatusMessage: () => string | null;
@@ -70,8 +62,6 @@ type HandDiagramNavigationDeps = {
   backupLastUserPlay: () => void;
   undoStack: unknown[];
   followCurrentArticleScriptUserTurn: () => boolean;
-  articleScriptFollowPromptCursorRef: ArticleScriptRef<number | null>;
-  articleScriptStickyMessageRef: ArticleScriptRef<boolean>;
   legalPlays: typeof import('../core').legalPlays;
   toCardId: (suit: string, rank: string) => CardId;
   chooseCurrentArticleScriptBranchOption: () => CardId | null;
@@ -92,8 +82,6 @@ type HandDiagramNavigationDeps = {
   beginPracticeRun: (solutionMode: boolean) => void;
   goToNextPracticePuzzle: () => void;
   readingRevealEnabled: boolean;
-  readingControlsRevealed: boolean;
-  setReadingControlsRevealed: (revealed: boolean) => void;
   render: () => void;
   currentArticleScriptStateId: () => string | null;
   currentArticleScriptReplayCard: () => CardId | null;
@@ -102,11 +90,6 @@ type HandDiagramNavigationDeps = {
 
 function currentTurnPrompt(view: State, deps: HandDiagramNavigationDeps): string {
   return deps.withHintPrompt(`${deps.seatName[view.turn]} to play.`, view);
-}
-
-function setWidgetMessage(status: WidgetStatusLike, text: string): void {
-  status.type = 'message';
-  status.text = text;
 }
 
 // Next likely seam: transport button wiring can split from outcome/status rendering
@@ -140,7 +123,7 @@ function renderOutcomeModule(args: {
     ddsLoadingForHint,
     activeHint,
     hintDiag,
-    widgetStatus,
+    handDiagramSession,
     narrate,
     widgetNarrationLatest,
     currentArticleScriptStatusMessage,
@@ -153,6 +136,7 @@ function renderOutcomeModule(args: {
     displayRank,
     hintLoading
   } = deps;
+  const widgetStatus = handDiagramSession.status;
 
   const outcome = document.createElement('div');
   const outcomeTone =
@@ -233,20 +217,17 @@ function renderOutcomeModule(args: {
       return outcome;
     }
     if (widgetStatus.type === 'hint') {
-      widgetStatus.type = 'default';
-      widgetStatus.text = '';
+      handDiagramSession.status = { type: 'default', text: '' };
     }
     if (!widgetArticleScript && narrate && widgetNarrationLatest?.text) {
-      widgetStatus.type = 'narration';
-      widgetStatus.text = widgetNarrationLatest.text;
+      handDiagramSession.status = { type: 'narration', text: widgetNarrationLatest.text };
     } else if ((!narrate || widgetArticleScript) && widgetStatus.type === 'narration') {
-      widgetStatus.type = 'default';
-      widgetStatus.text = '';
+      handDiagramSession.status = { type: 'default', text: '' };
     }
-    if (widgetStatus.type === 'message' && widgetStatus.text) {
+    if (handDiagramSession.status.type === 'message' && handDiagramSession.status.text) {
       outcome.classList.add('article-script-message');
-      if (widgetStatus.html) outcome.innerHTML = widgetStatus.text;
-      else outcome.textContent = widgetStatus.text;
+      if (handDiagramSession.status.html) outcome.innerHTML = handDiagramSession.status.text;
+      else outcome.textContent = handDiagramSession.status.text;
     } else if (widgetArticleScript && scriptedChoice?.prompt) {
       outcome.textContent = `${scriptedPrefix}${scriptedChoice.prompt}`;
     } else if (widgetArticleScript && currentArticleScriptStatusMessage()) {
@@ -260,8 +241,8 @@ function renderOutcomeModule(args: {
       } else {
         outcome.textContent = articleScriptStateLabel;
       }
-    } else if (widgetStatus.type === 'narration' && widgetStatus.text) {
-      outcome.textContent = widgetStatus.text;
+    } else if (handDiagramSession.status.type === 'narration' && handDiagramSession.status.text) {
+      outcome.textContent = handDiagramSession.status.text;
     } else if (state.userControls.includes(view.turn) && (!trickFrozen || canLeadDismiss)) {
       outcome.textContent = currentTurnPrompt(view, deps);
     } else if (!startPending) {
@@ -274,10 +255,10 @@ function renderOutcomeModule(args: {
 
   if (terminalCanonical) {
     outcome.textContent = canonicalStatus;
-  } else if (widgetStatus.type === 'message' && widgetStatus.text) {
+  } else if (handDiagramSession.status.type === 'message' && handDiagramSession.status.text) {
     outcome.classList.add('article-script-message');
-    if (widgetStatus.html) outcome.innerHTML = widgetStatus.text;
-    else outcome.textContent = widgetStatus.text;
+    if (handDiagramSession.status.html) outcome.innerHTML = handDiagramSession.status.text;
+    else outcome.textContent = handDiagramSession.status.text;
   } else if (scriptedChoice?.prompt) {
     outcome.textContent = `${scriptedPrefix}${scriptedChoice.prompt}`;
   } else if (currentArticleScriptStatusMessage()) {
@@ -323,14 +304,13 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     canLeadDismiss,
     state,
     currentDismissibleWidgetOutcomeKey,
-    dismissedWidgetOutcomeKey,
     canonicalRunStatusText,
     isWidgetShellMode,
     hintLoading,
     ddsLoadingForHint,
     activeHint,
     hintDiag,
-    widgetStatus,
+    handDiagramSession,
     narrate,
     widgetNarrationLatest,
     currentArticleScriptStatusMessage,
@@ -353,8 +333,6 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     backupLastUserPlay,
     undoStack,
     followCurrentArticleScriptUserTurn,
-    articleScriptFollowPromptCursorRef,
-    articleScriptStickyMessageRef,
     legalPlays,
     toCardId,
     chooseCurrentArticleScriptBranchOption,
@@ -379,7 +357,9 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
 
   const section = document.createElement('section');
   section.className = `board-navigation-area mode-${displayMode}${showGuides ? ' show-guides' : ''}`;
-  if (deps.readingRevealEnabled) section.classList.add('reading-profile-nav');
+  const slot = document.createElement('div');
+  slot.className = `hand-diagram-nav-slot mode-${displayMode}`;
+  if (deps.readingRevealEnabled) slot.classList.add('reading-profile-nav');
   const practicePuzzleMode = displayMode === 'practice' && !!practiceSession && !practiceSession.solutionMode;
   const warningStatusActive = inevitableFailureAlert && runStatus !== 'success' && runStatus !== 'failure';
   const scriptedChoice = pendingArticleScriptChoice();
@@ -404,10 +384,10 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
       })
   );
   const dismissedOutcomeKey = currentDismissibleWidgetOutcomeKey(view);
-  const suppressDismissedOutcome = dismissedOutcomeKey !== null && dismissedOutcomeKey === dismissedWidgetOutcomeKey;
+  const suppressDismissedOutcome = dismissedOutcomeKey !== null && dismissedOutcomeKey === handDiagramSession.dismissedOutcomeKey;
 
-  if (deps.readingRevealEnabled && !deps.readingControlsRevealed) {
-    section.classList.add('reading-collapsed');
+  if (deps.readingRevealEnabled && !handDiagramSession.readingControlsRevealed) {
+    slot.classList.add('reading-collapsed');
     const reveal = document.createElement('button');
     reveal.type = 'button';
     reveal.className = 'reading-reveal-edge';
@@ -421,10 +401,11 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     chevron.textContent = '⌄';
     reveal.append(line, chevron);
     reveal.onclick = () => {
-      deps.setReadingControlsRevealed(true);
+      setReadingControlsRevealed(handDiagramSession, true);
       deps.render();
     };
-    section.appendChild(reveal);
+    slot.appendChild(reveal);
+    section.appendChild(slot);
     return section;
   }
 
@@ -439,7 +420,7 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     warningStatusActive,
     suppressDismissedOutcome
   });
-  section.appendChild(outcome);
+  slot.appendChild(outcome);
 
   const transport = document.createElement('div');
   transport.className = `transport-bar mode-${displayMode}`;
@@ -516,13 +497,13 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     forwardBtn.onclick = () => {
       dismissTransientWidgetOutcome(currentViewState());
       if (widgetArticleScript && articleScriptUserAdvanceBlocked) {
-        if (articleScriptFollowPromptCursorRef.current === widgetArticleScript.cursor && followCurrentArticleScriptUserTurn()) {
+        if (handDiagramSession.followPromptCursor === widgetArticleScript.cursor && followCurrentArticleScriptUserTurn()) {
           render();
           return;
         }
-        articleScriptFollowPromptCursorRef.current = widgetArticleScript.cursor;
-        articleScriptStickyMessageRef.current = false;
-        setWidgetMessage(widgetStatus, `Select ${seatName[view.turn]}'s next play, or click > again to follow script.`);
+        handDiagramSession.followPromptCursor = widgetArticleScript.cursor;
+        handDiagramSession.stickyMessage = false;
+        setMessage(handDiagramSession, `Select ${seatName[view.turn]}'s next play, or click > again to follow script.`);
         render();
         return;
       }
@@ -530,7 +511,7 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
         const unresolvedOptions = scriptedChoicePresentation.unresolvedOptions;
         const branchAdvanceAction = deps.resolveExplicitBranchAdvanceAction({
           unresolvedOptionCount: unresolvedOptions.length,
-          followPromptActive: articleScriptFollowPromptCursorRef.current === widgetArticleScript.cursor
+          followPromptActive: handDiagramSession.followPromptCursor === widgetArticleScript.cursor
         });
         if (branchAdvanceAction === 'choose') {
           const chosenCardId = chooseCurrentArticleScriptBranchOption();
@@ -543,17 +524,17 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
             clearArticleScriptFollowPrompt();
             runTurn(play);
             if (!choiceMessage) {
-              articleScriptStickyMessageRef.current = true;
-              setWidgetMessage(widgetStatus, `Choosing ${chosenCardId}.`);
+              handDiagramSession.stickyMessage = true;
+              setMessage(handDiagramSession, `Choosing ${chosenCardId}.`);
             }
             render();
             return;
           }
         }
         if (branchAdvanceAction === 'prompt') {
-          articleScriptFollowPromptCursorRef.current = widgetArticleScript.cursor;
-          articleScriptStickyMessageRef.current = false;
-          setWidgetMessage(widgetStatus, `Choose ${seatName[view.turn]}'s play, or click > again to choose the lowest.`);
+          handDiagramSession.followPromptCursor = widgetArticleScript.cursor;
+          handDiagramSession.stickyMessage = false;
+          setMessage(handDiagramSession, `Choose ${seatName[view.turn]}'s play, or click > again to choose the lowest.`);
           render();
           return;
         }
@@ -566,8 +547,8 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
             clearArticleScriptFollowPrompt();
             runTurn(play);
             if (!choiceMessage) {
-              articleScriptStickyMessageRef.current = true;
-              setWidgetMessage(widgetStatus, `Choosing ${chosenCardId}.`);
+              handDiagramSession.stickyMessage = true;
+              setMessage(handDiagramSession, `Choosing ${chosenCardId}.`);
             }
             render();
             return;
@@ -665,7 +646,8 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     transport.appendChild(renderSettingsButton('widget'));
   }
 
-  section.appendChild(transport);
+  slot.appendChild(transport);
+  section.appendChild(slot);
   if (displayMode === 'practice' && practiceSession?.solutionMode) {
     const actions = document.createElement('div');
     actions.className = 'practice-actions practice-secondary-actions';

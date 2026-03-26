@@ -1541,7 +1541,6 @@ html.mode-widget {
   display: grid;
   gap: 10px;
   justify-items: center;
-  position: relative;
   width: min(calc(var(--hand-box-w) * 2 + var(--trick-box-w) + var(--table-gap-x, 8px) * 2), 100%);
   margin-left: auto;
   margin-right: auto;
@@ -1549,20 +1548,24 @@ html.mode-widget {
 
 .board-navigation-area.mode-widget {
   margin-top: 0;
-  height: 58px;
   width: calc(var(--hand-box-w) * 2 + var(--trick-box-w) + var(--table-gap-x, 8px) * 2);
+}
+
+.hand-diagram-nav-slot {
   position: relative;
+  width: calc(var(--hand-box-w) * 2 + var(--trick-box-w) + var(--table-gap-x, 8px) * 2);
+  min-height: 58px;
   overflow: visible;
 }
 
-.board-navigation-area.mode-widget.reading-profile-nav {
-  overflow: hidden;
+.hand-diagram-nav-slot.reading-collapsed .outcome-module,
+.hand-diagram-nav-slot.reading-collapsed .transport-bar,
+.hand-diagram-nav-slot.reading-collapsed .practice-actions {
+  display: none;
 }
 
-.board-navigation-area.mode-widget.reading-collapsed .outcome-module,
-.board-navigation-area.mode-widget.reading-collapsed .transport-bar,
-.board-navigation-area.mode-widget.reading-collapsed .practice-actions {
-  display: none;
+.hand-diagram-nav-slot.reading-profile-nav.reading-collapsed {
+  overflow: hidden;
 }
 
 .reading-reveal-edge {
@@ -1611,14 +1614,11 @@ html.mode-widget {
 
 .mode-practice .board-navigation-area.mode-practice {
   margin-top: 0;
-  min-height: 58px;
   width: calc(var(--hand-box-w) * 2 + var(--trick-box-w) + var(--table-gap-x, 8px) * 2);
   max-width: 100%;
   margin-left: auto;
   margin-right: auto;
   justify-items: center;
-  position: relative;
-  overflow: visible;
 }
 
 .board-navigation-area.show-guides::before {
@@ -1838,8 +1838,8 @@ html.mode-widget {
   background: #f3f6fa;
 }
 
-.mode-widget .outcome-module,
-.mode-practice .outcome-module {
+.hand-diagram-nav-slot.mode-widget .outcome-module,
+.hand-diagram-nav-slot.mode-practice .outcome-module {
   position: absolute;
   bottom: 30px;
   left: 50%;
@@ -1867,12 +1867,12 @@ html.mode-widget {
   max-height: 42px;
 }
 
-.mode-widget .outcome-module.neutral,
-.mode-widget .outcome-module.hint-active,
-.mode-widget .outcome-module.dds-loading,
-.mode-practice .outcome-module.neutral,
-.mode-practice .outcome-module.hint-active,
-.mode-practice .outcome-module.dds-loading {
+.hand-diagram-nav-slot.mode-widget .outcome-module.neutral,
+.hand-diagram-nav-slot.mode-widget .outcome-module.hint-active,
+.hand-diagram-nav-slot.mode-widget .outcome-module.dds-loading,
+.hand-diagram-nav-slot.mode-practice .outcome-module.neutral,
+.hand-diagram-nav-slot.mode-practice .outcome-module.hint-active,
+.hand-diagram-nav-slot.mode-practice .outcome-module.dds-loading {
   border-color: transparent;
   background: transparent;
 }
@@ -1924,8 +1924,8 @@ html.mode-widget {
   font-weight: 700;
 }
 
-.mode-widget .transport-bar,
-.mode-practice .transport-bar {
+.hand-diagram-nav-slot.mode-widget .transport-bar,
+.hand-diagram-nav-slot.mode-practice .transport-bar {
   position: absolute;
   left: 50%;
   top: 32px;

@@ -100,6 +100,18 @@ import {
   shouldAutoAdvanceNonExplicitChoiceForProfile,
   shouldBlockArticleScriptUserAdvance
 } from './articleScriptInteractionPolicy';
+import {
+  clearDismissedOutcomeIfChanged,
+  clearFollowPrompt,
+  clearMessage,
+  createHandDiagramSession,
+  dismissOutcome,
+  markBranchOptionTried,
+  resetArticleScriptTracking,
+  resetReadingReveal,
+  setMessage,
+  type HandDiagramStatus
+} from './handDiagramSession';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -733,7 +745,7 @@ function currentArticleScriptReplayCard(): CardId | null {
 }
 
 function clearArticleScriptFollowPrompt(): void {
-  articleScriptFollowPromptCursor = null;
+  clearFollowPrompt(handDiagramSession);
 }
 
 function currentArticleScriptHasRememberedTail(): boolean {
@@ -749,17 +761,12 @@ function chooseCurrentArticleScriptBranchOption(): CardId | null {
     profile: currentArticleScriptInteractionProfile(),
     choicePresentation: currentArticleScriptChoicePresentation(),
     branchName: currentArticleScriptResolvedBranchName(),
-    triedBranchOptions: articleScriptTriedBranchOptions
+    triedBranchOptions: handDiagramSession.triedBranchOptions
   });
 }
 
 function recordArticleScriptBranchOptionChoice(branchName: string, cardId: CardId): void {
-  const tried = articleScriptTriedBranchOptions.get(branchName);
-  if (tried) {
-    tried.add(cardId);
-    return;
-  }
-  articleScriptTriedBranchOptions.set(branchName, new Set([cardId]));
+  markBranchOptionTried(handDiagramSession, branchName, cardId);
 }
 
 function seatAtHistoryCursor(history: CardId[], cursor: number): Seat | null {
@@ -809,12 +816,12 @@ function articleScriptIsStoryViewing(): boolean {
 }
 
 function resetWidgetReadingControlsReveal(): void {
-  widgetReadingControlsRevealed = false;
+  resetReadingReveal(handDiagramSession);
 }
 
 function isArticleScriptBranchComplete(branchName: string): boolean {
   if (!articleScriptState) return false;
-  return isArticleScriptBranchCompleteShared(articleScriptState.spec, articleScriptCompletedBranches, branchName);
+  return isArticleScriptBranchCompleteShared(articleScriptState.spec, handDiagramSession.completedBranches, branchName);
 }
 
 function previousUnfinishedArticleScriptBranchCursor(
@@ -827,7 +834,7 @@ function previousUnfinishedArticleScriptBranchCursor(
     initialCursor: articleScriptState.initialCursor,
     cursor,
     choiceSelections,
-    completedBranches: articleScriptCompletedBranches
+    completedBranches: handDiagramSession.completedBranches
   });
 }
 
@@ -871,8 +878,8 @@ function currentArticleScriptProgressSummary(): string {
     const selfCount = includeSelf && isArticleScriptBranchComplete(branchName) ? 1 : 0;
     return selfCount + childCount;
   };
-  const completedCount = rootBranch ? countCompleted(rootBranch, false) : articleScriptCompletedBranches.size;
-  return `Branches ${completedCount} · Mistakes ${articleScriptMistakeCount} · Hints ${articleScriptHintCount}`;
+  const completedCount = rootBranch ? countCompleted(rootBranch, false) : handDiagramSession.completedBranches.size;
+  return `Branches ${completedCount} · Mistakes ${handDiagramSession.mistakeCount} · Hints ${handDiagramSession.hintCount}`;
 }
 
 function syncArticleScriptCompletionProgress(): void {
@@ -880,7 +887,7 @@ function syncArticleScriptCompletionProgress(): void {
   if (currentArticleScriptHasPendingChoiceAtCursor()) return;
   if (currentArticleScriptTerminalLabel() !== 'Complete') return;
   const branchName = currentArticleScriptBranchName();
-  if (branchName) articleScriptCompletedBranches.add(branchName);
+  if (branchName) handDiagramSession.completedBranches.add(branchName);
 }
 
 function followCurrentArticleScriptUserTurn(): boolean {
@@ -889,7 +896,7 @@ function followCurrentArticleScriptUserTurn(): boolean {
   if (!currentProblem.userControls.includes(state.turn)) return false;
   const rememberedCardId = currentArticleScriptReplayCard();
   if (rememberedCardId) {
-    articleScriptHintCount += 1;
+    handDiagramSession.hintCount += 1;
     clearArticleScriptFollowPrompt();
     return advanceOneWidgetCard();
   }
@@ -901,7 +908,7 @@ function followCurrentArticleScriptUserTurn(): boolean {
   const legal = legalPlays(state).filter((candidate) => candidate.seat === state.turn);
   const play = legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId);
   if (!play) return false;
-  articleScriptHintCount += 1;
+  handDiagramSession.hintCount += 1;
   clearArticleScriptFollowPrompt();
   runTurn(play);
   return true;
@@ -1020,14 +1027,7 @@ let articleScriptState: {
         choiceSelections: {}
       }
     : null;
-let articleScriptHintCount = 0;
-let articleScriptMistakeCount = 0;
-let articleScriptFollowPromptCursor: number | null = null;
-let articleScriptCompletedBranches = new Set<string>();
-let articleScriptTriedBranchOptions = new Map<string, Set<CardId>>();
-let articleScriptStickyMessage = false;
-let dismissedWidgetOutcomeKey: string | null = null;
-let widgetReadingControlsRevealed = false;
+const handDiagramSession = createHandDiagramSession();
 let articleScriptDerivedCache:
   | {
       history: CardId[];
@@ -1087,9 +1087,6 @@ function applyWidgetProblemDefaults(): void {
   }
   narrate = true;
 }
-type WidgetStatusType = 'hint' | 'narration' | 'message' | 'script-status' | 'default';
-type WidgetStatus = { type: WidgetStatusType; text: string; html?: boolean };
-let widgetStatus: WidgetStatus = { type: 'default', text: '' };
 type WidgetNarrationEntry = { text: string; lines: string[]; seat: Seat | null; seq: number };
 let widgetNarrationEntries: WidgetNarrationEntry[] = [];
 let widgetNarrationLatest: WidgetNarrationEntry | null = null;
@@ -1283,18 +1280,16 @@ function clearHint(): void {
   activeHintKey = null;
   hintLoading = false;
   ddsLoadingForHint = false;
-  if (widgetStatus.type === 'hint') widgetStatus = { type: 'default', text: '' };
+  if (handDiagramSession.status.type === 'hint') handDiagramSession.status = { type: 'default', text: '' };
 }
 
 function clearWidgetMessage(): void {
-  if (widgetStatus.type !== 'message') return;
-  widgetStatus = { type: 'default', text: '' };
-  articleScriptStickyMessage = false;
+  clearMessage(handDiagramSession);
 }
 
 function currentDismissibleWidgetOutcomeKey(view: State): string | null {
-  if (widgetStatus.type === 'message' && widgetStatus.text) {
-    return `message:${articleScriptState?.cursor ?? -1}:${widgetStatus.html ? 'html:' : 'text:'}${widgetStatus.text}`;
+  if (handDiagramSession.status.type === 'message' && handDiagramSession.status.text) {
+    return `message:${articleScriptState?.cursor ?? -1}:${handDiagramSession.status.html ? 'html:' : 'text:'}${handDiagramSession.status.text}`;
   }
   if (displayMode !== 'widget') return null;
   if (runStatus === 'success' || runStatus === 'failure') return `run:${runStatus}:${state.phase}`;
@@ -1312,13 +1307,12 @@ function currentDismissibleWidgetOutcomeKey(view: State): string | null {
 function dismissTransientWidgetOutcome(view: State): void {
   clearWidgetMessage();
   const key = currentDismissibleWidgetOutcomeKey(view);
-  if (key) dismissedWidgetOutcomeKey = key;
+  dismissOutcome(handDiagramSession, key);
 }
 
 function clearDismissedWidgetOutcomeIfChanged(view: State): void {
-  if (!dismissedWidgetOutcomeKey) return;
   const key = currentDismissibleWidgetOutcomeKey(view);
-  if (key !== dismissedWidgetOutcomeKey) dismissedWidgetOutcomeKey = null;
+  clearDismissedOutcomeIfChanged(handDiagramSession, key);
 }
 
 function clearDdErrorVisual(): void {
@@ -1326,7 +1320,7 @@ function clearDdErrorVisual(): void {
 }
 
 function clearNarration(): void {
-  if (widgetStatus.type === 'narration') widgetStatus = { type: 'default', text: '' };
+  if (handDiagramSession.status.type === 'narration') handDiagramSession.status = { type: 'default', text: '' };
   widgetNarrationLatest = null;
   widgetNarrationBySeat = {};
 }
@@ -1336,7 +1330,7 @@ function clearWidgetNarrationFeed(): void {
   widgetNarrationLatest = null;
   widgetNarrationBySeat = {};
   lastNarratedSeq = 0;
-  if (widgetStatus.type === 'narration') widgetStatus = { type: 'default', text: '' };
+  if (handDiagramSession.status.type === 'narration') handDiagramSession.status = { type: 'default', text: '' };
 }
 
 function resetSemanticStreams(): void {
@@ -1919,7 +1913,7 @@ function syncWidgetNarrationFeedFromTeaching(): void {
     lastNarratedSeq = entry.seq;
   }
   if (narrate && !activeHint && widgetNarrationLatest) {
-    widgetStatus = { type: 'narration', text: widgetNarrationLatest.text };
+    handDiagramSession.status = { type: 'narration', text: widgetNarrationLatest.text };
   }
 }
 
@@ -2410,7 +2404,7 @@ function requestHint(): void {
           badCards: [],
           textLine: 'BEST: (hint available on your turn)'
         };
-        widgetStatus = { type: 'hint', text: activeHint.textLine };
+        handDiagramSession.status = { type: 'hint', text: activeHint.textLine };
         hintDiag('activeHint set (fallback)');
         render();
         return;
@@ -2418,7 +2412,7 @@ function requestHint(): void {
       hintDiag(`classify ok BEST=${hint.bestCards.join(' ') || '-'} BAD=${hint.badCards.join(' ') || '-'}`);
       activeHint = hint;
       activeHintKey = key;
-      widgetStatus = { type: 'hint', text: hint.textLine };
+      handDiagramSession.status = { type: 'hint', text: hint.textLine };
       hintDiag(`activeHint set best=${hint.bestCards.join(' ')} bad=${hint.badCards.join(' ') || '-'}`);
       render();
     }, 0);
@@ -2437,7 +2431,7 @@ function requestHint(): void {
           badCards: [],
           textLine: 'BEST: (DDS unavailable)'
         };
-        widgetStatus = { type: 'hint', text: activeHint.textLine };
+        handDiagramSession.status = { type: 'hint', text: activeHint.textLine };
         render();
         return;
       }
@@ -2466,7 +2460,7 @@ function syncAlwaysHint(): void {
   if (!hint) return;
   activeHint = hint;
   activeHintKey = key;
-  widgetStatus = { type: 'hint', text: hint.textLine };
+  handDiagramSession.status = { type: 'hint', text: hint.textLine };
   hintDiag(`always-hint updated BEST=${hint.bestCards.join(' ') || '-'} BAD=${hint.badCards.join(' ') || '-'}`);
   if (!renderingNow) render();
 }
@@ -2841,7 +2835,7 @@ function attemptClaim(): void {
   } as const;
   if (!onLead || !needsAllRemaining) {
     const message = 'Claim is only available on lead for the remaining tricks';
-    widgetStatus = { type: 'message', text: message };
+    setMessage(handDiagramSession, message);
     practiceClaimDebug = {
       ...baseDebug,
       claimDecision: 'rejected-practice',
@@ -2870,7 +2864,7 @@ function attemptClaim(): void {
   }
   incrementPracticeUndoUsage();
   const message = "You can't claim yet — keep playing";
-  widgetStatus = { type: 'message', text: message };
+  setMessage(handDiagramSession, message);
   practiceClaimDebug = {
     ...baseDebug,
     claimDecision: 'rejected-bridge',
@@ -4551,8 +4545,6 @@ function resetGame(seed: number, reason: string): void {
   if (articleScriptModeEnabled()) {
     autoplaySingletons = false;
     autoplayEw = true;
-    articleScriptHintCount = 0;
-    clearArticleScriptFollowPrompt();
     resetToCurrentArticleCheckpoint();
   }
   render();
@@ -4663,7 +4655,7 @@ function runTurn(play: Play): void {
           )
         );
       }
-      if (choiceMessage) widgetStatus = { type: 'message', text: choiceMessage, html: true };
+      if (choiceMessage) setMessage(handDiagramSession, choiceMessage, true);
     } else if (articleScriptState) {
       articleScriptState.history = articleScriptState.history.slice(0, articleScriptState.cursor);
       articleScriptState.history.push(chosenCardId);
@@ -4725,7 +4717,7 @@ function runTurn(play: Play): void {
       : null;
   if (play.seat === 'N' || play.seat === 'S') {
     if (alertMistakes && userDdError?.ddError) {
-      if (articleScriptModeEnabled()) articleScriptMistakeCount += 1;
+      if (articleScriptModeEnabled()) handDiagramSession.mistakeCount += 1;
       ddErrorVisual = {
         seat: play.seat,
         goodCards: [...userDdError.goodCards],
@@ -6052,14 +6044,6 @@ function render(): void {
   if (unknownSlashLine) tableCanvas.appendChild(unknownSlashLine);
 
   tableHost.appendChild(tableCanvas);
-  const articleScriptFollowPromptCursorRef = {
-    get current() { return articleScriptFollowPromptCursor; },
-    set current(value: number | null) { articleScriptFollowPromptCursor = value; }
-  };
-  const articleScriptStickyMessageRef = {
-    get current() { return articleScriptStickyMessage; },
-    set current(value: boolean) { articleScriptStickyMessage = value; }
-  };
   const readingRevealEnabled = isWidgetShellMode && (articleScriptIsStoryViewing() || widgetReadingProfileEnabledFromUrl);
   const handDiagramNavigationDeps = {
     displayMode,
@@ -6082,14 +6066,13 @@ function render(): void {
     canLeadDismiss,
     state,
     currentDismissibleWidgetOutcomeKey,
-    dismissedWidgetOutcomeKey,
     canonicalRunStatusText,
     isWidgetShellMode,
     hintLoading,
     ddsLoadingForHint,
     activeHint,
     hintDiag,
-    widgetStatus,
+    handDiagramSession,
     narrate,
     widgetNarrationLatest,
     currentArticleScriptStatusMessage,
@@ -6112,8 +6095,6 @@ function render(): void {
     backupLastUserPlay,
     undoStack,
     followCurrentArticleScriptUserTurn,
-    articleScriptFollowPromptCursorRef,
-    articleScriptStickyMessageRef,
     legalPlays,
     toCardId,
     chooseCurrentArticleScriptBranchOption,
@@ -6134,8 +6115,6 @@ function render(): void {
     beginPracticeRun,
     goToNextPracticePuzzle,
     readingRevealEnabled,
-    readingControlsRevealed: widgetReadingControlsRevealed,
-    setReadingControlsRevealed: (revealed: boolean) => { widgetReadingControlsRevealed = revealed; },
     render,
     currentArticleScriptStateId,
     currentArticleScriptReplayCard,
@@ -6362,11 +6341,7 @@ function resetToCurrentArticleCheckpoint(): void {
     if (Number(key) >= articleScriptState.initialCursor) delete articleScriptState.choiceSelections[Number(key)];
   }
   articleScriptState.history = defaultArticleScriptHistory(articleScriptState.spec, articleScriptState.initialCursor);
-  articleScriptHintCount = 0;
-  articleScriptMistakeCount = 0;
-  articleScriptCompletedBranches.clear();
-  articleScriptTriedBranchOptions.clear();
-  clearArticleScriptFollowPrompt();
+  resetArticleScriptTracking(handDiagramSession);
   resetWidgetReadingControlsReveal();
   replayArticleScriptToCursor(articleScriptState.initialCursor);
 }
