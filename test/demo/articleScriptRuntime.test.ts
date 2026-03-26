@@ -11,9 +11,11 @@ import {
   resolveArticleScriptAuthoredBranchName,
   resolveArticleScriptCardAtCursor,
   resolveArticleScriptCheckpointEndCursor,
+  resolveNextArticleScriptCheckpoint,
   resolveArticleScriptLength,
   resolveArticleScriptTerminalState,
   resolvePreviousArticleScriptAuthoredChoiceCursor,
+  resolvePreviousArticleScriptLandmarkCursor,
   resolvePendingArticleScriptChoice,
   resolveArticleScriptCheckpoint,
   resolveArticleScriptStepAtCursor
@@ -98,6 +100,9 @@ describe('article script runtime', () => {
     expect(resolveArticleScriptCheckpoint(experimentalDraftIntroScript, '1a')).toEqual({ id: '1a', cursor: 24 });
     expect(resolveArticleScriptCheckpointEndCursor(experimentalDraftIntroScript, '1a')).toBe(36);
     expect(resolveArticleScriptCheckpointEndCursor(experimentalDraftIntroScript, '1b')).toBe(resolveArticleScriptLength(experimentalDraftIntroScript));
+    expect(resolveNextArticleScriptCheckpoint(experimentalDraftIntroScript, '1')).toEqual({ id: '1a', cursor: 24 });
+    expect(resolveNextArticleScriptCheckpoint(experimentalDraftIntroScript, '1b')).toBeNull();
+    expect(resolveNextArticleScriptCheckpoint(doubleDummy01Script, '1')).toBeNull();
     expect(resolveArticleScriptCheckpoint(experimentalDraftIntroScript, 'missing')).toEqual({ id: '1', cursor: 0 });
   });
 
@@ -496,6 +501,13 @@ describe('article script runtime', () => {
     expect(resolvePreviousArticleScriptAuthoredChoiceCursor(doubleDummy01Script, 29, { 7: 'DJ', 27: 'S6' })).toBe(27);
   });
 
+  it('finds the previous authored landmark cursor for checkpoints and branch points', () => {
+    expect(resolvePreviousArticleScriptLandmarkCursor(experimentalDraftIntroScript, 0, {})).toBeNull();
+    expect(resolvePreviousArticleScriptLandmarkCursor(experimentalDraftIntroScript, 30, {})).toBe(24);
+    expect(resolvePreviousArticleScriptLandmarkCursor(doubleDummy01Script, 20, { 7: 'DJ' })).toBe(7);
+    expect(resolvePreviousArticleScriptLandmarkCursor(doubleDummy01Script, 35, { 7: 'DJ', 27: 'S6', 32: 'H9' })).toBe(32);
+  });
+
   it('uses only explicit choices in the authored branch name', () => {
     expect(resolveArticleScriptAuthoredBranchName(doubleDummy01Script, {})).toBe('SK');
     expect(resolveArticleScriptAuthoredBranchName(doubleDummy01Script, { 7: 'DJ' })).toBe('SKDJ');
@@ -679,6 +691,7 @@ describe('article script runtime', () => {
     expect(resolveArticleScriptTerminalState(doubleDummy01Script, caSelections)).toBe('complete');
     expect(resolveArticleScriptTerminalState(doubleDummy01Script, diamondSelections)).toBe('complete');
     expect(resolveArticleScriptAuthoredBranchName(doubleDummy01Script, { 7: 'D4', 8: 'CA' })).toBe('SKD4');
+    expect(resolveArticleScriptLength(doubleDummy01Script, { 7: 'D4', 8: 'D7' })).toBe(41);
   });
 
   it('covers the heart ten on the merged SKD4 line and otherwise plays low', () => {

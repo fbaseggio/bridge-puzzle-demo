@@ -3,6 +3,7 @@ import type { CardId, Seat, Suit } from '../core';
 export const ARTICLE_SCRIPT_NAVIGATION_MODE = 'article-script';
 
 export type ArticleScriptNavigationMode = typeof ARTICLE_SCRIPT_NAVIGATION_MODE;
+export type ArticleScriptInteractionProfile = 'story-viewing' | 'puzzle-solving';
 
 export type ArticleScriptStep = {
   kind: 'play';
@@ -28,6 +29,7 @@ export type ArticleScriptChoiceStep = {
   options?: CardId[];
   optionMode?: 'explicit' | 'dd-accurate';
   branchRole?: 'authored' | 'internal' | 'none';
+  routeTokenByOption?: Partial<Record<CardId, string>>;
   suit?: Suit;
   assertedOptions?: CardId[];
   assertedSuits?: Suit[];
@@ -55,6 +57,7 @@ export type ArticleScriptSpec = {
   id: string;
   parentProblemId: string;
   navigationMode: ArticleScriptNavigationMode;
+  interactionProfile: ArticleScriptInteractionProfile;
   checkpoints: ArticleScriptCheckpoint[];
   steps: Array<ArticleScriptStep | ArticleScriptDerivedPlayStep | ArticleScriptChoiceStep | ArticleScriptFlexSegmentStep>;
 };
@@ -63,6 +66,7 @@ export const experimentalDraftIntroScript: ArticleScriptSpec = {
   id: 'experimental-draft-intro',
   parentProblemId: 'experimental_draft_01',
   navigationMode: ARTICLE_SCRIPT_NAVIGATION_MODE,
+  interactionProfile: 'story-viewing',
   checkpoints: [
     { id: '1', cursor: 0 },
     { id: '1a', cursor: 24 },
@@ -85,8 +89,8 @@ export const experimentalDraftIntroScript: ArticleScriptSpec = {
       options: ['DJ', 'ST'],
       prompt: "Pick East's play",
       choiceMessages: {
-        DJ: 'When East pitches a diamond, we must <b>ruff</b> and then throw them in with a diamond.',
-        ST: "When East pitches a spade, we must <b>sluff</b> so West will perforce grant us access to dummy's 2 spade winners."
+        DJ: 'When East pitches a diamond, we must <span class="article-inline-emphasis">ruff</span> and then throw them in with a diamond.',
+        ST: "When East pitches a spade, we must <span class=\"article-inline-emphasis\">sluff</span> so West will perforce grant us access to dummy's 2 spade winners."
       },
       continuations: {
         DJ: ['H5', 'C9', 'D5', 'S4', 'D8', 'DQ', 'ST', 'D7', 'S8', 'SJ', 'SK', 'SQ', 'D9', 'S9'],
@@ -100,6 +104,7 @@ export const doubleDummy01Script: ArticleScriptSpec = {
   id: 'double-dummy-01',
   parentProblemId: 'double_dummy_01',
   navigationMode: ARTICLE_SCRIPT_NAVIGATION_MODE,
+  interactionProfile: 'puzzle-solving',
   checkpoints: [{ id: '1', cursor: 0 }],
   steps: [
     { kind: 'play', cardId: 'SK' },
@@ -121,6 +126,12 @@ export const doubleDummy01Script: ArticleScriptSpec = {
       seat: 'S',
       options: ['CA', 'D8', 'D7', 'D2'],
       branchRole: 'internal',
+      routeTokenByOption: {
+        CA: 'CA',
+        D8: 'D',
+        D7: 'D',
+        D2: 'D'
+      },
       prompt: "Pick South's play",
       branchPrefix: 'SKD4'
     },
@@ -498,7 +509,9 @@ function resolveArticleScriptRouteKey(
     const choiceCursor = cursor;
     cursor += 1;
     const selected = choiceSelections[choiceCursor];
-    if (selected && choiceCursor < maxCursor && isRouteBranchChoice(step)) parts.push(selected);
+    if (selected && choiceCursor < maxCursor && isRouteBranchChoice(step)) {
+      parts.push((step.routeTokenByOption?.[selected] ?? selected) as CardId);
+    }
     cursor += selected ? selectedContinuation(step, selected).length : maxChoiceContinuationLength(step);
   }
   return parts.join('');
@@ -689,11 +702,29 @@ export function resolveArticleScriptStepAtCursor(
 }
 
 export function resolveArticleScriptCheckpointEndCursor(spec: ArticleScriptSpec, checkpointId?: string | null): number {
+  const next = resolveNextArticleScriptCheckpoint(spec, checkpointId);
+  return next?.cursor ?? resolveArticleScriptLength(spec);
+}
+
+export function resolveNextArticleScriptCheckpoint(
+  spec: ArticleScriptSpec,
+  checkpointId?: string | null
+): ArticleScriptCheckpoint | null {
   const checkpoint = resolveArticleScriptCheckpoint(spec, checkpointId);
   const checkpoints = [...spec.checkpoints].sort((a, b) => a.cursor - b.cursor);
   const idx = checkpoints.findIndex((entry) => entry.id === checkpoint.id);
-  const next = idx >= 0 ? checkpoints[idx + 1] : null;
-  return next?.cursor ?? resolveArticleScriptLength(spec);
+  return idx >= 0 ? checkpoints[idx + 1] ?? null : null;
+}
+
+export function resolvePreviousArticleScriptCheckpointCursor(
+  spec: ArticleScriptSpec,
+  cursor: number
+): number | null {
+  const checkpoints = [...spec.checkpoints]
+    .map((checkpoint) => checkpoint.cursor)
+    .filter((checkpointCursor) => checkpointCursor < cursor)
+    .sort((a, b) => b - a);
+  return checkpoints[0] ?? null;
 }
 
 export function resolveArticleScriptTerminalState(
@@ -719,4 +750,16 @@ export function resolvePreviousArticleScriptAuthoredChoiceCursor(
     return current;
   }
   return null;
+}
+
+export function resolvePreviousArticleScriptLandmarkCursor(
+  spec: ArticleScriptSpec,
+  cursor: number,
+  choiceSelections: Partial<Record<number, CardId>> = {}
+): number | null {
+  const previousCheckpoint = resolvePreviousArticleScriptCheckpointCursor(spec, cursor);
+  const previousAuthoredChoice = resolvePreviousArticleScriptAuthoredChoiceCursor(spec, cursor, choiceSelections);
+  return Math.max(previousCheckpoint ?? Number.NEGATIVE_INFINITY, previousAuthoredChoice ?? Number.NEGATIVE_INFINITY) === Number.NEGATIVE_INFINITY
+    ? null
+    : Math.max(previousCheckpoint ?? Number.NEGATIVE_INFINITY, previousAuthoredChoice ?? Number.NEGATIVE_INFINITY);
 }

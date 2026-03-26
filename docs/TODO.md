@@ -29,3 +29,7 @@ Current focus is on keeping PlayAgain/replay behavior explainable and reproducib
 ## D) Test/Logs support
 - [ ] Add/collect minimal repro logs for p003 and p004 that demonstrate the replayRemaining discrepancy with run/visit fields.
 - [ ] Define an acceptance checklist for the idle-branching fix (must never offer forcedClass=idle:*; idle multiplicity not branchable).
+
+## E) Article / interaction profile follow-up
+- [ ] Reading-profile chrome: add a low-contrast reveal edge for transport controls so print-like article diagrams can stay calm while still exposing story controls on demand.
+- [ ] Distinguish authored explanatory messages from short status messages in widget/article UI; explanatory script text should render as readable left-aligned prose rather than centered chip-style status.
