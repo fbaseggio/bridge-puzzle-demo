@@ -38,6 +38,10 @@ Current code alignment:
   - `/Users/edgar/Documents/Codex/src/demo/articleScriptRuntime.ts`
 - interaction policy:
   - `/Users/edgar/Documents/Codex/src/demo/articleScriptInteractionPolicy.ts`
+- hand-diagram session:
+  - `/Users/edgar/Documents/Codex/src/demo/handDiagramSession.ts`
+- settings-panel session:
+  - `/Users/edgar/Documents/Codex/src/demo/settingsPanelSession.ts`
 - shared diagram-adjacent UI:
   - `/Users/edgar/Documents/Codex/src/demo/handDiagramNavigation.ts`
 - app coordinator:
@@ -106,6 +110,7 @@ This was recently re-aligned and should stay that way.
 - widget message band bottom-anchored above controls
 - short/long messages fitting without moving hands or controls
 - practice/article shared diagram/status/control geometry
+- practice-only terminal/session actions live in a real fourth band below the shared control row
 - inline emphasis in script-authored text uses `display: contents`
 
 Important:
@@ -144,7 +149,33 @@ It currently renders:
 - practice secondary actions
 - reading reveal edge
 
-It is still controller-heavy, but it is the right shared seam.
+It now has explicit internal helpers for:
+
+- outcome/status rendering
+- transport row rendering
+- practice extra-row rendering
+- reading reveal edge rendering
+
+It is still controller-heavy, but it is no longer just a raw extraction from `main.ts`.
+
+### Extracted session state
+
+`/Users/edgar/Documents/Codex/src/demo/handDiagramSession.ts` now owns most diagram-local mutable state:
+
+- widget status/outcome
+- dismissed outcome key
+- reading reveal state
+- follow-prompt cursor
+- sticky-message state
+- branch completion and tried-option tracking
+- hint/mistake counters
+- diagram-local narration state
+
+`/Users/edgar/Documents/Codex/src/demo/settingsPanelSession.ts` now owns settings panel UI state:
+
+- open context
+- nested-options open state
+- outside-dismiss binding flag
 
 ### `main.ts`
 
@@ -157,35 +188,31 @@ It still mixes:
 - problem selection
 - practice frame/session state
 - article-script session state
-- widget transient state
+- some remaining widget and settings orchestration
 - rendering orchestration
 - many derived helpers
 
-The next cleanup should reduce state clutter more than rendering clutter.
+The biggest gains from the recent refactor are already landed. `main.ts` is still large, but the newest interaction/presentation state is no longer concentrated there.
 
 ## Recommended Next Architectural Step
 
-Best next step:
+There is no urgent missing seam right now.
 
-- introduce a small explicit session/helper boundary for hand-diagram interaction state
+This is a good stopping checkpoint:
 
-Suggested target:
+- interaction policy is extracted and tested
+- hand-diagram session is extracted
+- settings panel session is extracted
+- hand-diagram navigation is extracted and internally structured
+- practice/article/workbench geometry is behaving again
 
-- `/Users/edgar/Documents/Codex/src/demo/handDiagramSession.ts`
+If new refactor work is needed later, it should be driven by a real product change rather than by continuing to split files for its own sake.
 
-Initial scope:
+The most plausible future seams are:
 
-- widget transient status/outcome state
-- follow-prompt cursor / sticky-message state
-- branch completion / tried-option maps
-- reading reveal state
-- closely related session-side helpers
-
-Reason:
-
-- the policy layer already exists
-- the diagram navigation layer already exists
-- the next missing explicit layer is session ownership
+- further slimming `main.ts` by identifying remaining coordinator-vs-session leakage
+- a separate transport-row module if future control complexity grows again
+- a narrower retry of reading-profile auto-collapse
 
 ## Avoid
 
@@ -193,6 +220,7 @@ Reason:
 - practice-only geometry patches when the issue is shared diagram layout
 - pushing policy logic back into `main.ts`
 - mixing policy and session concerns
+- merging settings-panel session state back into `main.ts`
 - broad all-modes refactors
 - reviving abandoned `flex` machinery
 
@@ -217,4 +245,16 @@ When deciding where something belongs:
 - reading-profile auto-collapse was attempted and backed out
 - current reading-profile baseline is stable
 - practice/article geometry is aligned again
+- workbench centering is restored
+- article-mode settings/assist expansion is behaving again
 - VSC and DD1 are both in acceptable shape to continue from here
+
+## Suggested Next-Session Posture
+
+Start from product needs, not from refactor hunger.
+
+Reasonable next directions:
+
+- add new DD1 or VSC content/behavior
+- revisit reading-profile polish only if there is a concrete user-facing reason
+- only resume refactoring if a new feature exposes a real structural pain point
