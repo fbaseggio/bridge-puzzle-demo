@@ -14,6 +14,10 @@ export type ArticleScriptStep = {
   onPlayCompanionText?: string;
   onPlayCompanionHtml?: boolean;
   onPlayCompanionProfiles?: ArticleScriptInteractionProfile[];
+  onDeviationCompanionTitle?: string;
+  onDeviationCompanionText?: string;
+  onDeviationCompanionHtml?: boolean;
+  onDeviationCompanionProfiles?: ArticleScriptInteractionProfile[];
   branchPrefix?: string;
   assertedWinner?: Seat;
   terminalState?: 'complete';
@@ -119,7 +123,9 @@ export const doubleDummy01Script: ArticleScriptSpec = {
       cardId: 'S7',
       onPlayCompanionTitle: 'Solution note',
       onPlayCompanionText: 'S7 is a key play, we will see why later.',
-      onPlayCompanionProfiles: ['solution-viewing']
+      onPlayCompanionProfiles: ['solution-viewing'],
+      onDeviationCompanionText: 'Oops! That was fast',
+      onDeviationCompanionProfiles: ['puzzle-solving']
     },
     { kind: 'play', cardId: 'S8' },
     { kind: 'play', cardId: 'SA' },
@@ -216,7 +222,13 @@ export const doubleDummy01Script: ArticleScriptSpec = {
     { kind: 'play', cardId: 'HQ', branchPrefix: 'SKD4', assertedWinner: 'S' },
     { kind: 'play', cardId: 'DQ', branchPrefix: 'SKD4' },
     { kind: 'play', cardId: 'C6', branchPrefix: 'SKD4' },
-    { kind: 'play', cardId: 'CQ', branchPrefix: 'SKD4' },
+    {
+      kind: 'play',
+      cardId: 'CQ',
+      branchPrefix: 'SKD4',
+      onPlayCompanionText: 'Nice play!',
+      onPlayCompanionProfiles: ['puzzle-solving']
+    },
     { kind: 'play', cardId: 'D6', branchPrefix: 'SKD4', assertedWinner: 'S' },
     { kind: 'play', cardId: 'CT', branchPrefix: 'SKD4' },
     { kind: 'play', cardId: 'C7', branchPrefix: 'SKD4' },
@@ -744,6 +756,26 @@ export function resolveArticleScriptPlayStepCompanionAtCursor(args: {
     title: step.onPlayCompanionTitle,
     text: step.onPlayCompanionText,
     html: step.onPlayCompanionHtml === true
+  };
+}
+
+export function resolveArticleScriptPlayStepDeviationCompanionAtCursor(args: {
+  spec: ArticleScriptSpec;
+  cursor: number;
+  choiceSelections?: Partial<Record<number, CardId>>;
+  playedCardId: CardId;
+  activeProfile: ArticleScriptInteractionProfile;
+}): { title?: string; text: string; html: boolean } | null {
+  const { spec, cursor, choiceSelections = {}, playedCardId, activeProfile } = args;
+  const step = resolveArticleScriptStepAtCursor(spec, cursor, choiceSelections);
+  if (!step || step.kind !== 'play') return null;
+  if (step.cardId === playedCardId) return null;
+  if (!step.onDeviationCompanionText) return null;
+  if (step.onDeviationCompanionProfiles?.length && !step.onDeviationCompanionProfiles.includes(activeProfile)) return null;
+  return {
+    title: step.onDeviationCompanionTitle,
+    text: step.onDeviationCompanionText,
+    html: step.onDeviationCompanionHtml === true
   };
 }
 

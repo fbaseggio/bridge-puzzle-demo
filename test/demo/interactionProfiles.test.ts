@@ -4,6 +4,7 @@ import {
   isSolutionViewingProfile,
   resolveNonStandardPracticeAssistToggles,
   resolveStandardPracticeAssistLevel,
+  shouldRevealDdErrorAlternatives,
   shouldScorePracticeProfile
 } from '../../src/demo/interactionProfiles';
 
@@ -34,5 +35,11 @@ describe('interaction profile policy', () => {
     });
     expect(isSolutionViewingProfile('solution-viewing')).toBe(true);
     expect(isSolutionViewingProfile('story-viewing')).toBe(false);
+  });
+
+  it('suppresses DD-error alternative reveal in puzzle-solving only', () => {
+    expect(shouldRevealDdErrorAlternatives('puzzle-solving')).toBe(false);
+    expect(shouldRevealDdErrorAlternatives('story-viewing')).toBe(true);
+    expect(shouldRevealDdErrorAlternatives('solution-viewing')).toBe(true);
   });
 });

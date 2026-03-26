@@ -241,6 +241,57 @@ html.mode-widget {
   line-height: 1.4;
 }
 
+.hand-diagram-branch-map {
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  padding: 6px 7px;
+  background: #fcfdff;
+  display: grid;
+  gap: 3px;
+}
+
+.hand-diagram-branch-map-title {
+  font-size: 11px;
+  color: #64748b;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.hand-diagram-branch-map-summary {
+  font-size: 11px;
+  color: #475569;
+}
+
+.hand-diagram-branch-map-rows {
+  display: grid;
+  gap: 1px;
+}
+
+.hand-diagram-branch-map-row {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.25;
+  color: #475569;
+  white-space: pre;
+  border-radius: 4px;
+  padding: 1px 3px;
+}
+
+.hand-diagram-branch-map-row.is-current-path {
+  background: #f3f7fd;
+  color: #334155;
+}
+
+.hand-diagram-branch-map-row.is-current {
+  background: #e7effb;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.hand-diagram-branch-map-row.is-complete-leaf {
+  color: #166534;
+}
+
 .hand-diagram-companion-reopen {
   justify-self: end;
   border: 1px solid #d6dee9;

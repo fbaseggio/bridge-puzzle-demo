@@ -22,7 +22,11 @@ describe('hand diagram session', () => {
     expect(session.followPromptCursor).toBeNull();
     expect(session.stickyMessage).toBe(false);
     expect(session.completedBranches.size).toBe(0);
+    expect(session.knownBranches.size).toBe(0);
     expect(session.triedBranchOptions.size).toBe(0);
+    expect(session.leafStatsByBranch.size).toBe(0);
+    expect(session.attributedLeafMistakes).toBe(0);
+    expect(session.attributedLeafHints).toBe(0);
     expect(session.hintCount).toBe(0);
     expect(session.mistakeCount).toBe(0);
   });
@@ -93,7 +97,12 @@ describe('hand diagram session', () => {
     session.followPromptCursor = 9;
     session.stickyMessage = true;
     session.completedBranches.add('SKDJ');
+    session.knownBranches.add('SK');
+    session.knownBranches.add('SKDJ');
     markBranchOptionTried(session, 'SK', 'DJ');
+    session.leafStatsByBranch.set('SKDJ', { mistakes: 2, hints: 1, outcome: 'success' });
+    session.attributedLeafMistakes = 2;
+    session.attributedLeafHints = 1;
     session.hintCount = 2;
     session.mistakeCount = 1;
     session.dismissedOutcomeKey = 'run:success:end';
@@ -104,7 +113,11 @@ describe('hand diagram session', () => {
     expect(session.followPromptCursor).toBeNull();
     expect(session.stickyMessage).toBe(false);
     expect(session.completedBranches.size).toBe(0);
+    expect(session.knownBranches.size).toBe(0);
     expect(session.triedBranchOptions.size).toBe(0);
+    expect(session.leafStatsByBranch.size).toBe(0);
+    expect(session.attributedLeafMistakes).toBe(0);
+    expect(session.attributedLeafHints).toBe(0);
     expect(session.hintCount).toBe(0);
     expect(session.mistakeCount).toBe(0);
     expect(session.dismissedOutcomeKey).toBe('run:success:end');

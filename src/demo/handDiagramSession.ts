@@ -20,6 +20,12 @@ export type HandDiagramCompanionContent = {
   html?: boolean;
 };
 
+export type HandDiagramLeafStats = {
+  mistakes: number;
+  hints: number;
+  outcome: 'success' | 'failure';
+};
+
 export type HandDiagramSession = {
   status: HandDiagramStatus;
   companionContent: HandDiagramCompanionContent | null;
@@ -28,7 +34,11 @@ export type HandDiagramSession = {
   followPromptCursor: number | null;
   stickyMessage: boolean;
   completedBranches: Set<string>;
+  knownBranches: Set<string>;
   triedBranchOptions: Map<string, Set<CardId>>;
+  leafStatsByBranch: Map<string, HandDiagramLeafStats>;
+  attributedLeafMistakes: number;
+  attributedLeafHints: number;
   hintCount: number;
   mistakeCount: number;
   narrationEntries: HandDiagramNarrationEntry[];
@@ -46,7 +56,11 @@ export function createHandDiagramSession(): HandDiagramSession {
     followPromptCursor: null,
     stickyMessage: false,
     completedBranches: new Set<string>(),
+    knownBranches: new Set<string>(),
     triedBranchOptions: new Map<string, Set<CardId>>(),
+    leafStatsByBranch: new Map<string, HandDiagramLeafStats>(),
+    attributedLeafMistakes: 0,
+    attributedLeafHints: 0,
     hintCount: 0,
     mistakeCount: 0,
     narrationEntries: [],
@@ -114,7 +128,11 @@ export function resetArticleScriptTracking(session: HandDiagramSession): void {
   session.followPromptCursor = null;
   session.stickyMessage = false;
   session.completedBranches.clear();
+  session.knownBranches.clear();
   session.triedBranchOptions.clear();
+  session.leafStatsByBranch.clear();
+  session.attributedLeafMistakes = 0;
+  session.attributedLeafHints = 0;
   session.hintCount = 0;
   session.mistakeCount = 0;
   session.companionContent = null;

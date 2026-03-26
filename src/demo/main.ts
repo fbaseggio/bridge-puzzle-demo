@@ -73,6 +73,7 @@ import {
   resolveArticleScriptCheckpointEndCursor,
   resolveNextArticleScriptCheckpoint,
   resolveArticleScriptLength,
+  resolveArticleScriptPlayStepDeviationCompanionAtCursor,
   resolveArticleScriptTerminalState,
   resolveArticleScriptPlayStepCompanionAtCursor,
   resolveArticleScriptPlayStepMessageAtCursor,
@@ -109,6 +110,7 @@ import {
   isSolutionViewingProfile,
   resolveNonStandardPracticeAssistToggles,
   resolveStandardPracticeAssistLevel,
+  shouldRevealDdErrorAlternatives,
   shouldScorePracticeProfile,
   type InteractionProfile,
   type PracticeInteractionProfile
@@ -851,6 +853,16 @@ function currentPracticeInteractionProfile(): PracticeInteractionProfile {
   return practiceSession?.interactionProfile ?? 'puzzle-solving';
 }
 
+function shouldRevealDdErrorAlternativesCurrentContext(): boolean {
+  if (articleScriptModeEnabled()) {
+    return shouldRevealDdErrorAlternatives(currentArticleScriptInteractionProfile());
+  }
+  if (displayMode === 'practice') {
+    return shouldRevealDdErrorAlternatives(currentPracticeInteractionProfile());
+  }
+  return true;
+}
+
 function applyArticleScriptInteractionProfileDefaults(profile: InteractionProfile): void {
   if (!articleScriptModeEnabled()) return;
   if (profile === 'solution-viewing') {
@@ -878,6 +890,7 @@ function setCurrentArticleScriptInteractionProfile(profile: InteractionProfile, 
 
 function applyArticleScriptPlayStepFeedbackAtCursor(cursor: number, playedCardId: CardId): void {
   if (!articleScriptState) return;
+  const activeProfile = currentArticleScriptInteractionProfile();
   const message = resolveArticleScriptPlayStepMessageAtCursor({
     spec: articleScriptState.spec,
     cursor,
@@ -889,24 +902,33 @@ function applyArticleScriptPlayStepFeedbackAtCursor(cursor: number, playedCardId
     cursor,
     choiceSelections: articleScriptState.choiceSelections,
     playedCardId,
-    activeProfile: currentArticleScriptInteractionProfile()
+    activeProfile
   });
-  if (!message && !companion) return;
+  const deviationCompanion = resolveArticleScriptPlayStepDeviationCompanionAtCursor({
+    spec: articleScriptState.spec,
+    cursor,
+    choiceSelections: articleScriptState.choiceSelections,
+    playedCardId,
+    activeProfile
+  });
+  if (!message && !companion && !deviationCompanion) return;
   clearHint();
   if (message) setMessage(handDiagramSession, message.text, message.html);
   if (companion) setCompanionContent(handDiagramSession, companion);
+  if (deviationCompanion) setCompanionContent(handDiagramSession, deviationCompanion);
 }
 
 type WidgetCompanionPanelState = {
   enabled: boolean;
   hidden: boolean;
   branchName: string | null;
+  branchTree: AuthoredBranchTreeNode | null;
   content: HandDiagramCompanionContent | null;
 };
 
 function currentWidgetCompanionPanelState(): WidgetCompanionPanelState {
   if (displayMode !== 'widget') {
-    return { enabled: false, hidden: false, branchName: null, content: null };
+    return { enabled: false, hidden: false, branchName: null, branchTree: null, content: null };
   }
   const scripted = articleScriptModeEnabled();
   const scriptedPuzzleProfile = scripted && !articleScriptIsStoryViewing();
@@ -915,13 +937,15 @@ function currentWidgetCompanionPanelState(): WidgetCompanionPanelState {
     : null;
   const enabled = scriptedPuzzleProfile || (widgetCompanionPanelEnabledFromUrl && Boolean(content));
   if (!enabled) {
-    return { enabled: false, hidden: false, branchName: null, content: null };
+    return { enabled: false, hidden: false, branchName: null, branchTree: null, content: null };
   }
   const branchName = scriptedPuzzleProfile ? currentArticleScriptBranchName() : null;
+  const branchTree = scriptedPuzzleProfile ? currentAuthoredBranchTree() : null;
   return {
     enabled: true,
     hidden: widgetCompanionPanelHidden,
     branchName,
+    branchTree,
     content
   };
 }
@@ -980,8 +1004,72 @@ function currentArticleScriptChoicePresentation():
   };
 }
 
+type AuthoredBranchTreeNode = {
+  key: string;
+  children: AuthoredBranchTreeNode[];
+};
+
+function rootAuthoredBranchKey(spec: ArticleScriptSpec): string {
+  return spec.steps[0]?.kind === 'play' ? spec.steps[0].cardId : '';
+}
+
+function buildAuthoredBranchTree(spec: ArticleScriptSpec, branchName: string): AuthoredBranchTreeNode {
+  const explicitChoice = explicitChoiceStepForBranchShared(spec, branchName);
+  const options = explicitChoice?.options ?? [];
+  return {
+    key: branchName,
+    children: options.map((option) => buildAuthoredBranchTree(spec, `${branchName}${option}`))
+  };
+}
+
+function currentAuthoredBranchTree(): AuthoredBranchTreeNode | null {
+  if (!articleScriptState) return null;
+  const cached = authoredBranchTreeCache.get(articleScriptState.spec.id);
+  if (cached !== undefined) return cached;
+  const rootBranch = rootAuthoredBranchKey(articleScriptState.spec);
+  const tree = rootBranch ? buildAuthoredBranchTree(articleScriptState.spec, rootBranch) : null;
+  authoredBranchTreeCache.set(articleScriptState.spec.id, tree);
+  return tree;
+}
+
+function currentPendingAuthoredChoiceBranchKey(): string | null {
+  if (!articleScriptState) return null;
+  const choicePresentation = currentArticleScriptChoicePresentation();
+  const choice = choicePresentation?.rawChoice;
+  if (!choice) return null;
+  if ((choice.optionMode ?? 'explicit') !== 'explicit') return null;
+  if ((choice.branchRole ?? 'authored') !== 'authored') return null;
+  return choice.branchPrefix ?? rootAuthoredBranchKey(articleScriptState.spec);
+}
+
+function revealKnownArticleScriptBranchesFromCurrentPath(): void {
+  if (!articleScriptState || articleScriptIsStoryViewing()) return;
+  const tree = currentAuthoredBranchTree();
+  if (!tree) return;
+  const pendingChoiceBranchKey = currentPendingAuthoredChoiceBranchKey();
+  const currentBranch = currentArticleScriptBranchName() ?? tree.key;
+  let node: AuthoredBranchTreeNode | null = tree;
+  handDiagramSession.knownBranches.add(tree.key);
+  while (node) {
+    handDiagramSession.knownBranches.add(node.key);
+    if (node.children.length > 0) {
+      const selectedChildShown = node.children.some((child) => currentBranch.startsWith(child.key));
+      const pendingChoiceAtNode = pendingChoiceBranchKey === node.key;
+      const childAlreadyKnown = node.children.some((child) => handDiagramSession.knownBranches.has(child.key));
+      if (selectedChildShown || pendingChoiceAtNode || childAlreadyKnown) {
+        for (const child of node.children) {
+          handDiagramSession.knownBranches.add(child.key);
+        }
+      }
+    }
+    const next = node.children.find((child) => currentBranch.startsWith(child.key));
+    if (!next) break;
+    node = next;
+  }
+}
+
 function currentArticleScriptProgressSummary(): string {
-  const rootBranch = articleScriptState?.spec.steps[0]?.kind === 'play' ? articleScriptState.spec.steps[0].cardId : '';
+  const rootBranch = articleScriptState ? rootAuthoredBranchKey(articleScriptState.spec) : '';
   const countCompleted = (branchName: string, includeSelf: boolean): number => {
     const explicitChoice = articleScriptState ? explicitChoiceStepForBranchShared(articleScriptState.spec, branchName) : null;
     if (!explicitChoice) return isArticleScriptBranchComplete(branchName) ? (includeSelf ? 1 : 0) : 0;
@@ -995,10 +1083,26 @@ function currentArticleScriptProgressSummary(): string {
 
 function syncArticleScriptCompletionProgress(): void {
   if (!articleScriptState) return;
-  if (currentArticleScriptHasPendingChoiceAtCursor()) return;
-  if (currentArticleScriptTerminalLabel() !== 'Complete') return;
   const branchName = currentArticleScriptBranchName();
-  if (branchName) handDiagramSession.completedBranches.add(branchName);
+  if (!branchName) return;
+  const terminalLabel = currentArticleScriptTerminalLabel();
+  const terminalOutcome =
+    terminalLabel === 'Complete'
+      ? 'success'
+      : (runStatus === 'failure' && state.phase === 'end' ? 'failure' : null);
+  if (!terminalOutcome) return;
+  if (!handDiagramSession.leafStatsByBranch.has(branchName)) {
+    const deltaMistakes = Math.max(0, handDiagramSession.mistakeCount - handDiagramSession.attributedLeafMistakes);
+    const deltaHints = Math.max(0, handDiagramSession.hintCount - handDiagramSession.attributedLeafHints);
+    handDiagramSession.leafStatsByBranch.set(branchName, {
+      mistakes: deltaMistakes,
+      hints: deltaHints,
+      outcome: terminalOutcome
+    });
+    handDiagramSession.attributedLeafMistakes = handDiagramSession.mistakeCount;
+    handDiagramSession.attributedLeafHints = handDiagramSession.hintCount;
+  }
+  if (terminalOutcome === 'success') handDiagramSession.completedBranches.add(branchName);
 }
 
 function followCurrentArticleScriptUserTurn(): boolean {
@@ -1153,6 +1257,7 @@ let articleScriptDerivedCache:
       replayByCursor: Map<number, ReturnType<typeof replayArticleHistory>>;
     }
   | null = null;
+const authoredBranchTreeCache = new Map<string, AuthoredBranchTreeNode | null>();
 let alwaysHint = displayMode === 'widget';
 let cardColoringEnabled = true;
 let narrate = displayMode === 'analysis';
@@ -5430,7 +5535,7 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   if (activeHint && effectiveCanAct && seat === state.turn) {
     hintDiag(`highlight sets best=${hintBestSet.size} bad=0`);
   }
-  if (ddErrorVisual && ddErrorVisual.seat === seat) {
+  if (ddErrorVisual && ddErrorVisual.seat === seat && shouldRevealDdErrorAlternativesCurrentContext()) {
     for (const card of ddErrorVisual.goodCards) ddErrorGoodSet.add(card);
   }
   const scriptedChoicePresentation = currentArticleScriptChoicePresentation();
@@ -5573,12 +5678,176 @@ function renderDraftNotes(): HTMLElement | null {
   return box;
 }
 
+type BranchTreeSummary = {
+  knownNodeCount: number;
+  resolvedLeafCount: number;
+  mistakes: number;
+  hints: number;
+};
+
+type BranchTreeRow = {
+  text: string;
+  key: string;
+  isCurrent: boolean;
+  isCurrentPath: boolean;
+  isCompletedLeaf: boolean;
+};
+
+function summarizeKnownBranchTree(
+  node: AuthoredBranchTreeNode,
+  knownBranches: Set<string>
+): BranchTreeSummary {
+  if (!knownBranches.has(node.key)) {
+    return { knownNodeCount: 0, resolvedLeafCount: 0, mistakes: 0, hints: 0 };
+  }
+  const stats = handDiagramSession.leafStatsByBranch.get(node.key);
+  let knownNodeCount = 1;
+  let resolvedLeafCount = stats ? 1 : 0;
+  let mistakes = 0;
+  let hints = 0;
+  if (stats) {
+    mistakes += stats.mistakes;
+    hints += stats.hints;
+  }
+  for (const child of node.children) {
+    const childSummary = summarizeKnownBranchTree(child, knownBranches);
+    knownNodeCount += childSummary.knownNodeCount;
+    resolvedLeafCount += childSummary.resolvedLeafCount;
+    mistakes += childSummary.mistakes;
+    hints += childSummary.hints;
+  }
+  return { knownNodeCount, resolvedLeafCount, mistakes, hints };
+}
+
+function deepestKnownCurrentBranchNodeKey(
+  tree: AuthoredBranchTreeNode,
+  knownBranches: Set<string>,
+  currentBranch: string
+): string {
+  let node = tree;
+  let deepest = tree.key;
+  while (true) {
+    const next = node.children.find((child) => currentBranch.startsWith(child.key) && knownBranches.has(child.key));
+    if (!next) break;
+    deepest = next.key;
+    node = next;
+  }
+  return deepest;
+}
+
+function collectKnownBranchTreeRows(args: {
+  node: AuthoredBranchTreeNode;
+  knownBranches: Set<string>;
+  currentBranch: string;
+  currentTipKey: string;
+  liveTipMistakes: number;
+  liveTipHints: number;
+  prefix?: string;
+  isLast?: boolean;
+  parentKey?: string;
+}): BranchTreeRow[] {
+  const { node, knownBranches, currentBranch, currentTipKey, liveTipMistakes, liveTipHints } = args;
+  const prefix = args.prefix ?? '';
+  const isLast = args.isLast ?? true;
+  const parentKey = args.parentKey ?? null;
+  if (!knownBranches.has(node.key)) return [];
+
+  const nodeLabel = parentKey ? node.key.slice(parentKey.length) : node.key;
+  const linePrefix = parentKey ? `${prefix}${isLast ? '└─ ' : '├─ '}` : '';
+  const leafStats = handDiagramSession.leafStatsByBranch.get(node.key) ?? null;
+  const terminalSuffix = leafStats
+    ? `${leafStats.outcome === 'success' ? ' ✓' : ' x'} m${leafStats.mistakes} h${leafStats.hints}`
+    : '';
+  const liveTipSuffix =
+    !leafStats && node.key === currentTipKey && (liveTipMistakes > 0 || liveTipHints > 0)
+      ? ` · m${liveTipMistakes} h${liveTipHints}`
+      : '';
+  const rows: BranchTreeRow[] = [
+    {
+      text: `${linePrefix}${nodeLabel}${terminalSuffix}${liveTipSuffix}`,
+      key: node.key,
+      isCurrent: currentBranch === node.key,
+      isCurrentPath: currentBranch.startsWith(node.key),
+      isCompletedLeaf: Boolean(leafStats)
+    }
+  ];
+
+  const nextPrefix = parentKey ? `${prefix}${isLast ? '   ' : '│  '}` : '';
+  const knownChildren = node.children.filter((child) => knownBranches.has(child.key));
+  for (const [idx, child] of knownChildren.entries()) {
+    rows.push(
+      ...collectKnownBranchTreeRows({
+        node: child,
+        knownBranches,
+        currentBranch,
+        currentTipKey,
+        liveTipMistakes,
+        liveTipHints,
+        prefix: nextPrefix,
+        isLast: idx === knownChildren.length - 1,
+        parentKey: node.key
+      })
+    );
+  }
+  return rows;
+}
+
+function renderWidgetBranchTree(args: {
+  tree: AuthoredBranchTreeNode;
+  knownBranches: Set<string>;
+  currentBranch: string | null;
+}): HTMLElement {
+  const { tree, knownBranches, currentBranch } = args;
+  const current = currentBranch ?? tree.key;
+  const summary = summarizeKnownBranchTree(tree, knownBranches);
+  const liveTipMistakes = Math.max(0, handDiagramSession.mistakeCount - handDiagramSession.attributedLeafMistakes);
+  const liveTipHints = Math.max(0, handDiagramSession.hintCount - handDiagramSession.attributedLeafHints);
+  const currentTipKey = deepestKnownCurrentBranchNodeKey(tree, knownBranches, current);
+  const rows = collectKnownBranchTreeRows({
+    node: tree,
+    knownBranches,
+    currentBranch: current,
+    currentTipKey,
+    liveTipMistakes,
+    liveTipHints
+  });
+
+  const section = document.createElement('section');
+  section.className = 'hand-diagram-branch-map';
+
+  const heading = document.createElement('strong');
+  heading.className = 'hand-diagram-branch-map-title';
+  heading.textContent = 'Branch Map';
+  section.appendChild(heading);
+
+  const summaryLine = document.createElement('div');
+  summaryLine.className = 'hand-diagram-branch-map-summary';
+  summaryLine.textContent =
+    `Resolved ${summary.resolvedLeafCount} · Known ${summary.knownNodeCount} · M ${summary.mistakes + liveTipMistakes} · H ${summary.hints + liveTipHints}`;
+  section.appendChild(summaryLine);
+
+  const rowsWrap = document.createElement('div');
+  rowsWrap.className = 'hand-diagram-branch-map-rows';
+  for (const row of rows) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'hand-diagram-branch-map-row';
+    if (row.isCurrentPath) rowEl.classList.add('is-current-path');
+    if (row.isCurrent) rowEl.classList.add('is-current');
+    if (row.isCompletedLeaf) rowEl.classList.add('is-complete-leaf');
+    rowEl.textContent = row.text;
+    rowsWrap.appendChild(rowEl);
+  }
+  section.appendChild(rowsWrap);
+  return section;
+}
+
 function renderWidgetCompanionPanel(args: {
   branchName: string | null;
+  branchTree: AuthoredBranchTreeNode | null;
   content: HandDiagramCompanionContent | null;
   onHide: () => void;
 }): HTMLElement {
-  const { branchName, content, onHide } = args;
+  const { branchName, branchTree, content, onHide } = args;
   const panel = document.createElement('aside');
   panel.className = 'hand-diagram-companion-panel';
 
@@ -5605,6 +5874,16 @@ function renderWidgetCompanionPanel(args: {
   hideBtn.onclick = () => onHide();
   head.appendChild(hideBtn);
   panel.appendChild(head);
+
+  if (branchTree && handDiagramSession.knownBranches.has(branchTree.key)) {
+    panel.appendChild(
+      renderWidgetBranchTree({
+        tree: branchTree,
+        knownBranches: handDiagramSession.knownBranches,
+        currentBranch: branchName
+      })
+    );
+  }
 
   if (content?.title?.trim()) {
     const title = document.createElement('strong');
@@ -6170,6 +6449,7 @@ function render(): void {
   const view = currentViewState();
   clearDismissedWidgetOutcomeIfChanged(view);
   const isWidgetReadingMode = widgetReadingMode();
+  revealKnownArticleScriptBranchesFromCurrentPath();
   const widgetCompanionPanel = currentWidgetCompanionPanelState();
   const widgetCompanionPanelVisible = widgetCompanionPanel.enabled && !widgetCompanionPanel.hidden;
 
@@ -6309,6 +6589,7 @@ function render(): void {
       widgetFrame.appendChild(
         renderWidgetCompanionPanel({
           branchName: widgetCompanionPanel.branchName,
+          branchTree: widgetCompanionPanel.branchTree,
           content: widgetCompanionPanel.content,
           onHide: () => {
             widgetCompanionPanelHidden = true;

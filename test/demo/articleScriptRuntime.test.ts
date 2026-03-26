@@ -19,6 +19,7 @@ import {
   resolvePendingArticleScriptChoice,
   resolveArticleScriptCheckpoint,
   resolveArticleScriptPlayStepCompanionAtCursor,
+  resolveArticleScriptPlayStepDeviationCompanionAtCursor,
   resolveArticleScriptPlayStepMessageAtCursor,
   resolveArticleScriptStepAtCursor
 } from '../../src/demo/articleScripts';
@@ -163,6 +164,26 @@ describe('article script runtime', () => {
         cursor: 1,
         choiceSelections: {},
         playedCardId: 'S8',
+        activeProfile: 'solution-viewing'
+      })
+    ).toBeNull();
+
+    expect(
+      resolveArticleScriptPlayStepDeviationCompanionAtCursor({
+        spec: doubleDummy01Script,
+        cursor: 1,
+        choiceSelections: {},
+        playedCardId: 'S9',
+        activeProfile: 'puzzle-solving'
+      })
+    ).toEqual({ title: undefined, text: 'Oops! That was fast', html: false });
+
+    expect(
+      resolveArticleScriptPlayStepDeviationCompanionAtCursor({
+        spec: doubleDummy01Script,
+        cursor: 1,
+        choiceSelections: {},
+        playedCardId: 'S9',
         activeProfile: 'solution-viewing'
       })
     ).toBeNull();

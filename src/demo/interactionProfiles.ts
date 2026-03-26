@@ -16,6 +16,10 @@ export function isSolutionViewingProfile(profile: InteractionProfile): boolean {
   return profile === 'solution-viewing';
 }
 
+export function shouldRevealDdErrorAlternatives(profile: InteractionProfile): boolean {
+  return profile !== 'puzzle-solving';
+}
+
 export function shouldScorePracticeProfile(profile: PracticeInteractionProfile): boolean {
   return profile === 'puzzle-solving';
 }
