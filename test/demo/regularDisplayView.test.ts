@@ -6,7 +6,7 @@ import { buildRegularPlayedCardDisplay, buildRegularSuitCardDisplays } from '../
 describe('regular display view', () => {
   it('builds regular suit card displays from semantic state', () => {
     const state = init(sureTricksDemo);
-    const displays = buildRegularSuitCardDisplays(state, 'N', 'S', true, true);
+    const displays = buildRegularSuitCardDisplays(state, 'N', 'S', true, true, true);
 
     expect(displays).toEqual([
       {
@@ -41,5 +41,11 @@ describe('regular display view', () => {
       rank: 'K',
       visual: { kind: 'solid', colorClass: 'rank--grey' }
     });
+  });
+
+  it('suppresses equivalence underlines when explicitly disabled', () => {
+    const state = init(sureTricksDemo);
+    const displays = buildRegularSuitCardDisplays(state, 'N', 'S', true, true, false);
+    expect(displays.every((entry) => entry.isEquivalent === false)).toBe(true);
   });
 });

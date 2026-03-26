@@ -32,10 +32,11 @@ export function buildRegularSuitCardDisplays(
   seat: Seat,
   suit: Suit,
   teachingMode: boolean,
-  coloringEnabled: boolean
+  coloringEnabled: boolean,
+  showEquivalentUnderlines: boolean
 ): RegularSuitCardDisplay[] {
   const equivalentRanks = new Set<Rank>();
-  if (teachingMode) {
+  if (showEquivalentUnderlines) {
     for (const cls of getSuitEquivalenceClasses(view, seat, suit)) {
       if (cls.length > 1) {
         for (const rank of cls) equivalentRanks.add(rank);

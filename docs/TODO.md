@@ -33,3 +33,4 @@ Current focus is on keeping PlayAgain/replay behavior explainable and reproducib
 ## E) Article / interaction profile follow-up
 - [ ] Reading-profile chrome: add a low-contrast reveal edge for transport controls so print-like article diagrams can stay calm while still exposing story controls on demand.
 - [ ] Distinguish authored explanatory messages from short status messages in widget/article UI; explanatory script text should render as readable left-aligned prose rather than centered chip-style status.
+- [ ] Define a shared editorial suit/card display style (diagram rows, played-card text, BEST/recommended chips, contract strain glyphs) and refactor ad hoc suit/card formatting to use it.

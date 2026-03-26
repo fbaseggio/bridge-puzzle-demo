@@ -151,6 +151,7 @@ const seatOrder: Seat[] = ['N', 'E', 'S', 'W'];
 const suitOrder: Suit[] = ['S', 'H', 'D', 'C'];
 const rankOrder: Rank[] = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
 const suitSymbol: Record<Suit, string> = { S: '♠', H: '♥', D: '♦', C: '♣' };
+const suitName: Record<Suit, string> = { S: 'Spades', H: 'Hearts', D: 'Diamonds', C: 'Clubs' };
 const seatName: Record<Seat, string> = { N: 'North', E: 'East', S: 'South', W: 'West' };
 const busyBranchingLabel: Record<'strict' | 'sameLevel' | 'allBusy', string> = {
   strict: 'Strict',
@@ -1590,6 +1591,10 @@ function shouldHighlightScriptChoiceForSeat(seat: Seat): boolean {
   return !currentProblem.userControls.includes(seat);
 }
 
+function shouldShowEquivalentUnderlinesCurrentSurface(): boolean {
+  return displayMode === 'analysis';
+}
+
 function applyCurrentAssistLevelToControls(problemId = currentProblemId): void {
   const puzzleMode = currentPuzzleModeId(problemId);
   const level = currentAssistLevel(problemId);
@@ -2708,12 +2713,12 @@ function formatHandInitSummary(s: State, seat: Seat): string {
 }
 
 function rankPalette(colorClass: string): { text: string; background: string } {
-  if (colorClass === 'rank--purple') return { text: '#7e22ce', background: 'rgba(126, 34, 206, 0.16)' };
-  if (colorClass === 'rank--green') return { text: '#15803d', background: 'rgba(21, 128, 61, 0.16)' };
-  if (colorClass === 'rank--blue') return { text: '#1d4ed8', background: 'rgba(29, 78, 216, 0.16)' };
-  if (colorClass === 'rank--amber') return { text: '#d97706', background: 'rgba(217, 119, 6, 0.18)' };
-  if (colorClass === 'rank--grey') return { text: '#6b7280', background: 'rgba(148, 163, 184, 0.16)' };
-  return { text: '#111827', background: 'transparent' };
+  if (colorClass === 'rank--purple') return { text: '#7d52a4', background: 'rgba(125, 82, 164, 0.08)' };
+  if (colorClass === 'rank--green') return { text: '#1a8750', background: 'rgba(26, 135, 80, 0.08)' };
+  if (colorClass === 'rank--blue') return { text: '#3564c2', background: 'rgba(53, 100, 194, 0.08)' };
+  if (colorClass === 'rank--amber') return { text: '#a86416', background: 'rgba(168, 100, 22, 0.08)' };
+  if (colorClass === 'rank--grey') return { text: '#6a655d', background: 'rgba(106, 101, 93, 0.16)' };
+  return { text: '#1c1917', background: 'transparent' };
 }
 
 function rankColorVisualForCard(
@@ -2755,7 +2760,7 @@ function applyRankVisual(target: HTMLElement, visual: RankColorVisual): void {
   }
   const palettes = visual.colors.map(rankPalette);
   target.classList.add('rank--mixed');
-  target.style.color = '#111827';
+  target.style.color = '#1c1917';
   if (visual.kind === 'split') {
     target.style.backgroundImage = `linear-gradient(135deg, ${palettes[0]?.background ?? 'transparent'} 0 50%, ${palettes[1]?.background ?? 'transparent'} 50% 100%)`;
     return;
@@ -5417,16 +5422,21 @@ function renderSuitRow(
   const row = document.createElement('div');
   row.className = 'suit-row';
 
-  const suitEl = document.createElement('span');
-  suitEl.className = `suit-symbol suit-${suit}`;
-  suitEl.textContent = suitSymbol[suit];
+  const suitEl = createSuitGlyph(suit);
   row.appendChild(suitEl);
 
   const cards = document.createElement('div');
-  cards.className = 'cards';
+  cards.className = 'cards holding';
 
   const regularDisplays = !versionUnknownModeEnabled()
-    ? buildRegularSuitCardDisplays(view, seat, suit, teachingMode, cardColoringEnabled)
+    ? buildRegularSuitCardDisplays(
+        view,
+        seat,
+        suit,
+        teachingMode,
+        cardColoringEnabled,
+        shouldShowEquivalentUnderlinesCurrentSurface()
+      )
     : null;
   const ranks = regularDisplays ? regularDisplays.map((item) => item.rank) : [...displayRanks];
   if (ranks.length > 0) {
@@ -5479,6 +5489,17 @@ function renderSuitRow(
 
   row.appendChild(cards);
   return row;
+}
+
+function createSuitGlyph(suit: Suit, extraClass = ''): HTMLSpanElement {
+  const suitEl = document.createElement('span');
+  suitEl.className = `suit-symbol suit-${suit}${extraClass ? ` ${extraClass}` : ''}`;
+  suitEl.setAttribute('aria-label', suitName[suit]);
+  const glyph = document.createElement('span');
+  glyph.className = 'suit-glyph';
+  glyph.textContent = suitSymbol[suit];
+  suitEl.appendChild(glyph);
+  return suitEl;
 }
 
 function renderSeatHand(view: State, seat: Seat): HTMLElement {
@@ -6065,45 +6086,50 @@ function renderStatusPanel(view: State): HTMLElement {
   panel.className = 'status-panel';
 
   const title = document.createElement('strong');
+  title.className = 'status-title';
   title.textContent = 'Status';
   panel.appendChild(title);
 
   const facts = document.createElement('div');
   facts.className = 'status-facts';
   const contractRow = document.createElement('div');
+  contractRow.className = 'status-row status-row-contract';
   const contractKey = document.createElement('span');
   contractKey.className = 'k';
   contractKey.textContent = 'Contract';
   const contractValue = document.createElement('span');
-  contractValue.className = `v${view.contract.strain === 'NT' ? '' : ` suit-${view.contract.strain}`}`;
-  contractValue.textContent = formatStrainText(view.contract.strain);
+  contractValue.className = `v contract-value${view.contract.strain === 'NT' ? '' : ` suit-${view.contract.strain}`}`;
+  if (view.contract.strain === 'NT') contractValue.textContent = formatStrainText(view.contract.strain);
+  else contractValue.appendChild(createSuitGlyph(view.contract.strain, 'contract-suit'));
   contractRow.append(contractKey, contractValue);
   facts.appendChild(contractRow);
 
   const goalRow = document.createElement('div');
+  goalRow.className = 'status-row';
   goalRow.innerHTML = `<span class="k">Goal</span><span class="v">${formatGoal(view)}</span>`;
   facts.appendChild(goalRow);
 
   const goalStateRow = document.createElement('div');
+  goalStateRow.className = 'status-row';
   goalStateRow.innerHTML = `<span class="k">Goal state</span><span class="v">${formatGoalStatus(view)}</span>`;
   facts.appendChild(goalStateRow);
 
   const tricksRow = document.createElement('div');
-  tricksRow.className = 'tricks';
+  tricksRow.className = 'status-row tricks';
   tricksRow.innerHTML = `<span class="k">Tricks</span><span class="v heavy">NS ${view.tricksWon.NS} - EW ${view.tricksWon.EW}</span>`;
   facts.appendChild(tricksRow);
 
   const leaderRow = document.createElement('div');
-  leaderRow.className = 'meta-row';
+  leaderRow.className = 'status-row meta-row';
   leaderRow.innerHTML = `<span class="k">Leader</span><span class="v turn-meta">${view.leader}</span>`;
   facts.appendChild(leaderRow);
 
   const turnRow = document.createElement('div');
-  turnRow.className = 'meta-row';
+  turnRow.className = 'status-row meta-row';
   turnRow.innerHTML = `<span class="k">Turn</span><span class="v turn-meta turn-emph">${view.turn}</span>`;
   facts.appendChild(turnRow);
   const seedRow = document.createElement('div');
-  seedRow.className = 'meta-row';
+  seedRow.className = 'status-row meta-row';
   const seedKey = document.createElement('span');
   seedKey.className = 'k';
   seedKey.textContent = 'Seed';
@@ -6122,7 +6148,7 @@ function renderStatusPanel(view: State): HTMLElement {
   facts.appendChild(seedRow);
 
   const debugRow = document.createElement('div');
-  debugRow.className = 'meta-row';
+  debugRow.className = 'status-row meta-row';
   const debugKey = document.createElement('span');
   debugKey.className = 'k';
   debugKey.textContent = 'Debug';
