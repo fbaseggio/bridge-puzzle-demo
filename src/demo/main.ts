@@ -88,6 +88,15 @@ import {
   type ArticleScriptChoiceSelections,
   type ArticleScriptStateId
 } from './articleScriptRuntime';
+import {
+  chooseArticleScriptBranchOptionForProfile,
+  explicitChoiceStepForBranch as explicitChoiceStepForBranchShared,
+  isArticleScriptBranchComplete as isArticleScriptBranchCompleteShared,
+  previousUnfinishedArticleScriptBranchCursor as previousUnfinishedArticleScriptBranchCursorShared,
+  resolveExplicitBranchAdvanceAction,
+  shouldAutoAdvanceNonExplicitChoiceForProfile,
+  shouldBlockArticleScriptUserAdvance
+} from './articleScriptInteractionPolicy';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -722,31 +731,13 @@ function chooseArticleScriptHintCard(options: CardId[]): CardId | null {
   return chooseHintAdvanceCard(options) ?? options[0] ?? null;
 }
 
-function chooseLowestCardId(options: CardId[]): CardId | null {
-  if (options.length === 0) return null;
-  const sorted = [...options].sort((a, b) => {
-    const rankDelta = rankStrengthForAdvance(parseCardId(a).rank) - rankStrengthForAdvance(parseCardId(b).rank);
-    if (rankDelta !== 0) return rankDelta;
-    return suitStrengthForAdvance(parseCardId(a).suit) - suitStrengthForAdvance(parseCardId(b).suit);
-  });
-  return sorted[0] ?? null;
-}
-
 function chooseCurrentArticleScriptBranchOption(): CardId | null {
-  const choicePresentation = currentArticleScriptChoicePresentation();
-  if (!choicePresentation) return null;
-  const authoredExplicit = (choicePresentation.rawChoice.optionMode ?? 'explicit') === 'explicit'
-    && (choicePresentation.rawChoice.branchRole ?? 'authored') === 'authored';
-  const preferredOptions = authoredExplicit
-    ? (choicePresentation.unresolvedOptions.length > 0 ? choicePresentation.unresolvedOptions : (choicePresentation.rawChoice.options ?? []))
-    : (choicePresentation.choice.options ?? []);
-  if (articleScriptIsStoryViewing() && authoredExplicit) {
-    const branchName = currentArticleScriptResolvedBranchName();
-    const tried = branchName ? articleScriptTriedBranchOptions.get(branchName) : null;
-    const untriedOptions = tried ? preferredOptions.filter((cardId) => !tried.has(cardId)) : preferredOptions;
-    return chooseLowestCardId(untriedOptions.length > 0 ? untriedOptions : preferredOptions);
-  }
-  return chooseLowestCardId(preferredOptions);
+  return chooseArticleScriptBranchOptionForProfile({
+    profile: currentArticleScriptInteractionProfile(),
+    choicePresentation: currentArticleScriptChoicePresentation(),
+    branchName: currentArticleScriptResolvedBranchName(),
+    triedBranchOptions: articleScriptTriedBranchOptions
+  });
 }
 
 function recordArticleScriptBranchOptionChoice(branchName: string, cardId: CardId): void {
@@ -804,26 +795,9 @@ function articleScriptIsStoryViewing(): boolean {
   return currentArticleScriptInteractionProfile() === 'story-viewing';
 }
 
-function explicitChoiceStepForBranch(branchName: string): ArticleScriptChoiceStep | null {
-  if (!articleScriptState) return null;
-  const rootBranch = articleScriptState.spec.steps[0]?.kind === 'play' ? articleScriptState.spec.steps[0].cardId : '';
-  for (const step of articleScriptState.spec.steps) {
-    if (step.kind !== 'choice') continue;
-    if ((step.optionMode ?? 'explicit') !== 'explicit') continue;
-    if ((step.branchRole ?? 'authored') !== 'authored') continue;
-    const stepBranch = step.branchPrefix ?? rootBranch;
-    if (stepBranch === branchName) return step;
-  }
-  return null;
-}
-
 function isArticleScriptBranchComplete(branchName: string): boolean {
-  if (!branchName) return false;
-  if (articleScriptCompletedBranches.has(branchName)) return true;
-  const explicitChoice = explicitChoiceStepForBranch(branchName);
-  const options = explicitChoice?.options ?? [];
-  if (options.length === 0) return false;
-  return options.every((option) => isArticleScriptBranchComplete(`${branchName}${option}`));
+  if (!articleScriptState) return false;
+  return isArticleScriptBranchCompleteShared(articleScriptState.spec, articleScriptCompletedBranches, branchName);
 }
 
 function previousUnfinishedArticleScriptBranchCursor(
@@ -831,17 +805,13 @@ function previousUnfinishedArticleScriptBranchCursor(
   choiceSelections: Partial<Record<number, CardId>>
 ): number | null {
   if (!articleScriptState) return null;
-  for (let current = Math.max(0, cursor - 1); current >= articleScriptState.initialCursor; current -= 1) {
-    const step = resolveArticleScriptStepAtCursor(articleScriptState.spec, current, choiceSelections);
-    if (step?.kind !== 'choice') continue;
-    if ((step.optionMode ?? 'explicit') !== 'explicit') continue;
-    if ((step.branchRole ?? 'authored') !== 'authored') continue;
-    if (!choiceSelections[current]) continue;
-    const branchName = resolveArticleScriptAuthoredBranchName(articleScriptState.spec, choiceSelections, current);
-    const options = step.options ?? [];
-    if (options.some((option) => !isArticleScriptBranchComplete(`${branchName}${option}`))) return current;
-  }
-  return null;
+  return previousUnfinishedArticleScriptBranchCursorShared({
+    spec: articleScriptState.spec,
+    initialCursor: articleScriptState.initialCursor,
+    cursor,
+    choiceSelections,
+    completedBranches: articleScriptCompletedBranches
+  });
 }
 
 function currentArticleScriptChoicePresentation():
@@ -878,7 +848,7 @@ function currentArticleScriptChoicePresentation():
 function currentArticleScriptProgressSummary(): string {
   const rootBranch = articleScriptState?.spec.steps[0]?.kind === 'play' ? articleScriptState.spec.steps[0].cardId : '';
   const countCompleted = (branchName: string, includeSelf: boolean): number => {
-    const explicitChoice = explicitChoiceStepForBranch(branchName);
+    const explicitChoice = articleScriptState ? explicitChoiceStepForBranchShared(articleScriptState.spec, branchName) : null;
     if (!explicitChoice) return isArticleScriptBranchComplete(branchName) ? (includeSelf ? 1 : 0) : 0;
     const childCount = (explicitChoice.options ?? []).reduce((sum, option) => sum + countCompleted(`${branchName}${option}`, true), 0);
     const selfCount = includeSelf && isArticleScriptBranchComplete(branchName) ? 1 : 0;
@@ -2302,7 +2272,10 @@ function advanceOneWidgetCard(): boolean {
     }
     const scriptedChoice = pendingArticleScriptChoice();
     if (scriptedChoice && (scriptState === 'in-script' || scriptState === 'pre-script')) {
-      if (articleScriptIsStoryViewing() && (scriptedChoice.optionMode ?? 'explicit') !== 'explicit') {
+      if (shouldAutoAdvanceNonExplicitChoiceForProfile({
+        profile: currentArticleScriptInteractionProfile(),
+        choice: scriptedChoice
+      })) {
         const chosenCardId =
           chooseArticleScriptHintCard(scriptedChoice.options ?? []);
         const legal = chosenCardId
@@ -5895,11 +5868,14 @@ function renderBoardNavigationArea(view: State): HTMLElement {
   const scriptedPrefix = articleScriptStateLabel ? `${articleScriptStateLabel} · ` : '';
   const articleScriptUserAdvanceBlocked = Boolean(
     widgetArticleScript
-    && !articleScriptIsStoryViewing()
-    && currentProblem.userControls.includes(view.turn)
-    && !articleScriptHasRememberedTail
-    && (!trickFrozen || canLeadDismiss)
-    && state.phase !== 'end'
+    && shouldBlockArticleScriptUserAdvance({
+      profile: currentArticleScriptInteractionProfile(),
+      isUserTurn: currentProblem.userControls.includes(view.turn),
+      hasRememberedTail: articleScriptHasRememberedTail,
+      trickFrozen,
+      canLeadDismiss,
+      phase: state.phase
+    })
   );
   const dismissedOutcomeKey = currentDismissibleWidgetOutcomeKey(view);
   const suppressDismissedOutcome = dismissedOutcomeKey !== null && dismissedOutcomeKey === dismissedWidgetOutcomeKey;
@@ -6133,8 +6109,11 @@ function renderBoardNavigationArea(view: State): HTMLElement {
         && (scriptedChoicePresentation.rawChoice.optionMode ?? 'explicit') === 'explicit'
       ) {
         const unresolvedOptions = scriptedChoicePresentation.unresolvedOptions;
-        if (unresolvedOptions.length > 1) {
-          if (articleScriptFollowPromptCursor === widgetArticleScript.cursor) {
+        const branchAdvanceAction = resolveExplicitBranchAdvanceAction({
+          unresolvedOptionCount: unresolvedOptions.length,
+          followPromptActive: articleScriptFollowPromptCursor === widgetArticleScript.cursor
+        });
+        if (branchAdvanceAction === 'choose') {
             const chosenCardId = chooseCurrentArticleScriptBranchOption();
             const legal = legalPlays(state).filter((candidate) => candidate.seat === state.turn);
             const play = chosenCardId
@@ -6151,14 +6130,15 @@ function renderBoardNavigationArea(view: State): HTMLElement {
               render();
               return;
             }
-          }
+        }
+        if (branchAdvanceAction === 'prompt') {
           articleScriptFollowPromptCursor = widgetArticleScript.cursor;
           articleScriptStickyMessage = false;
           widgetStatus = { type: 'message', text: `Choose ${seatName[view.turn]}'s play, or click > again to choose the lowest.` };
           render();
           return;
         }
-        if (unresolvedOptions.length === 1) {
+        if (branchAdvanceAction === 'choose-single') {
           const chosenCardId = chooseCurrentArticleScriptBranchOption() ?? unresolvedOptions[0];
           const legal = legalPlays(state).filter((candidate) => candidate.seat === state.turn);
           const play = legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId);

@@ -139,8 +139,8 @@ describe('article script runtime', () => {
       options: ['DJ', 'ST'],
       prompt: "Pick East's play",
       choiceMessages: {
-        DJ: 'When East pitches a diamond, we must <b>ruff</b> and then throw them in with a diamond.',
-        ST: "When East pitches a spade, we must <b>sluff</b> so West will perforce grant us access to dummy's 2 spade winners."
+        DJ: 'When East pitches a diamond, we must <span class="article-inline-emphasis">ruff</span> and then throw them in with a diamond.',
+        ST: "When East pitches a spade, we must <span class=\"article-inline-emphasis\">sluff</span> so West will perforce grant us access to dummy's 2 spade winners."
       },
       continuations: {
         DJ: ['H5', 'C9', 'D5', 'S4', 'D8', 'DQ', 'ST', 'D7', 'S8', 'SJ', 'SK', 'SQ', 'D9', 'S9'],
