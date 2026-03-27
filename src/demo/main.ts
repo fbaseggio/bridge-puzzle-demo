@@ -426,6 +426,10 @@ const initialArticleCheckpointIdFromUrl: string | null = (() => {
   return raw?.trim() ? raw.trim() : null;
 })();
 const initialArticleScriptSpec = resolveArticleScript(initialArticleScriptIdFromUrl);
+const readingWidgetEmbedCompactHeight = 326;
+const readingWidgetEmbedFullHeight = 364;
+const readingWidgetEmbedHeightMessageType = 'ds-widget-reading-height';
+let lastReportedReadingWidgetEmbedHeight: number | null = null;
 const initialArticleCursor = (() => {
   if (!initialArticleScriptSpec) return 0;
   return resolveArticleScriptCheckpoint(initialArticleScriptSpec, initialArticleCheckpointIdFromUrl ?? '1').cursor;
@@ -6145,6 +6149,26 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
   return pane;
 }
 
+function publishReadingWidgetEmbedHeight(readingRevealEnabled: boolean): void {
+  if (!readingRevealEnabled) {
+    lastReportedReadingWidgetEmbedHeight = null;
+    return;
+  }
+  if (!isWidgetShellMode || displayMode !== 'widget' || typeof window === 'undefined' || window.parent === window) return;
+  const height = handDiagramSession.readingControlsRevealStage === 'full'
+    ? readingWidgetEmbedFullHeight
+    : readingWidgetEmbedCompactHeight;
+  if (lastReportedReadingWidgetEmbedHeight === height) return;
+  lastReportedReadingWidgetEmbedHeight = height;
+  window.parent.postMessage(
+    {
+      type: readingWidgetEmbedHeightMessageType,
+      height
+    },
+    window.location.origin
+  );
+}
+
 function render(): void {
   renderingNow = true;
   // Unknown-mode card visuals and teaching display must read the same replay snapshot.
@@ -6336,6 +6360,7 @@ function render(): void {
   applyCompactTableAlignment(tableCanvas);
   applyUnknownSlashLinePlacement(tableCanvas);
   applyNarrationBubbleCollisionAvoidance(tableCanvas);
+  publishReadingWidgetEmbedHeight(readingRevealEnabled);
   if (displayMode === 'analysis' && (showLog || showDebugSection)) {
     root.appendChild(renderDebugSection());
   }

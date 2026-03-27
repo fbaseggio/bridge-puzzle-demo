@@ -1070,6 +1070,9 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     section.appendChild(slot);
     return section;
   }
+  if (deps.readingRevealEnabled) {
+    slot.classList.add('reading-full-stage');
+  }
 
   const outcome = renderOutcomeModule({
     view,

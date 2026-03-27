@@ -2058,6 +2058,7 @@ html.mode-widget {
 }
 
 .hand-diagram-nav-slot.reading-profile-nav.reading-collapsed {
+  min-height: 36px;
   overflow: hidden;
 }
 
@@ -2227,6 +2228,20 @@ html.mode-widget {
   border-color: #c3cfdf;
   background: #f7faff;
   border-radius: 999px;
+}
+
+.hand-diagram-nav-slot.mode-widget.reading-full-stage {
+  min-height: 76px;
+  gap: 8px;
+}
+
+.hand-diagram-nav-slot.mode-widget.reading-full-stage .outcome-module,
+.hand-diagram-nav-slot.mode-widget.reading-full-stage .transport-bar {
+  position: static;
+  left: auto;
+  top: auto;
+  bottom: auto;
+  transform: none;
 }
 
 .mode-practice .board-navigation-area.mode-practice {
