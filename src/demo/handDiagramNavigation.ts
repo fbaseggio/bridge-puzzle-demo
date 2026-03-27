@@ -1,6 +1,7 @@
-import type { Rank, State, Suit } from '../core';
+import type { State } from '../core';
 import type { CardId } from '../ai/threatModel';
 import { setMessage, setReadingControlsRevealed, type HandDiagramSession } from './handDiagramSession';
+import { renderCardToken } from './cardPresentation';
 import {
   canGuidedAdvanceByProfile,
   shouldScorePracticeProfile,
@@ -61,8 +62,6 @@ type HandDiagramNavigationDeps = {
   withHintPrompt: (text: string, view: State) => string;
   seatName: Record<'N' | 'E' | 'S' | 'W', string>;
   startPending: boolean;
-  suitSymbol: Record<Suit, string>;
-  displayRank: (rank: Rank) => string;
   renderSettingsButton: (placement: 'widget') => HTMLElement;
   articleScriptIsStoryViewing: () => boolean;
   resolvePreviousArticleScriptLandmarkCursor: (spec: any, cursor: number, choiceSelections: Partial<Record<number, CardId>>) => number | null;
@@ -148,8 +147,6 @@ function renderOutcomeModule(args: {
     canLeadDismiss,
     state,
     seatName,
-    suitSymbol,
-    displayRank,
     hintLoading
   } = deps;
   const widgetStatus = handDiagramSession.status;
@@ -211,11 +208,7 @@ function renderOutcomeModule(args: {
     outcome.appendChild(prefix);
     if (activeHint.bestCards.length > 0) {
       for (const cardId of activeHint.bestCards) {
-        const suit = cardId[0] as Suit;
-        const rank = cardId.slice(1) as Rank;
-        const chip = document.createElement('span');
-        chip.className = `hint-card ${suit === 'H' ? 'heart' : suit === 'D' ? 'diamond' : suit === 'S' ? 'spade' : 'club'}`;
-        chip.textContent = `${suitSymbol[suit]}${displayRank(rank)}`;
+        const chip = renderCardToken(cardId, { context: 'best-chip', mode: 'base', className: 'hint-card' });
         outcome.appendChild(chip);
       }
     } else {
@@ -744,8 +737,6 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     withHintPrompt,
     seatName,
     startPending,
-    suitSymbol,
-    displayRank,
     renderSettingsButton,
     articleScriptIsStoryViewing,
     resolvePreviousArticleScriptLandmarkCursor,

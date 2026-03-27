@@ -53,6 +53,7 @@ import { buildUnknownMergedRankColorVisual, fixedRanksForSeatSuit, unresolvedEwC
 import { buildRegularPlayedCardDisplay, buildRegularSuitCardDisplays } from './regularDisplayView';
 import { buildTeachingDisplayEntries, buildWidgetNarrationEntries } from './teachingDisplay';
 import { mergeUnknownDdsSummaries, mergeUnknownTeachingEntries } from './unknownModeDisplay';
+import { renderCardToken, renderSuitGlyph } from './cardPresentation';
 import {
   buildUnknownModePlayedEvents,
   buildUnknownModeVariantReplayData as buildUnknownModeVariantReplayDataShared,
@@ -1220,6 +1221,8 @@ let autoplaySingletons = displayMode !== 'widget';
 let autoplayEw = true;
 let unknownModeVariantReplayData: Map<string, UnknownModeVariantReplay> | null = null;
 let westInitialContentWidth: number | null = null;
+let nsInitialFitWidth: number | null = null;
+let diagramRowHeightPx: number | null = null;
 let assistLevelByMode: Record<PuzzleModeId, AssistLevelId> = {
   standard: displayMode === 'practice' ? 'puzzle' : 'solution',
   'single-dummy': 'sd',
@@ -4704,6 +4707,8 @@ function resetGame(seed: number, reason: string): void {
   clearPulseTimer();
   pulseUntilByCardKey.clear();
   westInitialContentWidth = null;
+  nsInitialFitWidth = null;
+  diagramRowHeightPx = null;
   const nextSeed = seed >>> 0;
   if (nextSeed !== (currentSeed >>> 0)) {
     replayCoverage.triedByIdx.clear();
@@ -4758,6 +4763,8 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   clearPulseTimer();
   pulseUntilByCardKey.clear();
   westInitialContentWidth = null;
+  nsInitialFitWidth = null;
+  diagramRowHeightPx = null;
   const entry = demoProblems.find((p) => p.id === problemId);
   if (!entry && !practiceProblemOverrides.has(problemId)) return;
   currentProblemVariantId = practiceProblemOverrides.has(problemId) ? null : resolveProblemVariantId(problemId, variantId);
@@ -5645,8 +5652,14 @@ function renderBoardMeta(view: State): HTMLElement {
     contractLine.className = 'board-meta-line';
     contractLine.appendChild(document.createTextNode('Contract: '));
     const levelValue = document.createElement('span');
-    levelValue.className = `board-meta-strain${view.contract.strain === 'NT' ? '' : ` suit-${view.contract.strain}`}`;
-    levelValue.textContent = `${Math.max(0, view.goal.n - 6)}${formatStrainText(view.contract.strain)}`;
+    levelValue.className = 'board-meta-strain';
+    const contractLevel = Math.max(0, view.goal.n - 6);
+    if (view.contract.strain === 'NT') {
+      levelValue.textContent = `${contractLevel}${formatStrainText(view.contract.strain)}`;
+    } else {
+      levelValue.textContent = String(contractLevel);
+      levelValue.appendChild(renderSuitGlyph(view.contract.strain, { context: 'contract-strain' }));
+    }
     contractLine.appendChild(levelValue);
     meta.appendChild(contractLine);
   } else {
@@ -5654,8 +5667,9 @@ function renderBoardMeta(view: State): HTMLElement {
     strainLine.className = 'board-meta-line';
     strainLine.appendChild(document.createTextNode('Strain: '));
     const strainValue = document.createElement('span');
-    strainValue.className = `board-meta-strain${view.contract.strain === 'NT' ? '' : ` suit-${view.contract.strain}`}`;
-    strainValue.textContent = formatStrainText(view.contract.strain);
+    strainValue.className = 'board-meta-strain';
+    if (view.contract.strain === 'NT') strainValue.textContent = formatStrainText(view.contract.strain);
+    else strainValue.appendChild(renderSuitGlyph(view.contract.strain, { context: 'contract-strain' }));
     strainLine.appendChild(strainValue);
     meta.appendChild(strainLine);
 
@@ -5670,8 +5684,17 @@ function renderBoardMeta(view: State): HTMLElement {
   }
 
   const tricksLine = document.createElement('div');
-  tricksLine.className = 'board-meta-line';
-  tricksLine.textContent = `NS ${view.tricksWon.NS} · EW ${view.tricksWon.EW}`;
+  tricksLine.className = 'board-meta-line board-meta-line-tricks';
+  tricksLine.appendChild(document.createTextNode('NS '));
+  const nsTricks = document.createElement('span');
+  nsTricks.className = 'board-meta-live-value';
+  nsTricks.textContent = String(view.tricksWon.NS);
+  tricksLine.appendChild(nsTricks);
+  tricksLine.appendChild(document.createTextNode(' · EW '));
+  const ewTricks = document.createElement('span');
+  ewTricks.className = 'board-meta-live-value';
+  ewTricks.textContent = String(view.tricksWon.EW);
+  tricksLine.appendChild(ewTricks);
   meta.appendChild(tricksLine);
 
   return meta;
@@ -5707,12 +5730,86 @@ type BranchTreeSummary = {
 };
 
 type BranchTreeRow = {
-  text: string;
+  prefixText: string;
+  branchKeyPart: string;
+  suffixText: string;
   key: string;
   isCurrent: boolean;
   isCurrentPath: boolean;
   isCompletedLeaf: boolean;
 };
+
+const SUIT_CHARS = new Set(['S', 'H', 'D', 'C']);
+const RANK_CHARS = new Set(['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2']);
+const INLINE_CARD_TOKEN_PATTERN = /[SHDC](?:10|[AKQJT2-9])/g;
+
+function parseCardToken(rawToken: string): CardId | null {
+  const token = rawToken.trim().toUpperCase();
+  if (token.length < 2) return null;
+  const suit = token[0];
+  if (!SUIT_CHARS.has(suit)) return null;
+  const rankToken = token.slice(1) === '10' ? 'T' : token.slice(1);
+  if (!RANK_CHARS.has(rankToken)) return null;
+  return `${suit}${rankToken}` as CardId;
+}
+
+function appendBranchKeyWithCardTokens(target: HTMLElement, branchKey: string, cardClassName = ''): void {
+  let cursor = 0;
+  while (cursor < branchKey.length) {
+    const suit = branchKey[cursor]?.toUpperCase() ?? '';
+    if (SUIT_CHARS.has(suit)) {
+      const twoChar = branchKey.slice(cursor, cursor + 2).toUpperCase();
+      const threeChar = branchKey.slice(cursor, cursor + 3).toUpperCase();
+      const rawCard = threeChar[1] === '1' && threeChar[2] === '0' ? threeChar : twoChar;
+      const cardId = parseCardToken(rawCard);
+      if (cardId) {
+        target.appendChild(
+          renderCardToken(cardId, {
+            context: 'inline-card',
+            mode: 'base',
+            className: cardClassName
+          })
+        );
+        cursor += rawCard.length;
+        continue;
+      }
+    }
+    target.appendChild(document.createTextNode(branchKey[cursor]));
+    cursor += 1;
+  }
+}
+
+function isCardTokenBoundary(text: string, start: number, end: number): boolean {
+  const prev = start > 0 ? text[start - 1] : '';
+  const next = end < text.length ? text[end] : '';
+  return !/[A-Za-z0-9]/.test(prev) && !/[A-Za-z0-9]/.test(next);
+}
+
+function appendInlineTextWithCardTokens(target: HTMLElement, text: string, cardClassName = ''): void {
+  let cursor = 0;
+  for (const match of text.matchAll(INLINE_CARD_TOKEN_PATTERN)) {
+    const token = match[0] ?? '';
+    const index = match.index ?? -1;
+    if (index < 0) continue;
+    const end = index + token.length;
+    if (!isCardTokenBoundary(text, index, end)) continue;
+    if (index > cursor) target.appendChild(document.createTextNode(text.slice(cursor, index)));
+    const cardId = parseCardToken(token);
+    if (cardId) {
+      target.appendChild(
+        renderCardToken(cardId, {
+          context: 'inline-card',
+          mode: 'base',
+          className: cardClassName
+        })
+      );
+    } else {
+      target.appendChild(document.createTextNode(token));
+    }
+    cursor = end;
+  }
+  if (cursor < text.length) target.appendChild(document.createTextNode(text.slice(cursor)));
+}
 
 function summarizeKnownBranchTree(
   node: AuthoredBranchTreeNode,
@@ -5785,7 +5882,9 @@ function collectKnownBranchTreeRows(args: {
       : '';
   const rows: BranchTreeRow[] = [
     {
-      text: `${linePrefix}${nodeLabel}${terminalSuffix}${liveTipSuffix}`,
+      prefixText: linePrefix,
+      branchKeyPart: nodeLabel,
+      suffixText: `${terminalSuffix}${liveTipSuffix}`,
       key: node.key,
       isCurrent: currentBranch === node.key,
       isCurrentPath: currentBranch.startsWith(node.key),
@@ -5855,7 +5954,19 @@ function renderWidgetBranchTree(args: {
     if (row.isCurrentPath) rowEl.classList.add('is-current-path');
     if (row.isCurrent) rowEl.classList.add('is-current');
     if (row.isCompletedLeaf) rowEl.classList.add('is-complete-leaf');
-    rowEl.textContent = row.text;
+    if (row.prefixText) {
+      const prefix = document.createElement('span');
+      prefix.className = 'hand-diagram-branch-map-prefix';
+      prefix.textContent = row.prefixText;
+      rowEl.appendChild(prefix);
+    }
+    appendBranchKeyWithCardTokens(rowEl, row.branchKeyPart, 'hand-diagram-inline-card hand-diagram-branch-card');
+    if (row.suffixText) {
+      const suffix = document.createElement('span');
+      suffix.className = 'hand-diagram-branch-map-suffix';
+      suffix.textContent = row.suffixText;
+      rowEl.appendChild(suffix);
+    }
     rowsWrap.appendChild(rowEl);
   }
   section.appendChild(rowsWrap);
@@ -5882,7 +5993,8 @@ function renderWidgetCompanionPanel(args: {
   branchLabel.textContent = 'BRANCH';
   const branchValue = document.createElement('div');
   branchValue.className = 'hand-diagram-companion-branch-value';
-  branchValue.textContent = branchName || '-';
+  if (branchName) appendBranchKeyWithCardTokens(branchValue, branchName, 'hand-diagram-inline-card hand-diagram-branch-card');
+  else branchValue.textContent = '-';
   branch.append(branchLabel, branchValue);
   head.appendChild(branch);
 
@@ -5909,7 +6021,7 @@ function renderWidgetCompanionPanel(args: {
   if (content?.title?.trim()) {
     const title = document.createElement('strong');
     title.className = 'hand-diagram-companion-title';
-    title.textContent = content.title.trim();
+    appendInlineTextWithCardTokens(title, content.title.trim(), 'hand-diagram-inline-card');
     panel.appendChild(title);
   }
 
@@ -5917,7 +6029,7 @@ function renderWidgetCompanionPanel(args: {
     const body = document.createElement('div');
     body.className = 'hand-diagram-companion-body';
     if (content.html) body.innerHTML = content.text;
-    else body.textContent = content.text;
+    else appendInlineTextWithCardTokens(body, content.text, 'hand-diagram-inline-card');
     panel.appendChild(body);
   }
 
@@ -5992,18 +6104,57 @@ function applyCompactTableAlignment(tableCanvas: HTMLElement): void {
   const northWidth = tableCanvas.querySelector<HTMLElement>('.seat-N .hand-content')?.getBoundingClientRect().width ?? handBoxWidth;
   const southWidth = tableCanvas.querySelector<HTMLElement>('.seat-S .hand-content')?.getBoundingClientRect().width ?? handBoxWidth;
   const westWidth = tableCanvas.querySelector<HTMLElement>('.seat-W .hand-content')?.getBoundingClientRect().width ?? handBoxWidth;
-  const nsFitWidth = Math.max(northWidth, southWidth);
-  const compactSlack = handBoxWidth - nsFitWidth;
+  if (nsInitialFitWidth === null) nsInitialFitWidth = Math.max(northWidth, southWidth);
   if (westInitialContentWidth === null) westInitialContentWidth = westWidth;
   const westSlack = handBoxWidth - westInitialContentWidth;
 
   const westSnugShift = westSlack >= 18 ? Math.min(8, Math.round((westSlack - 12) / 3)) : 0;
-  const tableAxisShift = compactSlack >= 28 ? -Math.min(8, Math.round(compactSlack / 2)) : 0;
+  const nsFitWidth = Math.min(handBoxWidth, nsInitialFitWidth);
 
   tableCanvas.style.setProperty('--ns-fit-width', `${Math.round(nsFitWidth)}px`);
   tableCanvas.style.setProperty('--west-anchor-width', `${Math.round(westInitialContentWidth)}px`);
   tableCanvas.style.setProperty('--west-snug-shift', `${westSnugShift}px`);
-  tableCanvas.style.setProperty('--table-axis-shift', `${tableAxisShift}px`);
+  tableCanvas.style.setProperty('--table-axis-shift', '0px');
+}
+
+function measureDiagramRowHeight(tableCanvas: HTMLElement): number {
+  const probe = document.createElement('div');
+  probe.style.position = 'absolute';
+  probe.style.left = '-9999px';
+  probe.style.top = '0';
+  probe.style.visibility = 'hidden';
+  probe.style.pointerEvents = 'none';
+  probe.style.display = 'grid';
+  probe.style.gridTemplateColumns = 'max-content';
+  probe.style.gridAutoRows = 'max-content';
+
+  tableCanvas.appendChild(probe);
+  let maxHeight = 0;
+
+  for (const suit of suitOrder) {
+    const suitProbe = createSuitGlyph(suit);
+    probe.appendChild(suitProbe);
+    maxHeight = Math.max(maxHeight, suitProbe.getBoundingClientRect().height);
+  }
+
+  const neutralVisual: RankColorVisual = { kind: 'solid', colorClass: 'rank--black' };
+  for (const rank of rankOrder) {
+    const rankProbe = document.createElement('span');
+    rankProbe.className = 'rank-text muted';
+    appendRankContent(rankProbe, rank, neutralVisual);
+    probe.appendChild(rankProbe);
+    maxHeight = Math.max(maxHeight, rankProbe.getBoundingClientRect().height);
+  }
+
+  probe.remove();
+  return Math.max(16, Math.ceil(maxHeight + 1));
+}
+
+function applyFrozenDiagramRowHeight(tableCanvas: HTMLElement): void {
+  if (diagramRowHeightPx === null) {
+    diagramRowHeightPx = measureDiagramRowHeight(tableCanvas);
+  }
+  tableCanvas.style.setProperty('--diagram-row-h', `${diagramRowHeightPx}px`);
 }
 
 function applyUnknownSlashLinePlacement(tableCanvas: HTMLElement): void {
@@ -6049,18 +6200,15 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
     if (play) {
       if (resolvedWinner === seat) slot.classList.add('resolved-winner');
       else if (resolvedWinner) slot.classList.add('resolved-nonwinner');
-      const text = document.createElement('span');
-      text.className = 'played-text';
       const regularDisplay = buildRegularPlayedCardDisplay(view, play, teachingMode, cardColoringEnabled);
       const cardId = regularDisplay.cardId;
+      const text = renderCardToken(cardId, { context: 'played-card', mode: 'semantic-color', className: 'played-text' });
       if (ddErrorVisual && ddErrorVisual.badCard === cardId) text.classList.add('dd-error-bad');
-      const suitEl = document.createElement('span');
-      suitEl.className = `played-suit suit-${play.suit}`;
-      suitEl.textContent = suitSymbol[play.suit];
-      const rankEl = document.createElement('span');
-      rankEl.className = 'played-rank';
-      appendRankContent(rankEl, regularDisplay.rank, regularDisplay.visual);
-      text.append(suitEl, rankEl);
+      const rankEl = text.querySelector<HTMLElement>('.card-rank');
+      if (rankEl) {
+        rankEl.classList.add('rank');
+        applyRankVisual(rankEl, regularDisplay.visual);
+      }
       slot.appendChild(text);
     }
     table.appendChild(slot);
@@ -6098,9 +6246,9 @@ function renderStatusPanel(view: State): HTMLElement {
   contractKey.className = 'k';
   contractKey.textContent = 'Contract';
   const contractValue = document.createElement('span');
-  contractValue.className = `v contract-value${view.contract.strain === 'NT' ? '' : ` suit-${view.contract.strain}`}`;
+  contractValue.className = 'v contract-value';
   if (view.contract.strain === 'NT') contractValue.textContent = formatStrainText(view.contract.strain);
-  else contractValue.appendChild(createSuitGlyph(view.contract.strain, 'contract-suit'));
+  else contractValue.appendChild(renderSuitGlyph(view.contract.strain, { context: 'contract-strain' }));
   contractRow.append(contractKey, contractValue);
   facts.appendChild(contractRow);
 
@@ -6552,8 +6700,6 @@ function render(): void {
     withHintPrompt,
     seatName,
     startPending,
-    suitSymbol,
-    displayRank,
     renderSettingsButton,
     articleScriptIsStoryViewing,
     resolvePreviousArticleScriptLandmarkCursor,
@@ -6644,6 +6790,7 @@ function render(): void {
     mainRow.appendChild(renderTeachingEventsPane('widget'));
   }
   root.appendChild(mainRow);
+  applyFrozenDiagramRowHeight(tableCanvas);
   applyCompactTableAlignment(tableCanvas);
   applyUnknownSlashLinePlacement(tableCanvas);
   applyNarrationBubbleCollisionAvoidance(tableCanvas);
