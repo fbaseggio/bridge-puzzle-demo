@@ -54,6 +54,7 @@ import { buildRegularPlayedCardDisplay, buildRegularSuitCardDisplays } from './r
 import { buildTeachingDisplayEntries, buildWidgetNarrationEntries } from './teachingDisplay';
 import { mergeUnknownDdsSummaries, mergeUnknownTeachingEntries } from './unknownModeDisplay';
 import { renderCardToken, renderSuitGlyph } from './cardPresentation';
+import { renderLucideIcon } from './lucideIcons';
 import {
   buildUnknownModePlayedEvents,
   buildUnknownModeVariantReplayData as buildUnknownModeVariantReplayDataShared,
@@ -1398,7 +1399,11 @@ function renderSettingsButton(context: SettingsPanelContext): HTMLElement {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = context === 'widget' ? 'icon-btn settings-more-btn' : 'settings-more-btn';
-  button.textContent = '⋯';
+  if (context === 'widget') {
+    button.appendChild(renderLucideIcon('sliders-horizontal', 'transport-lucide-icon transport-lucide-sliders-horizontal transport-lucide-utility'));
+  } else {
+    button.textContent = '⋯';
+  }
   button.title = `Assist options (${currentAssistOptions().find((option) => option.id === currentAssistLevel())?.label ?? ''})`;
   button.setAttribute('aria-label', 'Assist and display options');
   button.onclick = () => toggleSettingsPanel(context);

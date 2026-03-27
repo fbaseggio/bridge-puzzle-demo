@@ -37,6 +37,7 @@ export type HandDiagramSession = {
   dismissedOutcomeKey: string | null;
   readingControlsRevealStage: ReadingControlsRevealStage;
   readingControlsRevealed: boolean;
+  readingQuietControlsEntered: boolean;
   followPromptCursor: number | null;
   stickyMessage: boolean;
   completedBranches: Set<string>;
@@ -63,6 +64,7 @@ export function createHandDiagramSession(): HandDiagramSession {
     dismissedOutcomeKey: null,
     readingControlsRevealStage: 'collapsed',
     readingControlsRevealed: false,
+    readingQuietControlsEntered: false,
     followPromptCursor: null,
     stickyMessage: false,
     completedBranches: new Set<string>(),
@@ -136,16 +138,23 @@ export function clearDismissedOutcomeIfChanged(session: HandDiagramSession, outc
 export function setReadingControlsRevealed(session: HandDiagramSession, revealed: boolean): void {
   session.readingControlsRevealStage = revealed ? 'full' : 'collapsed';
   session.readingControlsRevealed = revealed;
+  if (!revealed) session.readingQuietControlsEntered = false;
 }
 
 export function setReadingControlsRevealStage(session: HandDiagramSession, stage: ReadingControlsRevealStage): void {
   session.readingControlsRevealStage = stage;
   session.readingControlsRevealed = stage !== 'collapsed';
+  if (stage === 'collapsed') session.readingQuietControlsEntered = false;
 }
 
 export function resetReadingReveal(session: HandDiagramSession): void {
   session.readingControlsRevealStage = 'collapsed';
   session.readingControlsRevealed = false;
+  session.readingQuietControlsEntered = false;
+}
+
+export function markReadingQuietControlsEntered(session: HandDiagramSession): void {
+  session.readingQuietControlsEntered = true;
 }
 
 export function clearFollowPrompt(session: HandDiagramSession): void {

@@ -1,7 +1,8 @@
 import type { State } from '../core';
 import type { CardId } from '../ai/threatModel';
-import { setMessage, setReadingControlsRevealStage, type HandDiagramSession } from './handDiagramSession';
+import { markReadingQuietControlsEntered, setMessage, setReadingControlsRevealStage, type HandDiagramSession } from './handDiagramSession';
 import { renderCardToken } from './cardPresentation';
+import { renderLucideIcon } from './lucideIcons';
 import {
   canGuidedAdvanceByProfile,
   shouldScorePracticeProfile,
@@ -319,31 +320,6 @@ function renderReadingRevealEdge(args: {
   return slot;
 }
 
-function renderReadingToolsGlyph(): HTMLElement {
-  const icon = document.createElement('span');
-  icon.className = 'reading-tools-glyph';
-  for (const knob of ['left', 'right', 'mid'] as const) {
-    const line = document.createElement('span');
-    line.className = `reading-tools-line knob-${knob}`;
-    icon.appendChild(line);
-  }
-  return icon;
-}
-
-function renderReadingBoundaryStepGlyph(direction: 'back' | 'forward'): HTMLElement {
-  const icon = document.createElement('span');
-  icon.className = `reading-boundary-step-glyph direction-${direction}`;
-  const bar = document.createElement('span');
-  bar.className = 'reading-boundary-step-bar';
-  const triA = document.createElement('span');
-  triA.className = `reading-boundary-step-tri ${direction}`;
-  const triB = document.createElement('span');
-  triB.className = `reading-boundary-step-tri ${direction}`;
-  if (direction === 'back') icon.append(bar, triA, triB);
-  else icon.append(triA, triB, bar);
-  return icon;
-}
-
 function renderReadingQuietTransportRow(args: {
   view: State;
   deps: HandDiagramNavigationDeps;
@@ -396,15 +372,22 @@ function renderReadingQuietTransportRow(args: {
   } = deps;
 
   const transport = document.createElement('div');
-  transport.className = `transport-bar mode-${displayMode} reading-quiet-transport`;
+  transport.className = `transport-bar mode-${displayMode} reading-quiet-transport reading-quiet-controls`;
   const practiceAdvanceTransport = displayMode === 'practice';
   const practiceProfile: PracticeInteractionProfile = practiceSession?.interactionProfile ?? 'puzzle-solving';
   const practiceAdvanceEnabled = !practiceAdvanceTransport || canGuidedAdvanceByProfile(practiceProfile);
 
   const restartBtn = document.createElement('button');
   restartBtn.type = 'button';
-  restartBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn', 'reading-quiet-reset-btn');
-  restartBtn.appendChild(renderReadingBoundaryStepGlyph('back'));
+  restartBtn.classList.add(
+    'icon-btn',
+    'script-transport-btn',
+    'reading-quiet-btn',
+    'reading-quiet-reset-btn',
+    'control',
+    'control--restart'
+  );
+  restartBtn.appendChild(renderLucideIcon('skip-back', 'reading-lucide-icon reading-lucide-skip-back'));
   restartBtn.title = 'Restart';
   restartBtn.setAttribute('aria-label', 'Restart');
   if (widgetArticleScript) restartBtn.disabled = widgetArticleScript.cursor === widgetArticleScript.initialCursor;
@@ -427,8 +410,8 @@ function renderReadingQuietTransportRow(args: {
 
   const undoBtn = document.createElement('button');
   undoBtn.type = 'button';
-  undoBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn');
-  undoBtn.textContent = '‹';
+  undoBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn', 'control', 'control--prev', 'control--step');
+  undoBtn.appendChild(renderLucideIcon('chevron-left', 'reading-lucide-icon reading-lucide-chevron-left'));
   undoBtn.title = 'Previous';
   undoBtn.setAttribute('aria-label', 'Previous');
   if (widgetArticleScript) undoBtn.disabled = articleScriptAtAbsoluteStart;
@@ -447,8 +430,16 @@ function renderReadingQuietTransportRow(args: {
 
   const forwardBtn = document.createElement('button');
   forwardBtn.type = 'button';
-  forwardBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn', 'reading-quiet-next-btn');
-  forwardBtn.textContent = '›';
+  forwardBtn.classList.add(
+    'icon-btn',
+    'script-transport-btn',
+    'reading-quiet-btn',
+    'reading-quiet-next-btn',
+    'control',
+    'control--next',
+    'control--step'
+  );
+  forwardBtn.appendChild(renderLucideIcon('chevron-right', 'reading-lucide-icon reading-lucide-chevron-right'));
   forwardBtn.title = 'Next';
   forwardBtn.setAttribute('aria-label', 'Next');
   const forwardDisabled = widgetArticleScript
@@ -532,8 +523,17 @@ function renderReadingQuietTransportRow(args: {
 
   const jumpBtn = document.createElement('button');
   jumpBtn.type = 'button';
-  jumpBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn', 'reading-quiet-pause-btn', 'reading-quiet-coarse-btn');
-  jumpBtn.appendChild(renderReadingBoundaryStepGlyph('forward'));
+  jumpBtn.classList.add(
+    'icon-btn',
+    'script-transport-btn',
+    'reading-quiet-btn',
+    'reading-quiet-pause-btn',
+    'reading-quiet-coarse-btn',
+    'control',
+    'control--next-big',
+    'control--step'
+  );
+  jumpBtn.appendChild(renderLucideIcon('chevrons-right', 'reading-lucide-icon reading-lucide-chevrons-right'));
   jumpBtn.title = 'Advance to next pause or trick boundary';
   jumpBtn.setAttribute('aria-label', 'Advance to next pause or trick boundary');
   jumpBtn.disabled = widgetArticleScript
@@ -552,10 +552,10 @@ function renderReadingQuietTransportRow(args: {
 
   const toolsBtn = document.createElement('button');
   toolsBtn.type = 'button';
-  toolsBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn', 'reading-tools-toggle');
+  toolsBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn', 'reading-tools-toggle', 'control', 'control--explore');
   toolsBtn.title = 'Show full controls';
   toolsBtn.setAttribute('aria-label', 'Show full controls');
-  toolsBtn.appendChild(renderReadingToolsGlyph());
+  toolsBtn.appendChild(renderLucideIcon('chevrons-down', 'reading-lucide-icon reading-lucide-chevrons-down'));
   toolsBtn.onclick = () => {
     setReadingControlsRevealStage(handDiagramSession, 'full');
     render();
@@ -722,6 +722,15 @@ function renderTransportRow(args: {
 
   const transport = document.createElement('div');
   transport.className = `transport-bar mode-${displayMode}`;
+  let utilityStartAssigned = false;
+  const markUtilityTransportElement = <T extends HTMLElement>(element: T): T => {
+    element.classList.add('transport-utility-btn');
+    if (!utilityStartAssigned) {
+      element.classList.add('transport-utility-start');
+      utilityStartAssigned = true;
+    }
+    return element;
+  };
   const widgetTransport = isWidgetShellMode;
   const practiceAdvanceTransport = displayMode === 'practice';
   const practiceProfile: PracticeInteractionProfile = practiceSession?.interactionProfile ?? 'puzzle-solving';
@@ -730,7 +739,11 @@ function renderTransportRow(args: {
 
   const restartBtn = document.createElement('button');
   restartBtn.type = 'button';
-  restartBtn.textContent = widgetTransport ? '|<<' : 'Restart';
+  if (widgetTransport) {
+    restartBtn.appendChild(renderLucideIcon('skip-back', 'transport-lucide-icon transport-lucide-skip-back'));
+  } else {
+    restartBtn.textContent = 'Restart';
+  }
   restartBtn.title = 'Restart';
   restartBtn.setAttribute('aria-label', 'Restart');
   if (isWidgetShellMode) restartBtn.classList.add('icon-btn');
@@ -755,7 +768,11 @@ function renderTransportRow(args: {
 
   const undoBtn = document.createElement('button');
   undoBtn.type = 'button';
-  undoBtn.textContent = widgetTransport ? '<' : 'Undo';
+  if (widgetTransport) {
+    undoBtn.appendChild(renderLucideIcon('chevron-left', 'transport-lucide-icon transport-lucide-chevron-left'));
+  } else {
+    undoBtn.textContent = 'Undo';
+  }
   undoBtn.title = 'Undo';
   undoBtn.setAttribute('aria-label', 'Undo');
   if (isWidgetShellMode) undoBtn.classList.add('icon-btn', 'undo-btn');
@@ -777,7 +794,11 @@ function renderTransportRow(args: {
   if (compactAdvanceTransport) {
     const forwardBtn = document.createElement('button');
     forwardBtn.type = 'button';
-    forwardBtn.textContent = '>';
+    if (widgetTransport) {
+      forwardBtn.appendChild(renderLucideIcon('chevron-right', 'transport-lucide-icon transport-lucide-chevron-right'));
+    } else {
+      forwardBtn.textContent = '>';
+    }
     forwardBtn.title = 'Forward';
     forwardBtn.setAttribute('aria-label', 'Forward');
     forwardBtn.classList.add('icon-btn', 'script-transport-btn');
@@ -862,9 +883,13 @@ function renderTransportRow(args: {
 
     const jumpBtn = document.createElement('button');
     jumpBtn.type = 'button';
-    jumpBtn.textContent = '>>|';
-    jumpBtn.title = 'Advance to end';
-    jumpBtn.setAttribute('aria-label', 'Advance to end');
+    if (widgetTransport) {
+      jumpBtn.appendChild(renderLucideIcon('chevrons-right', 'transport-lucide-icon transport-lucide-chevrons-right'));
+    } else {
+      jumpBtn.textContent = '>>|';
+    }
+    jumpBtn.title = 'Advance to next pause';
+    jumpBtn.setAttribute('aria-label', 'Advance to next pause');
     jumpBtn.classList.add('icon-btn', 'script-transport-btn');
     jumpBtn.disabled = widgetArticleScript
       ? ((['in-script', 'pre-script'].includes(currentArticleScriptStateId() ?? ''))
@@ -911,7 +936,11 @@ function renderTransportRow(args: {
   } else if (hintsEnabled) {
     const hintBtn = document.createElement('button');
     hintBtn.type = 'button';
-    hintBtn.textContent = isWidgetShellMode ? '💡' : 'Hint';
+    if (isWidgetShellMode) {
+      hintBtn.appendChild(renderLucideIcon('lightbulb', 'transport-lucide-icon transport-lucide-lightbulb transport-lucide-utility'));
+    } else {
+      hintBtn.textContent = 'Hint';
+    }
     hintBtn.title = 'Hint';
     hintBtn.setAttribute('aria-label', 'Hint');
     if (isWidgetShellMode) hintBtn.classList.add('icon-btn');
@@ -921,7 +950,7 @@ function renderTransportRow(args: {
       event.stopPropagation();
       requestHint();
     };
-    transport.appendChild(hintBtn);
+    transport.appendChild(isWidgetShellMode ? markUtilityTransportElement(hintBtn) : hintBtn);
   }
 
   if (isWidgetShellMode && typeof window !== 'undefined') {
@@ -938,12 +967,12 @@ function renderTransportRow(args: {
       pop.target = '_blank';
       pop.rel = 'noopener noreferrer';
       pop.className = 'transport-popout icon-btn';
-      pop.textContent = '↗';
+      pop.appendChild(renderLucideIcon('move-up-right', 'transport-lucide-icon transport-lucide-move-up-right transport-lucide-utility'));
       pop.title = 'Pop Out (open full analysis)';
       pop.setAttribute('aria-label', 'Pop Out (open full analysis)');
-      transport.appendChild(pop);
+      transport.appendChild(markUtilityTransportElement(pop));
     }
-    transport.appendChild(renderSettingsButton('widget'));
+    transport.appendChild(markUtilityTransportElement(renderSettingsButton('widget')));
   }
 
   return transport;
@@ -1058,7 +1087,8 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
   }
   if (deps.readingRevealEnabled && handDiagramSession.readingControlsRevealStage === 'quiet') {
     slot.classList.add('reading-quiet-stage');
-    slot.appendChild(renderReadingQuietTransportRow({
+    const shouldAnimateEnter = !handDiagramSession.readingQuietControlsEntered;
+    const quietRow = renderReadingQuietTransportRow({
       view,
       deps,
       scriptedChoicePresentation,
@@ -1066,7 +1096,12 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
       articleScriptAtAbsoluteStart,
       articleScriptAtEnd,
       articleScriptUserAdvanceBlocked
-    }));
+    });
+    if (shouldAnimateEnter) {
+      quietRow.classList.add('reading-quiet-enter');
+      markReadingQuietControlsEntered(handDiagramSession);
+    }
+    slot.appendChild(quietRow);
     section.appendChild(slot);
     return section;
   }
