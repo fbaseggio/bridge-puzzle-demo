@@ -63,11 +63,34 @@ export type ArticleScriptCheckpoint = {
   cursor: number;
 };
 
+export type ArticleScriptCompanionPanelSpec = {
+  enabledProfiles?: ArticleScriptInteractionProfile[];
+  layout?: 'compact' | 'split';
+  textStyle?: 'default' | 'article-prose';
+  narrative?: {
+    title?: string;
+    introText?: string;
+    segments: Array<{
+      id: string;
+      text: string;
+      newLineBefore?: boolean;
+    }>;
+    activeSegmentByPlayCardId?: Partial<Record<CardId, string | string[]>>;
+    activeProfiles?: ArticleScriptInteractionProfile[];
+  };
+  defaultContent?: {
+    title?: string;
+    text: string;
+    html?: boolean;
+  };
+};
+
 export type ArticleScriptSpec = {
   id: string;
   parentProblemId: string;
   navigationMode: ArticleScriptNavigationMode;
   interactionProfile: ArticleScriptInteractionProfile;
+  companionPanel?: ArticleScriptCompanionPanelSpec;
   checkpoints: ArticleScriptCheckpoint[];
   steps: Array<ArticleScriptStep | ArticleScriptDerivedPlayStep | ArticleScriptChoiceStep | ArticleScriptFlexSegmentStep>;
 };
@@ -77,6 +100,37 @@ export const experimentalDraftIntroScript: ArticleScriptSpec = {
   parentProblemId: 'experimental_draft_01',
   navigationMode: ARTICLE_SCRIPT_NAVIGATION_MODE,
   interactionProfile: 'story-viewing',
+  companionPanel: {
+    enabledProfiles: ['story-viewing'],
+    layout: 'compact',
+    textStyle: 'article-prose',
+    narrative: {
+      introText: 'East opens a weak notrump, and the next thing you know, you, South, are in six hearts.',
+      segments: [
+        { id: 'lead-s7', text: 'West leads a third-or-lowest spade seven;' },
+        { id: 'win-sa', text: 'you win in dummy,' },
+        { id: 'follow-s6', text: 'East follows with the six,' },
+        { id: 'finesse-hj', text: 'and a successful heart finesse follows.' },
+        { id: 'queen-hq', text: 'When the heart queen falls under the ace,' },
+        { id: 'return-ht', text: 'you return to dummy with the heart ten' },
+        { id: 'pitch-dk', text: '(as East pitches a diamond honor)' },
+        { id: 'club-cj', text: 'to take a winning club finesse.' },
+        { id: 'after-ca', text: 'After the club ace, you reach:', newLineBefore: true }
+      ],
+      activeSegmentByPlayCardId: {
+        S7: 'lead-s7',
+        SA: 'win-sa',
+        S6: 'follow-s6',
+        HJ: 'finesse-hj',
+        HQ: 'queen-hq',
+        HT: 'return-ht',
+        DK: 'pitch-dk',
+        CJ: 'club-cj',
+        CA: 'after-ca'
+      },
+      activeProfiles: ['story-viewing']
+    }
+  },
   checkpoints: [
     { id: '1', cursor: 0 },
     { id: '1a', cursor: 24 },
@@ -756,6 +810,69 @@ export function resolveArticleScriptPlayStepCompanionAtCursor(args: {
     title: step.onPlayCompanionTitle,
     text: step.onPlayCompanionText,
     html: step.onPlayCompanionHtml === true
+  };
+}
+
+function escapeHtmlForCompanion(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export function resolveArticleScriptCompanionNarrativeSegmentIdsAtCursor(args: {
+  spec: ArticleScriptSpec;
+  cursor: number;
+  choiceSelections?: Partial<Record<number, CardId>>;
+  playedCardId: CardId;
+  activeProfile: ArticleScriptInteractionProfile;
+}): string[] {
+  const { spec, cursor, choiceSelections = {}, playedCardId, activeProfile } = args;
+  const step = resolveArticleScriptStepAtCursor(spec, cursor, choiceSelections);
+  if (!step || step.kind !== 'play') return [];
+  if (step.cardId !== playedCardId) return [];
+  const narrative = spec.companionPanel?.narrative;
+  if (!narrative) return [];
+  if (narrative.activeProfiles?.length && !narrative.activeProfiles.includes(activeProfile)) return [];
+  const mapped = narrative.activeSegmentByPlayCardId?.[playedCardId];
+  if (!mapped) return [];
+  return (Array.isArray(mapped) ? mapped : [mapped]).filter((segmentId) => Boolean(segmentId?.trim()));
+}
+
+export function resolveArticleScriptCompanionNarrativeDefaultContent(args: {
+  spec: ArticleScriptSpec;
+  activeProfile: ArticleScriptInteractionProfile;
+  activeSegmentIds: Set<string>;
+  hideFutureSegments?: boolean;
+}): { title?: string; text: string; html: boolean } | null {
+  const { spec, activeProfile, activeSegmentIds, hideFutureSegments = false } = args;
+  const narrative = spec.companionPanel?.narrative;
+  if (!narrative) return null;
+  if (narrative.activeProfiles?.length && !narrative.activeProfiles.includes(activeProfile)) return null;
+  if (!narrative.introText?.trim() && !narrative.segments.length) return null;
+  const parts: string[] = [];
+  if (narrative.introText?.trim()) {
+    parts.push(
+      `<span class="prose-chunk prose-chunk--revealed hand-diagram-companion-segment hand-diagram-companion-segment-intro is-revealed">${
+        escapeHtmlForCompanion(narrative.introText.trim())
+      }</span>`
+    );
+  }
+  for (const segment of narrative.segments) {
+    if (!segment.text?.trim()) continue;
+    if (!activeSegmentIds.has(segment.id) && hideFutureSegments) continue;
+    if (segment.newLineBefore) parts.push('<br/>');
+    const segmentClass = activeSegmentIds.has(segment.id)
+      ? 'prose-chunk prose-chunk--revealed hand-diagram-companion-segment is-revealed is-active'
+      : 'prose-chunk prose-chunk--future hand-diagram-companion-segment is-future is-light';
+    parts.push(`<span class="${segmentClass}">${escapeHtmlForCompanion(segment.text.trim())}</span>`);
+  }
+  return {
+    title: narrative.title,
+    text: parts.join(' '),
+    html: true
   };
 }
 

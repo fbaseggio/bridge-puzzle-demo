@@ -157,15 +157,28 @@ export function shouldPauseArticleScriptAutoplayAtChoice(args: {
 export function canAutoplayArticleScriptDefender(args: {
   autoplayEw: boolean;
   isUserTurn: boolean;
+  profile: InteractionProfile;
+  atInitialCursor: boolean;
   phase: ScriptPhase;
   trickFrozen: boolean;
   canLeadDismiss: boolean;
   choice: ArticleScriptChoiceStep | null;
   hasRememberedTail: boolean;
 }): boolean {
-  const { autoplayEw, isUserTurn, phase, trickFrozen, canLeadDismiss, choice, hasRememberedTail } = args;
+  const {
+    autoplayEw,
+    isUserTurn,
+    profile,
+    atInitialCursor,
+    phase,
+    trickFrozen,
+    canLeadDismiss,
+    choice,
+    hasRememberedTail
+  } = args;
   return autoplayEw
     && !isUserTurn
+    && !(profile === 'story-viewing' && atInitialCursor)
     && phase !== 'end'
     && (!trickFrozen || canLeadDismiss)
     && !shouldPauseArticleScriptAutoplayAtChoice({ choice, hasRememberedTail });

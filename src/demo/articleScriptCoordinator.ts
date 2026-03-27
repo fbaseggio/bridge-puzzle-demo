@@ -19,6 +19,8 @@ import {
 } from './articleScriptRuntime';
 import {
   ARTICLE_SCRIPT_NAVIGATION_MODE,
+  resolveArticleScriptCompanionNarrativeDefaultContent,
+  resolveArticleScriptCompanionNarrativeSegmentIdsAtCursor,
   resolveArticleScriptAuthoredBranchName,
   resolveArticleScriptCheckpoint,
   resolveArticleScriptLength,
@@ -36,6 +38,8 @@ import {
 } from './articleScripts';
 import {
   clearFollowPrompt,
+  startCompanionFutureTransition,
+  markCompanionNarrativeSegmentsActive,
   markBranchOptionTried,
   resetArticleScriptTracking,
   setCompanionContent,
@@ -76,6 +80,9 @@ export type AuthoredBranchTreeNode = {
 export type WidgetCompanionPanelState = {
   enabled: boolean;
   hidden: boolean;
+  futureTransitioning: boolean;
+  layout: 'compact' | 'split';
+  textStyle: 'default' | 'article-prose';
   branchName: string | null;
   branchTree: AuthoredBranchTreeNode | null;
   content: HandDiagramCompanionContent | null;
@@ -567,6 +574,23 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
     const scriptState = stateRef();
     if (!scriptState) return;
     const activeProfile = currentArticleScriptInteractionProfile();
+    if (
+      activeProfile === 'story-viewing'
+      && cursor === scriptState.initialCursor
+      && Boolean(scriptState.spec.companionPanel?.narrative?.segments.length)
+    ) {
+      startCompanionFutureTransition(handDiagramSession);
+    }
+    const narrativeSegmentIds = resolveArticleScriptCompanionNarrativeSegmentIdsAtCursor({
+      spec: scriptState.spec,
+      cursor,
+      choiceSelections: scriptState.choiceSelections,
+      playedCardId,
+      activeProfile
+    });
+    if (narrativeSegmentIds.length > 0) {
+      markCompanionNarrativeSegmentsActive(handDiagramSession, narrativeSegmentIds);
+    }
     const message = resolveArticleScriptPlayStepMessageAtCursor({
       spec: scriptState.spec,
       cursor,
@@ -587,8 +611,9 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
       playedCardId,
       activeProfile
     });
-    if (!message && !companion && !deviationCompanion) return;
-    deps.clearHint();
+    const hasFeedbackUpdate = Boolean(message || companion || deviationCompanion || narrativeSegmentIds.length > 0);
+    if (!hasFeedbackUpdate) return;
+    if (message || companion || deviationCompanion) deps.clearHint();
     if (message) setMessage(handDiagramSession, message.text, message.html);
     if (companion) setCompanionContent(handDiagramSession, companion);
     if (deviationCompanion) setCompanionContent(handDiagramSession, deviationCompanion);
@@ -657,22 +682,71 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
 
   function currentWidgetCompanionPanelState(): WidgetCompanionPanelState {
     if (deps.getDisplayMode() !== 'widget') {
-      return { enabled: false, hidden: false, branchName: null, branchTree: null, content: null };
+      return {
+        enabled: false,
+        hidden: false,
+        futureTransitioning: false,
+        layout: 'compact',
+        textStyle: 'default',
+        branchName: null,
+        branchTree: null,
+        content: null
+      };
     }
+    const scriptState = stateRef();
     const scripted = articleScriptModeEnabled();
     const scriptedPuzzleProfile = scripted && !articleScriptIsStoryViewing();
-    const content = handDiagramSession.companionContent?.text?.trim()
+    const activeProfile = currentArticleScriptInteractionProfile();
+    const companionPanelConfig = scriptState?.spec.companionPanel;
+    const profileEnabledByScript = scripted
+      && Boolean(companionPanelConfig?.enabledProfiles?.includes(activeProfile))
+      && (activeProfile !== 'story-viewing' || deps.widgetCompanionPanelEnabledFromUrl);
+    const sessionContent = handDiagramSession.companionContent?.text?.trim()
       ? handDiagramSession.companionContent
       : null;
-    const enabled = scriptedPuzzleProfile || (deps.widgetCompanionPanelEnabledFromUrl && Boolean(content));
+    const scriptNarrativeContent = profileEnabledByScript && scriptState
+      ? resolveArticleScriptCompanionNarrativeDefaultContent({
+          spec: scriptState.spec,
+          activeProfile,
+          activeSegmentIds: handDiagramSession.companionNarrativeActiveSegmentIds,
+          hideFutureSegments: handDiagramSession.companionFuturePruned
+        })
+      : null;
+    const scriptDefaultContent =
+      scriptNarrativeContent
+      ?? (
+        profileEnabledByScript && companionPanelConfig?.defaultContent?.text?.trim()
+        ? companionPanelConfig.defaultContent
+        : null
+      );
+    const content = sessionContent ?? scriptDefaultContent;
+    const enabled = scriptedPuzzleProfile || profileEnabledByScript || (deps.widgetCompanionPanelEnabledFromUrl && Boolean(content));
     if (!enabled) {
-      return { enabled: false, hidden: false, branchName: null, branchTree: null, content: null };
+      return {
+        enabled: false,
+        hidden: false,
+        futureTransitioning: false,
+        layout: 'compact',
+        textStyle: 'default',
+        branchName: null,
+        branchTree: null,
+        content: null
+      };
     }
     const branchName = scriptedPuzzleProfile ? currentArticleScriptBranchName() : null;
     const branchTree = scriptedPuzzleProfile ? currentAuthoredBranchTree() : null;
+    const layout = profileEnabledByScript
+      ? (companionPanelConfig?.layout ?? 'compact')
+      : 'compact';
+    const textStyle = profileEnabledByScript
+      ? (companionPanelConfig?.textStyle ?? 'default')
+      : 'default';
     return {
       enabled: true,
       hidden: deps.getWidgetCompanionPanelHidden(),
+      futureTransitioning: handDiagramSession.companionFutureTransitioning,
+      layout,
+      textStyle,
       branchName,
       branchTree,
       content

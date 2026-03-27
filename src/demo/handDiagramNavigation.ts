@@ -1,6 +1,6 @@
 import type { State } from '../core';
 import type { CardId } from '../ai/threatModel';
-import { setMessage, setReadingControlsRevealed, type HandDiagramSession } from './handDiagramSession';
+import { setMessage, setReadingControlsRevealStage, type HandDiagramSession } from './handDiagramSession';
 import { renderCardToken } from './cardPresentation';
 import {
   canGuidedAdvanceByProfile,
@@ -312,11 +312,257 @@ function renderReadingRevealEdge(args: {
   chevron.textContent = '⌄';
   reveal.append(line, chevron);
   reveal.onclick = () => {
-    setReadingControlsRevealed(handDiagramSession, true);
+    setReadingControlsRevealStage(handDiagramSession, 'quiet');
     deps.render();
   };
   slot.appendChild(reveal);
   return slot;
+}
+
+function renderReadingToolsGlyph(): HTMLElement {
+  const icon = document.createElement('span');
+  icon.className = 'reading-tools-glyph';
+  for (const knob of ['left', 'right', 'mid'] as const) {
+    const line = document.createElement('span');
+    line.className = `reading-tools-line knob-${knob}`;
+    icon.appendChild(line);
+  }
+  return icon;
+}
+
+function renderReadingBoundaryStepGlyph(direction: 'back' | 'forward'): HTMLElement {
+  const icon = document.createElement('span');
+  icon.className = `reading-boundary-step-glyph direction-${direction}`;
+  const bar = document.createElement('span');
+  bar.className = 'reading-boundary-step-bar';
+  const triA = document.createElement('span');
+  triA.className = `reading-boundary-step-tri ${direction}`;
+  const triB = document.createElement('span');
+  triB.className = `reading-boundary-step-tri ${direction}`;
+  if (direction === 'back') icon.append(bar, triA, triB);
+  else icon.append(triA, triB, bar);
+  return icon;
+}
+
+function renderReadingQuietTransportRow(args: {
+  view: State;
+  deps: HandDiagramNavigationDeps;
+  scriptedChoicePresentation: any;
+  widgetArticleScript: HandDiagramNavigationDeps['articleScriptState'];
+  articleScriptAtAbsoluteStart: boolean;
+  articleScriptAtEnd: boolean;
+  articleScriptUserAdvanceBlocked: boolean;
+}): HTMLElement {
+  const {
+    view,
+    deps,
+    scriptedChoicePresentation,
+    widgetArticleScript,
+    articleScriptAtAbsoluteStart,
+    articleScriptAtEnd,
+    articleScriptUserAdvanceBlocked
+  } = args;
+  const {
+    displayMode,
+    practiceSession,
+    currentArticleScriptStateId,
+    currentArticleScriptReplayCard,
+    articleScriptIsStoryViewing,
+    matchCurrentArticleScriptHistory,
+    resolvePreviousArticleScriptLandmarkCursor,
+    previousUnfinishedArticleScriptBranchCursor,
+    currentSeed,
+    resetGame,
+    state,
+    trickFrozen,
+    dismissTransientWidgetOutcome,
+    currentViewState,
+    articleScriptUndoTargetCursor,
+    replayArticleScriptToCursor,
+    backupLastUserPlay,
+    undoStack,
+    handDiagramSession,
+    followCurrentArticleScriptUserTurn,
+    seatName,
+    legalPlays,
+    toCardId,
+    chooseCurrentArticleScriptBranchOption,
+    clearArticleScriptFollowPrompt,
+    runTurn,
+    advanceOneWidgetCard,
+    advanceWidgetToNextPauseBoundary,
+    resolveExplicitBranchAdvanceAction,
+    render
+  } = deps;
+
+  const transport = document.createElement('div');
+  transport.className = `transport-bar mode-${displayMode} reading-quiet-transport`;
+  const practiceAdvanceTransport = displayMode === 'practice';
+  const practiceProfile: PracticeInteractionProfile = practiceSession?.interactionProfile ?? 'puzzle-solving';
+  const practiceAdvanceEnabled = !practiceAdvanceTransport || canGuidedAdvanceByProfile(practiceProfile);
+
+  const restartBtn = document.createElement('button');
+  restartBtn.type = 'button';
+  restartBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn', 'reading-quiet-reset-btn');
+  restartBtn.appendChild(renderReadingBoundaryStepGlyph('back'));
+  restartBtn.title = 'Restart';
+  restartBtn.setAttribute('aria-label', 'Restart');
+  if (widgetArticleScript) restartBtn.disabled = widgetArticleScript.cursor === widgetArticleScript.initialCursor;
+  restartBtn.onclick = () => {
+    dismissTransientWidgetOutcome(currentViewState());
+    if (widgetArticleScript) {
+      const matched = matchCurrentArticleScriptHistory();
+      const choiceSelections = matched?.choiceSelections ?? {};
+      const targetCursor = articleScriptIsStoryViewing()
+        ? resolvePreviousArticleScriptLandmarkCursor(widgetArticleScript.spec, widgetArticleScript.cursor, choiceSelections)
+        : previousUnfinishedArticleScriptBranchCursor(widgetArticleScript.cursor, choiceSelections)
+          ?? resolvePreviousArticleScriptLandmarkCursor(widgetArticleScript.spec, widgetArticleScript.cursor, choiceSelections);
+      replayArticleScriptToCursor(targetCursor ?? widgetArticleScript.initialCursor);
+      render();
+      return;
+    }
+    resetGame(currentSeed, 'reset');
+  };
+  transport.appendChild(restartBtn);
+
+  const undoBtn = document.createElement('button');
+  undoBtn.type = 'button';
+  undoBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn');
+  undoBtn.textContent = '‹';
+  undoBtn.title = 'Previous';
+  undoBtn.setAttribute('aria-label', 'Previous');
+  if (widgetArticleScript) undoBtn.disabled = articleScriptAtAbsoluteStart;
+  else undoBtn.disabled = undoStack.length === 0;
+  undoBtn.onclick = () => {
+    dismissTransientWidgetOutcome(currentViewState());
+    if (widgetArticleScript) {
+      replayArticleScriptToCursor(articleScriptUndoTargetCursor());
+      render();
+      return;
+    }
+    if (undoStack.length === 0) return;
+    backupLastUserPlay();
+  };
+  transport.appendChild(undoBtn);
+
+  const forwardBtn = document.createElement('button');
+  forwardBtn.type = 'button';
+  forwardBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn', 'reading-quiet-next-btn');
+  forwardBtn.textContent = '›';
+  forwardBtn.title = 'Next';
+  forwardBtn.setAttribute('aria-label', 'Next');
+  const forwardDisabled = widgetArticleScript
+    ? ((widgetArticleScript.spec && ['in-script', 'pre-script'].includes(currentArticleScriptStateId() ?? ''))
+        ? articleScriptAtEnd || ((!scriptedChoicePresentation || articleScriptUserAdvanceBlocked) && !currentArticleScriptReplayCard())
+        : state.phase === 'end' && !trickFrozen)
+    : practiceAdvanceTransport && !practiceAdvanceEnabled
+      ? true
+      : state.phase === 'end' && !trickFrozen;
+  if (widgetArticleScript && articleScriptUserAdvanceBlocked) {
+    forwardBtn.classList.add('is-disabled');
+    forwardBtn.setAttribute('aria-disabled', 'true');
+  } else {
+    forwardBtn.disabled = forwardDisabled;
+  }
+  forwardBtn.onclick = () => {
+    dismissTransientWidgetOutcome(currentViewState());
+    if (widgetArticleScript && articleScriptUserAdvanceBlocked) {
+      if (handDiagramSession.followPromptCursor === widgetArticleScript.cursor && followCurrentArticleScriptUserTurn()) {
+        render();
+        return;
+      }
+      handDiagramSession.followPromptCursor = widgetArticleScript.cursor;
+      handDiagramSession.stickyMessage = false;
+      setMessage(handDiagramSession, `Select ${seatName[view.turn]}'s next play, or click > again to follow script.`);
+      render();
+      return;
+    }
+    if (widgetArticleScript && scriptedChoicePresentation && (scriptedChoicePresentation.rawChoice.optionMode ?? 'explicit') === 'explicit') {
+      const unresolvedOptions = scriptedChoicePresentation.unresolvedOptions;
+      const branchAdvanceAction = resolveExplicitBranchAdvanceAction({
+        unresolvedOptionCount: unresolvedOptions.length,
+        followPromptActive: handDiagramSession.followPromptCursor === widgetArticleScript.cursor
+      });
+      if (branchAdvanceAction === 'choose') {
+        const chosenCardId = chooseCurrentArticleScriptBranchOption();
+        const legal = legalPlays(state).filter((candidate: any) => candidate.seat === state.turn);
+        const play = chosenCardId
+          ? legal.find((candidate: any) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId)
+          : null;
+        if (play) {
+          const choiceMessage = scriptedChoicePresentation.rawChoice.choiceMessages?.[chosenCardId];
+          clearArticleScriptFollowPrompt();
+          runTurn(play);
+          if (!choiceMessage) {
+            handDiagramSession.stickyMessage = true;
+            setMessage(handDiagramSession, `Choosing ${chosenCardId}.`);
+          }
+          render();
+          return;
+        }
+      }
+      if (branchAdvanceAction === 'prompt') {
+        handDiagramSession.followPromptCursor = widgetArticleScript.cursor;
+        handDiagramSession.stickyMessage = false;
+        setMessage(handDiagramSession, `Choose ${seatName[view.turn]}'s play, or click > again to choose the lowest.`);
+        render();
+        return;
+      }
+      if (branchAdvanceAction === 'choose-single') {
+        const chosenCardId = chooseCurrentArticleScriptBranchOption() ?? unresolvedOptions[0];
+        const legal = legalPlays(state).filter((candidate: any) => candidate.seat === state.turn);
+        const play = legal.find((candidate: any) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId);
+        if (play) {
+          const choiceMessage = scriptedChoicePresentation.rawChoice.choiceMessages?.[chosenCardId];
+          clearArticleScriptFollowPrompt();
+          runTurn(play);
+          if (!choiceMessage) {
+            handDiagramSession.stickyMessage = true;
+            setMessage(handDiagramSession, `Choosing ${chosenCardId}.`);
+          }
+          render();
+          return;
+        }
+      }
+    }
+    if (practiceAdvanceTransport && !practiceAdvanceEnabled) return;
+    advanceOneWidgetCard();
+  };
+  transport.appendChild(forwardBtn);
+
+  const jumpBtn = document.createElement('button');
+  jumpBtn.type = 'button';
+  jumpBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn', 'reading-quiet-pause-btn', 'reading-quiet-coarse-btn');
+  jumpBtn.appendChild(renderReadingBoundaryStepGlyph('forward'));
+  jumpBtn.title = 'Advance to next pause or trick boundary';
+  jumpBtn.setAttribute('aria-label', 'Advance to next pause or trick boundary');
+  jumpBtn.disabled = widgetArticleScript
+    ? ((['in-script', 'pre-script'].includes(currentArticleScriptStateId() ?? ''))
+        ? articleScriptAtEnd
+        : state.phase === 'end' && !trickFrozen)
+    : practiceAdvanceTransport && !practiceAdvanceEnabled
+      ? true
+      : state.phase === 'end' && !trickFrozen;
+  jumpBtn.onclick = () => {
+    dismissTransientWidgetOutcome(currentViewState());
+    if (practiceAdvanceTransport && !practiceAdvanceEnabled) return;
+    advanceWidgetToNextPauseBoundary();
+  };
+  transport.appendChild(jumpBtn);
+
+  const toolsBtn = document.createElement('button');
+  toolsBtn.type = 'button';
+  toolsBtn.classList.add('icon-btn', 'script-transport-btn', 'reading-quiet-btn', 'reading-tools-toggle');
+  toolsBtn.title = 'Show full controls';
+  toolsBtn.setAttribute('aria-label', 'Show full controls');
+  toolsBtn.appendChild(renderReadingToolsGlyph());
+  toolsBtn.onclick = () => {
+    setReadingControlsRevealStage(handDiagramSession, 'full');
+    render();
+  };
+  transport.appendChild(toolsBtn);
+
+  return transport;
 }
 
 function renderPracticeSecondaryActions(args: {
@@ -806,8 +1052,22 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
   const dismissedOutcomeKey = currentDismissibleWidgetOutcomeKey(view);
   const suppressDismissedOutcome = dismissedOutcomeKey !== null && dismissedOutcomeKey === handDiagramSession.dismissedOutcomeKey;
 
-  if (deps.readingRevealEnabled && !handDiagramSession.readingControlsRevealed) {
+  if (deps.readingRevealEnabled && handDiagramSession.readingControlsRevealStage === 'collapsed') {
     section.appendChild(renderReadingRevealEdge({ slot, deps, handDiagramSession }));
+    return section;
+  }
+  if (deps.readingRevealEnabled && handDiagramSession.readingControlsRevealStage === 'quiet') {
+    slot.classList.add('reading-quiet-stage');
+    slot.appendChild(renderReadingQuietTransportRow({
+      view,
+      deps,
+      scriptedChoicePresentation,
+      widgetArticleScript,
+      articleScriptAtAbsoluteStart,
+      articleScriptAtEnd,
+      articleScriptUserAdvanceBlocked
+    }));
+    section.appendChild(slot);
     return section;
   }
 

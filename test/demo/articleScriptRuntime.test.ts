@@ -18,6 +18,8 @@ import {
   resolvePreviousArticleScriptLandmarkCursor,
   resolvePendingArticleScriptChoice,
   resolveArticleScriptCheckpoint,
+  resolveArticleScriptCompanionNarrativeDefaultContent,
+  resolveArticleScriptCompanionNarrativeSegmentIdsAtCursor,
   resolveArticleScriptPlayStepCompanionAtCursor,
   resolveArticleScriptPlayStepDeviationCompanionAtCursor,
   resolveArticleScriptPlayStepMessageAtCursor,
@@ -187,6 +189,52 @@ describe('article script runtime', () => {
         activeProfile: 'solution-viewing'
       })
     ).toBeNull();
+
+    expect(
+      resolveArticleScriptCompanionNarrativeSegmentIdsAtCursor({
+        spec: experimentalDraftIntroScript,
+        cursor: 0,
+        choiceSelections: {},
+        playedCardId: 'S7',
+        activeProfile: 'story-viewing'
+      })
+    ).toEqual(['lead-s7']);
+
+    expect(
+      resolveArticleScriptCompanionNarrativeSegmentIdsAtCursor({
+        spec: experimentalDraftIntroScript,
+        cursor: 0,
+        choiceSelections: {},
+        playedCardId: 'S7',
+        activeProfile: 'puzzle-solving'
+      })
+    ).toEqual([]);
+
+    const defaultNarrative = resolveArticleScriptCompanionNarrativeDefaultContent({
+      spec: experimentalDraftIntroScript,
+      activeProfile: 'story-viewing',
+      activeSegmentIds: new Set<string>()
+    });
+    expect(defaultNarrative?.html).toBe(true);
+    expect(defaultNarrative?.text).toContain('prose-chunk--future');
+    expect(defaultNarrative?.text).not.toContain('hand-diagram-companion-segment is-active');
+
+    const activatedNarrative = resolveArticleScriptCompanionNarrativeDefaultContent({
+      spec: experimentalDraftIntroScript,
+      activeProfile: 'story-viewing',
+      activeSegmentIds: new Set<string>(['lead-s7'])
+    });
+    expect(activatedNarrative?.text).toContain('is-active');
+    expect(activatedNarrative?.text).toContain('West leads a third-or-lowest spade seven;');
+
+    const prunedNarrative = resolveArticleScriptCompanionNarrativeDefaultContent({
+      spec: experimentalDraftIntroScript,
+      activeProfile: 'story-viewing',
+      activeSegmentIds: new Set<string>(['lead-s7']),
+      hideFutureSegments: true
+    });
+    expect(prunedNarrative?.text).toContain('West leads a third-or-lowest spade seven;');
+    expect(prunedNarrative?.text).not.toContain('you win in dummy,');
   });
 
   it('supports one-card forward, backward, and checkpoint reset by replay', () => {

@@ -104,6 +104,7 @@ import {
   clearNarrationFeed,
   clearDismissedOutcomeIfChanged,
   clearMessage,
+  completeCompanionFutureTransition,
   createHandDiagramSession,
   dismissOutcome,
   resetReadingReveal,
@@ -621,10 +622,23 @@ function followCurrentArticleScriptUserTurn(): boolean {
   return true;
 }
 
-function nextArticleScriptRememberedTrickBoundary(): number | null {
+function currentArticleScriptNarrativeTriggerCards(): Set<CardId> {
+  const scriptState = articleScriptCoordinator.getArticleScriptState();
+  if (!scriptState) return new Set<CardId>();
+  const narrative = scriptState.spec.companionPanel?.narrative;
+  if (!narrative) return new Set<CardId>();
+  const activeProfile = currentArticleScriptInteractionProfile();
+  if (narrative.activeProfiles?.length && !narrative.activeProfiles.includes(activeProfile)) {
+    return new Set<CardId>();
+  }
+  return new Set<CardId>(Object.keys(narrative.activeSegmentByPlayCardId ?? {}) as CardId[]);
+}
+
+function nextArticleScriptRememberedPauseCursor(): number | null {
   const scriptState = articleScriptCoordinator.getArticleScriptState();
   if (!scriptState) return null;
   if (scriptState.cursor >= scriptState.history.length) return null;
+  const triggerCards = currentArticleScriptNarrativeTriggerCards();
   const replayAtCursor = currentArticleScriptReplayAtCursor(scriptState.cursor);
   if (!replayAtCursor) return null;
   let previousState = replayAtCursor.state;
@@ -632,7 +646,10 @@ function nextArticleScriptRememberedTrickBoundary(): number | null {
     const replayed = currentArticleScriptReplayAtCursor(nextCursor);
     if (!replayed) break;
     const completedTrick = previousState.trick.length > 0 && replayed.state.trick.length === 0;
-    if (completedTrick || nextCursor === scriptState.history.length) return nextCursor;
+    const playedCardId = scriptState.history[nextCursor - 1] ?? null;
+    if ((playedCardId && triggerCards.has(playedCardId)) || completedTrick || nextCursor === scriptState.history.length) {
+      return nextCursor;
+    }
     previousState = replayed.state;
   }
   return null;
@@ -645,6 +662,8 @@ function advanceArticleScriptToNextPauseOrEnd(): void {
   if (scriptStateId !== 'in-script' && scriptStateId !== 'pre-script') return;
   const endCursor = currentArticleScriptEndCursor() ?? resolveArticleScriptLength(scriptSession.spec);
   let cursor = scriptSession.cursor;
+  const triggerCards = currentArticleScriptNarrativeTriggerCards();
+  let previousReplay = currentArticleScriptReplayAtCursor(cursor);
   while (cursor < endCursor) {
     const nextCardId = resolveArticleScriptReplayCardAtCursor(cursor);
     if (nextCardId) {
@@ -652,7 +671,16 @@ function advanceArticleScriptToNextPauseOrEnd(): void {
       if (playCursor === null) break;
       cursor += 1;
       applyArticleScriptPlayStepFeedbackAtCursor(playCursor, nextCardId);
+      const nextReplay = currentArticleScriptReplayAtCursor(cursor);
+      const completedTrick = Boolean(
+        previousReplay
+        && nextReplay
+        && previousReplay.state.trick.length > 0
+        && nextReplay.state.trick.length === 0
+      );
+      if (triggerCards.has(nextCardId) || completedTrick) break;
       if (resolvePendingArticleScriptChoice(scriptSession.spec, cursor, matchCurrentArticleScriptHistory(cursor)?.choiceSelections ?? {})) break;
+      previousReplay = nextReplay;
       continue;
     }
     if (resolvePendingArticleScriptChoice(scriptSession.spec, cursor, matchCurrentArticleScriptHistory(cursor)?.choiceSelections ?? {})) break;
@@ -774,7 +802,7 @@ applyWidgetProblemDefaults();
 applyCurrentAssistLevelToControls();
 if (articleScriptModeEnabled()) {
   autoplaySingletons = false;
-  autoplayEw = true;
+  autoplayEw = false;
 }
 let showWidgetTeachingPane = false;
 let widgetCompanionPanelHidden = false;
@@ -809,6 +837,7 @@ function applyWidgetProblemDefaults(): void {
 let inversePrimaryBySuit: Partial<Record<Suit, 'N' | 'S'>> = {};
 let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
+let widgetCompanionFutureTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 let renderingNow = false;
 let startPending = startupGateEnabledFromUrl;
 
@@ -914,6 +943,25 @@ function clearSingletonAutoplayTimer(): void {
     singletonAutoplayTimer = null;
   }
   singletonAutoplayKey = null;
+}
+
+function clearWidgetCompanionFutureTransitionTimer(): void {
+  if (!widgetCompanionFutureTransitionTimer) return;
+  clearTimeout(widgetCompanionFutureTransitionTimer);
+  widgetCompanionFutureTransitionTimer = null;
+}
+
+function syncWidgetCompanionFutureTransitionTimer(panelState: WidgetCompanionPanelState): void {
+  if (displayMode !== 'widget' || !panelState.futureTransitioning) {
+    clearWidgetCompanionFutureTransitionTimer();
+    return;
+  }
+  if (widgetCompanionFutureTransitionTimer) return;
+  widgetCompanionFutureTransitionTimer = setTimeout(() => {
+    widgetCompanionFutureTransitionTimer = null;
+    completeCompanionFutureTransition(handDiagramSession);
+    render();
+  }, 180);
 }
 
 function cardPulseKey(seat: Seat, cardId: CardId): string {
@@ -2063,7 +2111,7 @@ function advanceWidgetToNextPauseBoundary(): void {
   if (articleScriptModeEnabled()) {
     const scriptState = currentArticleScriptStateId();
     if (scriptState === 'in-script' || scriptState === 'pre-script') {
-      const rememberedBoundary = nextArticleScriptRememberedTrickBoundary();
+      const rememberedBoundary = nextArticleScriptRememberedPauseCursor();
       if (rememberedBoundary !== null) {
         clearArticleScriptFollowPrompt();
         replayArticleScriptToCursor(rememberedBoundary);
@@ -4021,9 +4069,17 @@ function syncSingletonAutoplay(): void {
   if (articleScriptModeEnabled()) {
     syncConfiguredUserControls();
     const scriptedChoice = pendingArticleScriptChoice();
+    const activeProfile = currentArticleScriptInteractionProfile();
+    const storyAtInitialCursor = Boolean(
+      articleScriptState
+      && articleScriptState.cursor === articleScriptState.initialCursor
+      && activeProfile === 'story-viewing'
+    );
     const canAutoplayScript = canAutoplayArticleScriptDefender({
       autoplayEw,
       isUserTurn: currentProblem.userControls.includes(state.turn),
+      profile: activeProfile,
+      atInitialCursor: storyAtInitialCursor,
       phase: state.phase,
       trickFrozen,
       canLeadDismiss,
@@ -4043,9 +4099,16 @@ function syncSingletonAutoplay(): void {
             return;
           }
           const liveChoice = pendingArticleScriptChoice();
+          const liveProfile = currentArticleScriptInteractionProfile();
           if (!canAutoplayArticleScriptDefender({
             autoplayEw,
             isUserTurn: currentProblem.userControls.includes(state.turn),
+            profile: liveProfile,
+            atInitialCursor: Boolean(
+              articleScriptState
+              && articleScriptState.cursor === articleScriptState.initialCursor
+              && liveProfile === 'story-viewing'
+            ),
             phase: state.phase,
             trickFrozen,
             canLeadDismiss,
@@ -4248,7 +4311,7 @@ function resetGame(seed: number, reason: string): void {
   refreshThreatModel(currentProblemId, false);
   if (articleScriptModeEnabled()) {
     autoplaySingletons = false;
-    autoplayEw = true;
+    autoplayEw = false;
     resetToCurrentArticleCheckpoint();
   }
   render();
@@ -4307,7 +4370,7 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   refreshThreatModel(currentProblemId, true);
   if (articleScriptModeEnabled()) {
     autoplaySingletons = false;
-    autoplayEw = true;
+    autoplayEw = false;
     resetToCurrentArticleCheckpoint();
   }
   render();
@@ -5436,29 +5499,40 @@ function renderWidgetBranchTree(args: {
 }
 
 function renderWidgetCompanionPanel(args: {
+  layout: 'compact' | 'split';
+  textStyle: 'default' | 'article-prose';
+  futureTransitioning: boolean;
   branchName: string | null;
   branchTree: AuthoredBranchTreeNode | null;
   content: HandDiagramCompanionContent | null;
   onHide: () => void;
 }): HTMLElement {
-  const { branchName, branchTree, content, onHide } = args;
+  const { layout, textStyle, futureTransitioning, branchName, branchTree, content, onHide } = args;
   const panel = document.createElement('aside');
   panel.className = 'hand-diagram-companion-panel';
+  panel.classList.add(layout === 'split' ? 'layout-split' : 'layout-compact');
+  if (textStyle === 'article-prose') panel.classList.add('text-article-prose');
+  if (futureTransitioning) panel.classList.add('is-transitioning');
 
   const head = document.createElement('div');
   head.className = 'hand-diagram-companion-head';
+  const showBranchHeader = Boolean(branchName || branchTree);
 
-  const branch = document.createElement('div');
-  branch.className = 'hand-diagram-companion-branch';
-  const branchLabel = document.createElement('strong');
-  branchLabel.className = 'hand-diagram-companion-branch-label';
-  branchLabel.textContent = 'BRANCH';
-  const branchValue = document.createElement('div');
-  branchValue.className = 'hand-diagram-companion-branch-value';
-  if (branchName) appendBranchKeyWithCardTokens(branchValue, branchName, 'hand-diagram-inline-card hand-diagram-branch-card');
-  else branchValue.textContent = '-';
-  branch.append(branchLabel, branchValue);
-  head.appendChild(branch);
+  if (showBranchHeader) {
+    const branch = document.createElement('div');
+    branch.className = 'hand-diagram-companion-branch';
+    const branchLabel = document.createElement('strong');
+    branchLabel.className = 'hand-diagram-companion-branch-label';
+    branchLabel.textContent = 'BRANCH';
+    const branchValue = document.createElement('div');
+    branchValue.className = 'hand-diagram-companion-branch-value';
+    if (branchName) appendBranchKeyWithCardTokens(branchValue, branchName, 'hand-diagram-inline-card hand-diagram-branch-card');
+    else branchValue.textContent = '-';
+    branch.append(branchLabel, branchValue);
+    head.appendChild(branch);
+  } else {
+    head.classList.add('without-branch');
+  }
 
   const hideBtn = document.createElement('button');
   hideBtn.type = 'button';
@@ -6087,13 +6161,16 @@ function render(): void {
   const isWidgetReadingMode = widgetReadingMode();
   revealKnownArticleScriptBranchesFromCurrentPath();
   const widgetCompanionPanel = currentWidgetCompanionPanelState();
+  syncWidgetCompanionFutureTransitionTimer(widgetCompanionPanel);
   const widgetCompanionPanelVisible = widgetCompanionPanel.enabled && !widgetCompanionPanel.hidden;
+  const widgetCompanionPanelSplit = widgetCompanionPanelVisible && widgetCompanionPanel.layout === 'split';
 
   root.innerHTML = '';
   root.classList.toggle('mode-widget', isWidgetShellMode);
   root.classList.toggle('mode-analysis', displayMode === 'analysis');
   root.classList.toggle('mode-practice', displayMode === 'practice');
   root.classList.toggle('with-companion-panel', widgetCompanionPanelVisible);
+  root.classList.toggle('with-companion-panel-split', widgetCompanionPanelSplit);
   if (typeof document !== 'undefined') {
     document.documentElement.classList.toggle('mode-widget', isWidgetShellMode);
     document.documentElement.classList.toggle('mode-analysis', displayMode === 'analysis');
@@ -6213,7 +6290,7 @@ function render(): void {
     mainRow.appendChild(renderTeachingEventsPane('analysis'));
   } else if (displayMode === 'widget') {
     const widgetFrame = document.createElement('section');
-    widgetFrame.className = `hand-diagram-widget-frame${widgetCompanionPanelVisible ? ' with-companion-panel' : ''}`;
+    widgetFrame.className = `hand-diagram-widget-frame${widgetCompanionPanelVisible ? ' with-companion-panel' : ''}${widgetCompanionPanelSplit ? ' with-companion-panel-split' : ''}`;
     const widgetStack = document.createElement('div');
     widgetStack.className = 'hand-diagram-widget-stack';
     widgetStack.appendChild(tableHost);
@@ -6222,6 +6299,9 @@ function render(): void {
     if (widgetCompanionPanelVisible) {
       widgetFrame.appendChild(
         renderWidgetCompanionPanel({
+          layout: widgetCompanionPanel.layout,
+          textStyle: widgetCompanionPanel.textStyle,
+          futureTransitioning: widgetCompanionPanel.futureTransitioning,
           branchName: widgetCompanionPanel.branchName,
           branchTree: widgetCompanionPanel.branchTree,
           content: widgetCompanionPanel.content,
@@ -6470,7 +6550,7 @@ if (practiceSession) beginPracticeRun('puzzle-solving');
 refreshThreatModel(currentProblemId, false);
 if (articleScriptModeEnabled()) {
   autoplaySingletons = false;
-  autoplayEw = true;
+  autoplayEw = false;
   resetToCurrentArticleCheckpoint();
 }
 replayInitialUserHistoryIfPresent();

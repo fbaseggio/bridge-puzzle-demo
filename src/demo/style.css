@@ -81,6 +81,10 @@ html.mode-widget {
   max-width: 760px;
 }
 
+#app.mode-widget.with-companion-panel-split {
+  max-width: 1120px;
+}
+
 .controls-banner {
   border: 1px solid #d6dee9;
   border-radius: 8px;
@@ -225,6 +229,10 @@ html.mode-widget {
   gap: 8px;
 }
 
+.hand-diagram-companion-head.without-branch {
+  justify-content: flex-end;
+}
+
 .hand-diagram-companion-branch {
   display: grid;
   gap: 1px;
@@ -269,6 +277,80 @@ html.mode-widget {
 .hand-diagram-companion-body {
   font-size: 12px;
   line-height: 1.4;
+}
+
+.hand-diagram-companion-panel.text-article-prose {
+  color: #1f2937;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.hand-diagram-companion-panel.text-article-prose .hand-diagram-companion-body {
+  font-family: var(--bridge-serif);
+  font-size: 1rem;
+  line-height: 1.56;
+  color: #1f2937;
+  text-wrap: pretty;
+}
+
+.hand-diagram-companion-panel.text-article-prose .hand-diagram-companion-light {
+  font-weight: 300;
+  color: #6b7280;
+}
+
+.hand-diagram-companion-panel.text-article-prose .hand-diagram-companion-segment {
+  transition: color 140ms ease, background-color 260ms ease;
+}
+
+.hand-diagram-companion-panel.text-article-prose .hand-diagram-companion-segment.is-revealed,
+.hand-diagram-companion-panel.text-article-prose .hand-diagram-companion-segment.is-active {
+  font-weight: 400;
+  color: #1f2937;
+}
+
+.hand-diagram-companion-panel.text-article-prose .hand-diagram-companion-segment.is-future,
+.hand-diagram-companion-panel.text-article-prose .hand-diagram-companion-segment.is-light {
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.hand-diagram-companion-panel.is-transitioning .prose-chunk--future {
+  opacity: 0.15;
+  transition: opacity 160ms ease;
+  animation: hand-diagram-companion-future-fade 160ms ease forwards;
+}
+
+@keyframes hand-diagram-companion-future-fade {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.15;
+  }
+}
+
+.hand-diagram-companion-panel.text-article-prose .hand-diagram-companion-segment.is-just-revealed {
+  font-weight: 400;
+  color: #1f2937;
+  background-color: rgba(0, 0, 0, 0.05);
+  border-radius: 2px;
+  animation: hand-diagram-companion-just-revealed-fade 1200ms ease-out forwards;
+}
+
+@keyframes hand-diagram-companion-just-revealed-fade {
+  0% {
+    background-color: rgba(0, 0, 0, 0.05);
+  }
+  100% {
+    background-color: rgba(0, 0, 0, 0);
+  }
+}
+
+.hand-diagram-companion-panel.text-article-prose .hand-diagram-inline-card.card-token--inline-card {
+  font-size: 0.95em;
 }
 
 .hand-diagram-branch-map {
@@ -2023,6 +2105,130 @@ html.mode-widget {
   transform: translateY(1px);
 }
 
+.hand-diagram-nav-slot.reading-quiet-stage {
+  min-height: 36px;
+}
+
+.hand-diagram-nav-slot.reading-quiet-stage .transport-bar.reading-quiet-transport {
+  top: 4px;
+  gap: 4px;
+}
+
+.mode-widget .transport-bar.reading-quiet-transport .reading-quiet-btn {
+  min-width: 1.62rem;
+  height: 1.3rem;
+  padding: 0 3px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #334155;
+  border-radius: 2px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.mode-widget .transport-bar.reading-quiet-transport .reading-quiet-pause-btn {
+  font-size: 10.5px;
+  min-width: 2rem;
+}
+
+.mode-widget .transport-bar.reading-quiet-transport .reading-quiet-next-btn {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.mode-widget .transport-bar.reading-quiet-transport .reading-quiet-reset-btn,
+.mode-widget .transport-bar.reading-quiet-transport .reading-quiet-coarse-btn {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.reading-boundary-step-glyph {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.reading-boundary-step-tri.forward,
+.reading-boundary-step-tri.back {
+  width: 0;
+  height: 0;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+}
+
+.reading-boundary-step-tri.forward {
+  border-left: 4px solid currentColor;
+}
+
+.reading-boundary-step-tri.back {
+  border-right: 4px solid currentColor;
+}
+
+.reading-boundary-step-bar {
+  width: 1px;
+  height: 8px;
+  background: currentColor;
+}
+
+.reading-boundary-step-glyph.direction-forward .reading-boundary-step-bar {
+  margin-left: 1px;
+}
+
+.reading-boundary-step-glyph.direction-back .reading-boundary-step-bar {
+  margin-right: 1px;
+}
+
+.mode-widget .transport-bar.reading-quiet-transport .reading-tools-toggle {
+  min-width: 1.72rem;
+  border-color: #d9e1ec;
+  border-radius: 999px;
+}
+
+.reading-tools-glyph {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 12px;
+}
+
+.reading-tools-line {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: currentColor;
+}
+
+.reading-tools-line::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: #fff;
+}
+
+.reading-tools-line.knob-left::after {
+  left: 0;
+}
+
+.reading-tools-line.knob-right::after {
+  right: 0;
+}
+
+.reading-tools-line.knob-mid::after {
+  left: 4px;
+}
+
+.mode-widget .transport-bar.reading-quiet-transport .reading-quiet-btn:not(:disabled):hover,
+.mode-widget .transport-bar.reading-quiet-transport .reading-quiet-next-btn:not(:disabled):hover {
+  border-color: #c3cfdf;
+  background: #f7faff;
+  border-radius: 999px;
+}
+
 .mode-practice .board-navigation-area.mode-practice {
   margin-top: 0;
   width: calc(var(--hand-box-w) * 2 + var(--trick-box-w) + var(--table-gap-x, 8px) * 2);
@@ -2570,16 +2776,33 @@ html.mode-widget {
   }
 }
 
-@media (min-width: 720px) {
-  .mode-widget .hand-diagram-widget-frame.with-companion-panel {
-    grid-template-columns: auto minmax(220px, 280px);
+@media (min-width: 520px) {
+  .mode-widget .hand-diagram-widget-frame.with-companion-panel:not(.with-companion-panel-split) {
+    grid-template-columns: auto minmax(220px, 320px);
     align-items: start;
     justify-content: center;
     justify-items: start;
   }
 
-  .mode-widget .hand-diagram-companion-panel {
-    width: min(280px, 100%);
+  .mode-widget .hand-diagram-widget-frame.with-companion-panel:not(.with-companion-panel-split) .hand-diagram-companion-panel {
+    width: 100%;
+    max-width: 320px;
+  }
+}
+
+@media (min-width: 720px) {
+  .mode-widget .hand-diagram-widget-frame.with-companion-panel.with-companion-panel-split {
+    width: min(1120px, 100%);
+    grid-template-columns: minmax(340px, 1fr) minmax(340px, 1fr);
+    align-items: start;
+    justify-content: center;
+    justify-items: stretch;
+    column-gap: clamp(14px, 2.8vw, 30px);
+  }
+
+  .mode-widget .hand-diagram-widget-frame.with-companion-panel.with-companion-panel-split .hand-diagram-companion-panel {
+    width: 100%;
+    max-width: none;
   }
 }
 

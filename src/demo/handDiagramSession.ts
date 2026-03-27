@@ -26,10 +26,16 @@ export type HandDiagramLeafStats = {
   outcome: 'success' | 'failure';
 };
 
+export type ReadingControlsRevealStage = 'collapsed' | 'quiet' | 'full';
+
 export type HandDiagramSession = {
   status: HandDiagramStatus;
   companionContent: HandDiagramCompanionContent | null;
+  companionNarrativeActiveSegmentIds: Set<string>;
+  companionFutureTransitioning: boolean;
+  companionFuturePruned: boolean;
   dismissedOutcomeKey: string | null;
+  readingControlsRevealStage: ReadingControlsRevealStage;
   readingControlsRevealed: boolean;
   followPromptCursor: number | null;
   stickyMessage: boolean;
@@ -51,7 +57,11 @@ export function createHandDiagramSession(): HandDiagramSession {
   return {
     status: { type: 'default', text: '' },
     companionContent: null,
+    companionNarrativeActiveSegmentIds: new Set<string>(),
+    companionFutureTransitioning: false,
+    companionFuturePruned: false,
     dismissedOutcomeKey: null,
+    readingControlsRevealStage: 'collapsed',
     readingControlsRevealed: false,
     followPromptCursor: null,
     stickyMessage: false,
@@ -87,6 +97,26 @@ export function clearCompanionContent(session: HandDiagramSession): void {
   session.companionContent = null;
 }
 
+export function markCompanionNarrativeSegmentsActive(
+  session: HandDiagramSession,
+  segmentIds: string[]
+): void {
+  for (const segmentId of segmentIds) {
+    if (segmentId?.trim()) session.companionNarrativeActiveSegmentIds.add(segmentId);
+  }
+}
+
+export function startCompanionFutureTransition(session: HandDiagramSession): boolean {
+  if (session.companionFutureTransitioning || session.companionFuturePruned) return false;
+  session.companionFutureTransitioning = true;
+  return true;
+}
+
+export function completeCompanionFutureTransition(session: HandDiagramSession): void {
+  session.companionFutureTransitioning = false;
+  session.companionFuturePruned = true;
+}
+
 export function clearMessage(session: HandDiagramSession): void {
   if (session.status.type !== 'message') return;
   session.status = { type: 'default', text: '' };
@@ -104,10 +134,17 @@ export function clearDismissedOutcomeIfChanged(session: HandDiagramSession, outc
 }
 
 export function setReadingControlsRevealed(session: HandDiagramSession, revealed: boolean): void {
+  session.readingControlsRevealStage = revealed ? 'full' : 'collapsed';
   session.readingControlsRevealed = revealed;
 }
 
+export function setReadingControlsRevealStage(session: HandDiagramSession, stage: ReadingControlsRevealStage): void {
+  session.readingControlsRevealStage = stage;
+  session.readingControlsRevealed = stage !== 'collapsed';
+}
+
 export function resetReadingReveal(session: HandDiagramSession): void {
+  session.readingControlsRevealStage = 'collapsed';
   session.readingControlsRevealed = false;
 }
 
@@ -136,6 +173,9 @@ export function resetArticleScriptTracking(session: HandDiagramSession): void {
   session.hintCount = 0;
   session.mistakeCount = 0;
   session.companionContent = null;
+  session.companionNarrativeActiveSegmentIds.clear();
+  session.companionFutureTransitioning = false;
+  session.companionFuturePruned = false;
 }
 
 export function clearNarration(session: HandDiagramSession): void {
