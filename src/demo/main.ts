@@ -123,6 +123,14 @@ import {
   toggleSettingsPanel as toggleSettingsPanelSession,
   type SettingsPanelContext
 } from './settingsPanelSession';
+import {
+  captureWidgetStateSnapshotV1,
+  serializeWidgetStateSnapshotV1
+} from './widgetStateSnapshot';
+import {
+  resolveWidgetJourneyState,
+  resolveWidgetStartupGatePending
+} from './widgetJourneyState';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -536,10 +544,18 @@ function articleScriptIsStoryViewing(): boolean {
   return articleScriptCoordinator.articleScriptIsStoryViewing();
 }
 
+function currentWidgetJourneyState() {
+  const scripted = articleScriptModeEnabled();
+  return resolveWidgetJourneyState({
+    displayMode,
+    widgetReadingProfileEnabledFromUrl,
+    articleScriptModeEnabled: scripted,
+    articleScriptInteractionProfile: scripted ? currentArticleScriptInteractionProfile() : null
+  });
+}
+
 function readingStoryJourneyEnabled(): boolean {
-  if (!isWidgetShellMode) return false;
-  if (articleScriptModeEnabled()) return articleScriptIsStoryViewing();
-  return widgetReadingProfileEnabledFromUrl;
+  return currentWidgetJourneyState().readingRevealEnabled;
 }
 
 function currentPracticeInteractionProfile(): PracticeInteractionProfile {
@@ -856,7 +872,10 @@ let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
 let widgetCompanionFutureTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 let renderingNow = false;
-let startPending = startupGateEnabledFromUrl || readingStoryJourneyEnabled();
+let startPending = resolveWidgetStartupGatePending({
+  startupGateEnabledFromUrl,
+  journey: currentWidgetJourneyState()
+});
 
 let trickFrozen = false;
 let lastCompletedTrick: Play[] | null = null;
@@ -4336,7 +4355,11 @@ function resetGame(seed: number, reason: string, options: ResetGameOptions = {})
     resetWidgetReadingControlsReveal();
   }
   inversePrimaryBySuit = {};
-  startPending = options.skipStartupGate ? false : (startupGateEnabledFromUrl || readingStoryJourneyEnabled());
+  startPending = resolveWidgetStartupGatePending({
+    startupGateEnabledFromUrl,
+    journey: currentWidgetJourneyState(),
+    skipStartupGate: options.skipStartupGate
+  });
   if (practiceSession) beginPracticeRun(practiceSession.interactionProfile);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -4391,7 +4414,10 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   clearHint();
   clearTeachingEvents();
   inversePrimaryBySuit = {};
-  startPending = startupGateEnabledFromUrl || readingStoryJourneyEnabled();
+  startPending = resolveWidgetStartupGatePending({
+    startupGateEnabledFromUrl,
+    journey: currentWidgetJourneyState()
+  });
   if (practiceSession) beginPracticeRun(practiceSession.interactionProfile);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -6191,6 +6217,7 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
 }
 
 let readingInteractionTrackingBound = false;
+let widgetSnapshotDebugShortcutBound = false;
 
 function ensureReadingInteractionTracking(): void {
   if (readingInteractionTrackingBound || typeof document === 'undefined') return;
@@ -6205,6 +6232,121 @@ function ensureReadingInteractionTracking(): void {
   };
   document.addEventListener('pointerdown', maybeMarkReadingInteraction, true);
   document.addEventListener('keydown', maybeMarkReadingInteraction, true);
+}
+
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable
+    || target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement;
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (typeof document === 'undefined') {
+    throw new Error('Clipboard API unavailable');
+  }
+  const copyWithExecCommand = (): boolean => {
+    const copyTarget = document.createElement('textarea');
+    copyTarget.value = text;
+    copyTarget.setAttribute('readonly', 'readonly');
+    copyTarget.style.position = 'fixed';
+    copyTarget.style.left = '-99999px';
+    copyTarget.style.top = '0';
+    copyTarget.style.opacity = '0';
+    copyTarget.style.pointerEvents = 'none';
+    const previousActive = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    document.body.appendChild(copyTarget);
+    copyTarget.focus({ preventScroll: true });
+    copyTarget.select();
+    copyTarget.setSelectionRange(0, copyTarget.value.length);
+    let copied = false;
+    try {
+      copied = document.execCommand('copy');
+    } catch {
+      copied = false;
+    }
+    document.body.removeChild(copyTarget);
+    if (previousActive) previousActive.focus({ preventScroll: true });
+    return copied;
+  };
+  if (copyWithExecCommand()) return;
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall through and report failure.
+    }
+  }
+  throw new Error('Clipboard copy failed');
+}
+
+function captureCurrentWidgetStateSnapshot() {
+  const journey = currentWidgetJourneyState();
+  return captureWidgetStateSnapshotV1({
+    problemId: currentProblemId,
+    variantId: currentProblemVariantId,
+    seed: currentSeed,
+    displayMode,
+    widgetUiMode,
+    readingProfileEnabledFromUrl: widgetReadingProfileEnabledFromUrl,
+    companionPanelEnabledFromUrl: widgetCompanionPanelEnabledFromUrl,
+    startupGateEnabledFromUrl,
+    userHistory,
+    scriptedOpening: startupOpeningForProblem(currentProblem),
+    articleScriptState,
+    activeInteractionProfile: journey.activeInteractionProfile,
+    assistLevelByPuzzleMode: assistLevelByMode,
+    overrideToggles: {
+      alwaysHint,
+      narrate,
+      cardColoringEnabled,
+      hideEastWest
+    },
+    readingRevealEnabled: journey.readingRevealEnabled,
+    readingControlsRevealStage: handDiagramSession.readingControlsRevealStage,
+    readingInteractionStarted: handDiagramSession.readingInteractionStarted,
+    companionPanelHidden: widgetCompanionPanelHidden
+  });
+}
+
+async function copyCurrentWidgetSnapshotJson(): Promise<void> {
+  if (displayMode !== 'widget') return;
+  const snapshotJson = serializeWidgetStateSnapshotV1(captureCurrentWidgetStateSnapshot());
+  try {
+    await copyTextToClipboard(snapshotJson);
+    return;
+  } catch {
+    if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+      window.prompt('Copy widget snapshot JSON (Cmd+C, then Enter):', snapshotJson);
+      return;
+    }
+    throw new Error('Clipboard copy failed');
+  }
+}
+
+function ensureWidgetSnapshotDebugShortcut(): void {
+  if (widgetSnapshotDebugShortcutBound || typeof document === 'undefined') return;
+  widgetSnapshotDebugShortcutBound = true;
+  document.addEventListener('keydown', (event: KeyboardEvent) => {
+    if (displayMode !== 'widget') return;
+    if (event.defaultPrevented) return;
+    if (isTextEntryTarget(event.target)) return;
+    if (event.metaKey || event.ctrlKey || !event.altKey || !event.shiftKey) return;
+    if (event.code !== 'KeyS') return;
+    event.preventDefault();
+    void copyCurrentWidgetSnapshotJson()
+      .then(() => {
+        setMessage(handDiagramSession, 'Widget snapshot JSON copied.');
+        render();
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to copy widget snapshot JSON', error);
+        setMessage(handDiagramSession, 'Widget snapshot copy failed.');
+        render();
+      });
+  }, true);
 }
 
 function publishReadingWidgetEmbedHeight(readingRevealEnabled: boolean): void {
@@ -6646,6 +6788,7 @@ if (articleScriptModeEnabled()) {
   resetToCurrentArticleCheckpoint();
 }
 ensureReadingInteractionTracking();
+ensureWidgetSnapshotDebugShortcut();
 replayInitialUserHistoryIfPresent();
 warmDdsRuntime();
 render();
