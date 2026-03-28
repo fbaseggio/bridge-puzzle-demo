@@ -863,7 +863,7 @@ export function resolveArticleScriptCompanionNarrativeDefaultContent(args: {
   for (const segment of narrative.segments) {
     if (!segment.text?.trim()) continue;
     if (!activeSegmentIds.has(segment.id) && hideFutureSegments) continue;
-    if (segment.newLineBefore) parts.push('<br/>');
+    if (segment.newLineBefore) parts.push('<br/><br/>');
     const segmentClass = activeSegmentIds.has(segment.id)
       ? 'prose-chunk prose-chunk--revealed hand-diagram-companion-segment is-revealed is-active'
       : 'prose-chunk prose-chunk--future hand-diagram-companion-segment is-future is-light';

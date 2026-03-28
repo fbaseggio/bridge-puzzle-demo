@@ -38,6 +38,7 @@ export type HandDiagramSession = {
   readingControlsRevealStage: ReadingControlsRevealStage;
   readingControlsRevealed: boolean;
   readingQuietControlsEntered: boolean;
+  readingInteractionStarted: boolean;
   followPromptCursor: number | null;
   stickyMessage: boolean;
   completedBranches: Set<string>;
@@ -65,6 +66,7 @@ export function createHandDiagramSession(): HandDiagramSession {
     readingControlsRevealStage: 'collapsed',
     readingControlsRevealed: false,
     readingQuietControlsEntered: false,
+    readingInteractionStarted: false,
     followPromptCursor: null,
     stickyMessage: false,
     completedBranches: new Set<string>(),
@@ -108,6 +110,16 @@ export function markCompanionNarrativeSegmentsActive(
   }
 }
 
+export function setCompanionNarrativeSegmentsActive(
+  session: HandDiagramSession,
+  segmentIds: string[]
+): void {
+  session.companionNarrativeActiveSegmentIds.clear();
+  for (const segmentId of segmentIds) {
+    if (segmentId?.trim()) session.companionNarrativeActiveSegmentIds.add(segmentId);
+  }
+}
+
 export function startCompanionFutureTransition(session: HandDiagramSession): boolean {
   if (session.companionFutureTransitioning || session.companionFuturePruned) return false;
   session.companionFutureTransitioning = true;
@@ -117,6 +129,11 @@ export function startCompanionFutureTransition(session: HandDiagramSession): boo
 export function completeCompanionFutureTransition(session: HandDiagramSession): void {
   session.companionFutureTransitioning = false;
   session.companionFuturePruned = true;
+}
+
+export function restoreCompanionFutureSegments(session: HandDiagramSession): void {
+  session.companionFutureTransitioning = false;
+  session.companionFuturePruned = false;
 }
 
 export function clearMessage(session: HandDiagramSession): void {
@@ -138,23 +155,34 @@ export function clearDismissedOutcomeIfChanged(session: HandDiagramSession, outc
 export function setReadingControlsRevealed(session: HandDiagramSession, revealed: boolean): void {
   session.readingControlsRevealStage = revealed ? 'full' : 'collapsed';
   session.readingControlsRevealed = revealed;
-  if (!revealed) session.readingQuietControlsEntered = false;
+  if (!revealed) {
+    session.readingQuietControlsEntered = false;
+    session.readingInteractionStarted = false;
+  }
 }
 
 export function setReadingControlsRevealStage(session: HandDiagramSession, stage: ReadingControlsRevealStage): void {
   session.readingControlsRevealStage = stage;
   session.readingControlsRevealed = stage !== 'collapsed';
-  if (stage === 'collapsed') session.readingQuietControlsEntered = false;
+  if (stage === 'collapsed') {
+    session.readingQuietControlsEntered = false;
+    session.readingInteractionStarted = false;
+  }
 }
 
 export function resetReadingReveal(session: HandDiagramSession): void {
   session.readingControlsRevealStage = 'collapsed';
   session.readingControlsRevealed = false;
   session.readingQuietControlsEntered = false;
+  session.readingInteractionStarted = false;
 }
 
 export function markReadingQuietControlsEntered(session: HandDiagramSession): void {
   session.readingQuietControlsEntered = true;
+}
+
+export function markReadingInteractionStarted(session: HandDiagramSession): void {
+  session.readingInteractionStarted = true;
 }
 
 export function clearFollowPrompt(session: HandDiagramSession): void {

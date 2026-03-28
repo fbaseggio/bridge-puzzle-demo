@@ -1266,6 +1266,30 @@ html.mode-widget {
   cursor: pointer;
 }
 
+.start-overlay-btn.reading-start-overlay-btn {
+  border: none;
+  background: rgba(0, 0, 0, 0.04);
+  color: #64748b;
+  padding: 0;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.start-overlay-btn.reading-start-overlay-btn .start-overlay-icon {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.8;
+}
+
+.start-overlay-btn.reading-start-overlay-btn:hover {
+  color: #334155;
+  background: rgba(0, 0, 0, 0.08);
+}
+
 .played-text {
   display: inline-flex;
   align-items: baseline;

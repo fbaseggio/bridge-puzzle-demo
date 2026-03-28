@@ -108,7 +108,9 @@ import {
   completeCompanionFutureTransition,
   createHandDiagramSession,
   dismissOutcome,
+  markReadingInteractionStarted,
   resetReadingReveal,
+  setReadingControlsRevealStage,
   setMessage,
   type HandDiagramCompanionContent,
   type HandDiagramNarrationEntry,
@@ -534,6 +536,12 @@ function articleScriptIsStoryViewing(): boolean {
   return articleScriptCoordinator.articleScriptIsStoryViewing();
 }
 
+function readingStoryJourneyEnabled(): boolean {
+  if (!isWidgetShellMode) return false;
+  if (articleScriptModeEnabled()) return articleScriptIsStoryViewing();
+  return widgetReadingProfileEnabledFromUrl;
+}
+
 function currentPracticeInteractionProfile(): PracticeInteractionProfile {
   return practiceSession?.interactionProfile ?? 'puzzle-solving';
 }
@@ -569,6 +577,10 @@ function setCurrentArticleScriptInteractionProfile(profile: InteractionProfile, 
 
 function applyArticleScriptPlayStepFeedbackAtCursor(cursor: number, playedCardId: CardId): void {
   articleScriptCoordinator.applyArticleScriptPlayStepFeedbackAtCursor(cursor, playedCardId);
+}
+
+function syncCompanionNarrativeForCursor(cursor: number, options: { restoreFuture?: boolean } = {}): void {
+  articleScriptCoordinator.syncCompanionNarrativeForCursor(cursor, options);
 }
 
 function currentWidgetCompanionPanelState(): WidgetCompanionPanelState {
@@ -844,7 +856,7 @@ let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
 let widgetCompanionFutureTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 let renderingNow = false;
-let startPending = startupGateEnabledFromUrl;
+let startPending = startupGateEnabledFromUrl || readingStoryJourneyEnabled();
 
 let trickFrozen = false;
 let lastCompletedTrick: Play[] | null = null;
@@ -1131,6 +1143,13 @@ function currentAssistLevel(problemId = currentProblemId): AssistLevelId {
 }
 
 function shouldHighlightScriptNextForSeat(seat: Seat): boolean {
+  if (
+    isWidgetShellMode
+    && readingStoryJourneyEnabled()
+    && !handDiagramSession.readingInteractionStarted
+  ) {
+    return false;
+  }
   if (!articleScriptModeEnabled()) return true;
   if (currentAssistLevel() !== 'puzzle') return true;
   return !currentProblem.userControls.includes(seat);
@@ -4270,7 +4289,12 @@ function advanceAutoplayFromCurrentState(): void {
   refreshThreatModel(currentProblemId, false);
 }
 
-function resetGame(seed: number, reason: string): void {
+type ResetGameOptions = {
+  preserveReadingReveal?: boolean;
+  skipStartupGate?: boolean;
+};
+
+function resetGame(seed: number, reason: string, options: ResetGameOptions = {}): void {
   clearSingletonAutoplayTimer();
   clearPulseTimer();
   pulseUntilByCardKey.clear();
@@ -4308,9 +4332,11 @@ function resetGame(seed: number, reason: string): void {
   clearWidgetNarrationFeed();
   clearHint();
   clearTeachingEvents();
-  resetWidgetReadingControlsReveal();
+  if (!options.preserveReadingReveal) {
+    resetWidgetReadingControlsReveal();
+  }
   inversePrimaryBySuit = {};
-  startPending = startupGateEnabledFromUrl;
+  startPending = options.skipStartupGate ? false : (startupGateEnabledFromUrl || readingStoryJourneyEnabled());
   if (practiceSession) beginPracticeRun(practiceSession.interactionProfile);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -4365,7 +4391,7 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   clearHint();
   clearTeachingEvents();
   inversePrimaryBySuit = {};
-  startPending = startupGateEnabledFromUrl;
+  startPending = startupGateEnabledFromUrl || readingStoryJourneyEnabled();
   if (practiceSession) beginPracticeRun(practiceSession.interactionProfile);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -5762,11 +5788,21 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
   if (startPending && !trickFrozen && sourceTrick.length === 0 && view.phase !== 'end') {
     const startBtn = document.createElement('button');
     startBtn.type = 'button';
-    startBtn.className = 'start-overlay-btn';
-    startBtn.textContent = 'Start';
+    const readingStartup = readingStoryJourneyEnabled();
+    startBtn.className = `start-overlay-btn${readingStartup ? ' reading-start-overlay-btn' : ''}`;
+    if (readingStartup) {
+      startBtn.appendChild(renderLucideIcon('chevron-right', 'start-overlay-icon'));
+      startBtn.title = 'Start story';
+      startBtn.setAttribute('aria-label', 'Start story');
+    } else {
+      startBtn.textContent = 'Start';
+    }
     startBtn.onclick = () => {
       dismissTransientWidgetOutcome(currentViewState());
-      launchStartSequence();
+      if (readingStartup) {
+        setReadingControlsRevealStage(handDiagramSession, 'quiet');
+      }
+      launchStartSequence(readingStartup ? 'single-step' : 'default');
     };
     table.appendChild(startBtn);
   }
@@ -6154,6 +6190,23 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
   return pane;
 }
 
+let readingInteractionTrackingBound = false;
+
+function ensureReadingInteractionTracking(): void {
+  if (readingInteractionTrackingBound || typeof document === 'undefined') return;
+  readingInteractionTrackingBound = true;
+  const maybeMarkReadingInteraction = (event: Event): void => {
+    if (!isWidgetShellMode) return;
+    if (!readingStoryJourneyEnabled()) return;
+    if (handDiagramSession.readingInteractionStarted) return;
+    const target = event.target;
+    if (!(target instanceof Node) || !root.contains(target)) return;
+    markReadingInteractionStarted(handDiagramSession);
+  };
+  document.addEventListener('pointerdown', maybeMarkReadingInteraction, true);
+  document.addEventListener('keydown', maybeMarkReadingInteraction, true);
+}
+
 function publishReadingWidgetEmbedHeight(readingRevealEnabled: boolean): void {
   if (!readingRevealEnabled) {
     lastReportedReadingWidgetEmbedHeight = null;
@@ -6234,7 +6287,7 @@ function render(): void {
   if (unknownSlashLine) tableCanvas.appendChild(unknownSlashLine);
 
   tableHost.appendChild(tableCanvas);
-  const readingRevealEnabled = isWidgetShellMode && (articleScriptIsStoryViewing() || widgetReadingProfileEnabledFromUrl);
+  const readingRevealEnabled = readingStoryJourneyEnabled();
   const handDiagramNavigationDeps = {
     displayMode,
     showGuides,
@@ -6409,11 +6462,17 @@ function replayInitialUserHistoryIfPresent(): void {
   refreshThreatModel(currentProblemId, false);
 }
 
-function launchStartSequence(): void {
+function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void {
   if (!startPending) return;
   startPending = false;
   const startupOpening = startupOpeningForProblem(currentProblem);
+  const singleStep = mode === 'single-step';
   if (startupOpening.length === 0) {
+    if (singleStep) {
+      const moved = advanceOneWidgetCard();
+      if (!moved) render();
+      return;
+    }
     const before = state;
     const ddsHistoryForTurn = [...ddsPlayHistory];
     const result = autoplayUntilUserOrEnd(state, {
@@ -6450,7 +6509,8 @@ function launchStartSequence(): void {
   let appliedAny = false;
   const originalUserControls = [...state.userControls];
   const forcedManualUserControls: Seat[] = ['N', 'E', 'S', 'W'];
-  for (const cardId of startupOpening) {
+  const openingToApply = singleStep ? startupOpening.slice(0, 1) : startupOpening;
+  for (const cardId of openingToApply) {
     if (state.phase === 'end') break;
     const legal = legalPlays(state).filter((p) => p.seat === state.turn);
     const play = legal.find((p) => (toCardId(p.suit, p.rank) as CardId) === cardId);
@@ -6491,8 +6551,10 @@ function launchStartSequence(): void {
 
 function replayArticleScriptToCursor(cursor: number): void {
   if (!articleScriptState) return;
+  const previousCursor = articleScriptState.cursor;
   const bounded = Math.max(0, Math.min(cursor, articleScriptState.history.length));
   articleScriptState.cursor = bounded;
+  syncCompanionNarrativeForCursor(bounded, { restoreFuture: bounded < previousCursor });
   const replayed = replayArticleHistory(withDdSource(currentProblem), articleScriptState.history, bounded, currentSeed);
   state = replayed.state;
   syncConfiguredUserControls();
@@ -6583,6 +6645,7 @@ if (articleScriptModeEnabled()) {
   autoplayEw = false;
   resetToCurrentArticleCheckpoint();
 }
+ensureReadingInteractionTracking();
 replayInitialUserHistoryIfPresent();
 warmDdsRuntime();
 render();

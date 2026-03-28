@@ -73,7 +73,7 @@ type HandDiagramNavigationDeps = {
     choiceSelections: Partial<Record<number, CardId>>
   ) => number | null;
   currentSeed: number;
-  resetGame: (seed: number, reason: string) => void;
+  resetGame: (seed: number, reason: string, options?: { preserveReadingReveal?: boolean; skipStartupGate?: boolean }) => void;
   dismissTransientWidgetOutcome: (view: State) => void;
   currentViewState: () => State;
   articleScriptUndoTargetCursor: () => number;
@@ -404,7 +404,7 @@ function renderReadingQuietTransportRow(args: {
       render();
       return;
     }
-    resetGame(currentSeed, 'reset');
+    resetGame(currentSeed, 'reset', { preserveReadingReveal: deps.readingRevealEnabled, skipStartupGate: deps.readingRevealEnabled });
   };
   transport.appendChild(restartBtn);
 
@@ -762,7 +762,7 @@ function renderTransportRow(args: {
       render();
       return;
     }
-    resetGame(currentSeed, 'reset');
+    resetGame(currentSeed, 'reset', { preserveReadingReveal: deps.readingRevealEnabled, skipStartupGate: deps.readingRevealEnabled });
   };
   transport.appendChild(restartBtn);
 

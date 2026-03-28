@@ -40,6 +40,8 @@ import {
   clearFollowPrompt,
   startCompanionFutureTransition,
   markCompanionNarrativeSegmentsActive,
+  setCompanionNarrativeSegmentsActive,
+  restoreCompanionFutureSegments,
   markBranchOptionTried,
   resetArticleScriptTracking,
   setCompanionContent,
@@ -619,6 +621,46 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
     if (deviationCompanion) setCompanionContent(handDiagramSession, deviationCompanion);
   }
 
+  function syncCompanionNarrativeForCursor(
+    cursor: number,
+    options: { restoreFuture?: boolean } = {}
+  ): void {
+    const scriptState = stateRef();
+    if (!scriptState) return;
+    const activeProfile = currentArticleScriptInteractionProfile();
+    const narrative = scriptState.spec.companionPanel?.narrative;
+    const profileAllowsNarrative = Boolean(
+      narrative && (!narrative.activeProfiles?.length || narrative.activeProfiles.includes(activeProfile))
+    );
+    if (!narrative || !profileAllowsNarrative) {
+      setCompanionNarrativeSegmentsActive(handDiagramSession, []);
+      if (options.restoreFuture) restoreCompanionFutureSegments(handDiagramSession);
+      return;
+    }
+
+    const historyEnd = Math.max(0, Math.min(cursor, scriptState.history.length));
+    const activeSegmentIds: string[] = [];
+    const seen = new Set<string>();
+    for (let stepCursor = 0; stepCursor < historyEnd; stepCursor += 1) {
+      const playedCardId = scriptState.history[stepCursor];
+      if (!playedCardId) continue;
+      const segmentIds = resolveArticleScriptCompanionNarrativeSegmentIdsAtCursor({
+        spec: scriptState.spec,
+        cursor: stepCursor,
+        choiceSelections: scriptState.choiceSelections,
+        playedCardId,
+        activeProfile
+      });
+      for (const segmentId of segmentIds) {
+        if (!segmentId || seen.has(segmentId)) continue;
+        seen.add(segmentId);
+        activeSegmentIds.push(segmentId);
+      }
+    }
+    setCompanionNarrativeSegmentsActive(handDiagramSession, activeSegmentIds);
+    if (options.restoreFuture) restoreCompanionFutureSegments(handDiagramSession);
+  }
+
   function applyTurnPlay(play: Play): void {
     const scriptState = stateRef();
     if (!scriptState) return;
@@ -903,6 +945,7 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
     articleScriptIsStoryViewing,
     setCurrentArticleScriptInteractionProfile,
     applyArticleScriptPlayStepFeedbackAtCursor,
+    syncCompanionNarrativeForCursor,
     pendingArticleScriptChoice,
     currentArticleScriptChoicePresentation,
     chooseCurrentArticleScriptBranchOption,

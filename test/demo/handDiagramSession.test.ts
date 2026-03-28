@@ -8,6 +8,7 @@ import {
   dismissOutcome,
   markBranchOptionTried,
   markCompanionNarrativeSegmentsActive,
+  markReadingInteractionStarted,
   markReadingQuietControlsEntered,
   resetArticleScriptTracking,
   resetReadingReveal,
@@ -26,6 +27,7 @@ describe('hand diagram session', () => {
     expect(session.readingControlsRevealStage).toBe('collapsed');
     expect(session.readingControlsRevealed).toBe(false);
     expect(session.readingQuietControlsEntered).toBe(false);
+    expect(session.readingInteractionStarted).toBe(false);
     expect(session.followPromptCursor).toBeNull();
     expect(session.stickyMessage).toBe(false);
     expect(session.completedBranches.size).toBe(0);
@@ -87,12 +89,17 @@ describe('hand diagram session', () => {
     expect(session.readingControlsRevealStage).toBe('quiet');
     expect(session.readingControlsRevealed).toBe(true);
     expect(session.readingQuietControlsEntered).toBe(false);
+    expect(session.readingInteractionStarted).toBe(false);
 
     markReadingQuietControlsEntered(session);
     expect(session.readingQuietControlsEntered).toBe(true);
 
+    markReadingInteractionStarted(session);
+    expect(session.readingInteractionStarted).toBe(true);
+
     setReadingControlsRevealStage(session, 'collapsed');
     expect(session.readingQuietControlsEntered).toBe(false);
+    expect(session.readingInteractionStarted).toBe(false);
   });
 
   it('tracks follow prompt state and clears it independently of sticky messages', () => {
@@ -152,6 +159,7 @@ describe('hand diagram session', () => {
     session.readingControlsRevealStage = 'full';
     session.readingControlsRevealed = true;
     session.readingQuietControlsEntered = true;
+    session.readingInteractionStarted = true;
 
     resetArticleScriptTracking(session);
 
@@ -172,5 +180,6 @@ describe('hand diagram session', () => {
     expect(session.readingControlsRevealStage).toBe('full');
     expect(session.readingControlsRevealed).toBe(true);
     expect(session.readingQuietControlsEntered).toBe(true);
+    expect(session.readingInteractionStarted).toBe(true);
   });
 });
