@@ -125,12 +125,18 @@ import {
 } from './settingsPanelSession';
 import {
   captureWidgetStateSnapshotV1,
-  serializeWidgetStateSnapshotV1
+  serializeWidgetStateSnapshotV1,
+  type WidgetStateSnapshotV1
 } from './widgetStateSnapshot';
 import {
   resolveWidgetJourneyState,
   resolveWidgetStartupGatePending
 } from './widgetJourneyState';
+import {
+  buildWidgetStateSnapshotPermalink,
+  readWidgetStateSnapshotFromHash
+} from './widgetStateSnapshotUrl';
+import { advanceWidgetStartupFromScript } from './widgetStartupProgression';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -192,6 +198,8 @@ const ASSIST_LEVELS_BY_MODE: Record<PuzzleModeId, Array<{ id: AssistLevelId; lab
     { id: 'solution', label: 'Solution' }
   ]
 };
+const PUZZLE_MODE_IDS: PuzzleModeId[] = ['standard', 'single-dummy', 'multi-ew', 'scripted', 'draft'];
+const ASSIST_LEVEL_IDS: AssistLevelId[] = ['sd', 'puzzle', 'light', 'guided', 'solution'];
 type AssistControlPreset = {
   showEw: boolean;
   cardColoring: boolean;
@@ -315,8 +323,17 @@ type ClaimDebugSnapshot = {
   interactionProfile: PracticeInteractionProfile;
 };
 type ProblemWithThreats = Problem & { threatCardIds?: CardId[] };
+const initialWidgetSnapshotFromHash: WidgetStateSnapshotV1 | null = (() => {
+  if (typeof window === 'undefined') return null;
+  return readWidgetStateSnapshotFromHash(window.location.hash);
+})();
+const initialWidgetSnapshotForRestore: WidgetStateSnapshotV1 | null =
+  initialWidgetSnapshotFromHash?.initialConfig.displayMode === 'widget'
+    ? initialWidgetSnapshotFromHash
+    : null;
 const displayMode: DisplayMode = (() => {
   if (typeof window === 'undefined') return 'analysis';
+  if (initialWidgetSnapshotForRestore) return 'widget';
   const params = new URLSearchParams(window.location.search);
   const mode = params.get('mode');
   if (mode === 'practice' || mode === 'widget' || mode === 'analysis') return mode;
@@ -327,6 +344,7 @@ const displayMode: DisplayMode = (() => {
   return 'analysis';
 })();
 const widgetUiMode: WidgetUiMode = (() => {
+  if (initialWidgetSnapshotForRestore) return initialWidgetSnapshotForRestore.initialConfig.widgetUiMode;
   if (typeof window === 'undefined') return 'default';
   const params = new URLSearchParams(window.location.search);
   const raw = (params.get('uiMode') ?? params.get('ui') ?? '').trim().toLowerCase();
@@ -335,11 +353,13 @@ const widgetUiMode: WidgetUiMode = (() => {
   return 'default';
 })();
 const widgetReadingProfileEnabledFromUrl = (() => {
+  if (initialWidgetSnapshotForRestore) return initialWidgetSnapshotForRestore.initialConfig.readingProfileEnabledFromUrl;
   if (typeof window === 'undefined') return false;
   const raw = (new URLSearchParams(window.location.search).get('reading') ?? '').trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes';
 })();
 const widgetCompanionPanelEnabledFromUrl = (() => {
+  if (initialWidgetSnapshotForRestore) return initialWidgetSnapshotForRestore.initialConfig.companionPanelEnabledFromUrl;
   if (typeof window === 'undefined') return false;
   const raw = (new URLSearchParams(window.location.search).get('companionPanel') ?? '').trim().toLowerCase();
   if (!raw) return false;
@@ -385,12 +405,20 @@ const threatDetail = false;
 const verboseCoverageDetail = false;
 const browserDdsBackstopEnabled = true;
 const initialProblemIdFromUrl: string = (() => {
+  if (initialWidgetSnapshotForRestore) {
+    const snapshotProblemId = initialWidgetSnapshotForRestore.problem.problemId;
+    if (demoProblems.some((problem) => problem.id === snapshotProblemId)) return snapshotProblemId;
+  }
   if (typeof window === 'undefined') return demoProblems[0].id;
   const requested = new URLSearchParams(window.location.search).get('problem');
   if (!requested) return demoProblems[0].id;
   return demoProblems.some((p) => p.id === requested) ? requested : demoProblems[0].id;
 })();
 const initialVariantIdFromUrl: string | null = (() => {
+  if (initialWidgetSnapshotForRestore) {
+    const requested = initialWidgetSnapshotForRestore.problem.variantId;
+    return requested?.trim() ? requested.trim().toLowerCase() : null;
+  }
   if (typeof window === 'undefined') return null;
   const requested = new URLSearchParams(window.location.search).get('variant');
   return requested?.trim() ? requested.trim().toLowerCase() : null;
@@ -402,6 +430,7 @@ let practiceProblemOverrides = new Map<string, ProblemWithThreats>(
 );
 const initialPracticeQueue: string[] = displayMode === 'practice' ? initialPracticeEntries.map((entry) => entry.id) : [];
 const initialUserHistoryFromUrl: CardId[] = (() => {
+  if (initialWidgetSnapshotForRestore) return [...initialWidgetSnapshotForRestore.runtime.userHistory];
   if (typeof window === 'undefined') return [];
   const raw = new URLSearchParams(window.location.search).get('history');
   if (!raw) return [];
@@ -412,6 +441,7 @@ const initialUserHistoryFromUrl: CardId[] = (() => {
     .map((token) => `${token[0]}${token.slice(1) === '10' ? 'T' : token.slice(1)}` as CardId);
 })();
 const initialOpeningFromUrl: CardId[] = (() => {
+  if (initialWidgetSnapshotForRestore) return [...initialWidgetSnapshotForRestore.runtime.scriptedOpening];
   if (typeof window === 'undefined') return [];
   const raw = new URLSearchParams(window.location.search).get('opening');
   if (!raw) return [];
@@ -422,16 +452,19 @@ const initialOpeningFromUrl: CardId[] = (() => {
     .map((token) => `${token[0]}${token.slice(1) === '10' ? 'T' : token.slice(1)}` as CardId);
 })();
 const startupGateEnabledFromUrl: boolean = (() => {
+  if (initialWidgetSnapshotForRestore) return initialWidgetSnapshotForRestore.initialConfig.startupGateEnabledFromUrl;
   if (typeof window === 'undefined') return false;
   const raw = (new URLSearchParams(window.location.search).get('start') ?? '').trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 })();
 const initialArticleScriptIdFromUrl: string | null = (() => {
+  if (initialWidgetSnapshotForRestore?.articleScript?.scriptId) return initialWidgetSnapshotForRestore.articleScript.scriptId;
   if (typeof window === 'undefined') return null;
   const raw = new URLSearchParams(window.location.search).get('articleScript');
   return raw?.trim() ? raw.trim() : null;
 })();
 const initialArticleCheckpointIdFromUrl: string | null = (() => {
+  if (initialWidgetSnapshotForRestore?.articleScript) return initialWidgetSnapshotForRestore.articleScript.checkpointId;
   if (typeof window === 'undefined') return null;
   const raw = new URLSearchParams(window.location.search).get('checkpoint');
   return raw?.trim() ? raw.trim() : null;
@@ -442,6 +475,10 @@ const readingWidgetEmbedFullHeight = 364;
 const readingWidgetEmbedHeightMessageType = 'ds-widget-reading-height';
 let lastReportedReadingWidgetEmbedHeight: number | null = null;
 const initialArticleCursor = (() => {
+  if (initialWidgetSnapshotForRestore?.articleScript) {
+    const bounded = Math.max(0, Math.min(initialWidgetSnapshotForRestore.articleScript.initialCursor, initialWidgetSnapshotForRestore.articleScript.history.length));
+    return bounded;
+  }
   if (!initialArticleScriptSpec) return 0;
   return resolveArticleScriptCheckpoint(initialArticleScriptSpec, initialArticleCheckpointIdFromUrl ?? '1').cursor;
 })();
@@ -700,7 +737,7 @@ function advanceArticleScriptToNextPauseOrEnd(): void {
   while (cursor < endCursor) {
     const nextCardId = resolveArticleScriptReplayCardAtCursor(cursor);
     if (nextCardId) {
-      const playCursor = articleScriptCoordinator.appendReplayCardAtCursor(nextCardId);
+      const playCursor = articleScriptCoordinator.appendReplayCardAtCursor(nextCardId, cursor);
       if (playCursor === null) break;
       cursor += 1;
       applyArticleScriptPlayStepFeedbackAtCursor(playCursor, nextCardId);
@@ -751,11 +788,12 @@ function syncConfiguredUserControls(): void {
   if (frozenViewState) frozenViewState.userControls = configuredUserControls();
 }
 
-const initialProblemId = initialPracticeQueue[0] ?? initialArticleScriptSpec?.parentProblemId ?? initialProblemIdFromUrl;
+const initialProblemId = initialPracticeQueue[0]
+  ?? (initialWidgetSnapshotForRestore ? initialProblemIdFromUrl : (initialArticleScriptSpec?.parentProblemId ?? initialProblemIdFromUrl));
 let currentProblemVariantId = resolveProblemVariantId(initialProblemId, initialVariantIdFromUrl);
 let currentProblem = resolveProblemById(initialProblemId, currentProblemVariantId);
 let currentProblemId = initialProblemId;
-let currentSeed = currentProblem.rngSeed >>> 0;
+let currentSeed = initialWidgetSnapshotForRestore ? (initialWidgetSnapshotForRestore.problem.seed >>> 0) : (currentProblem.rngSeed >>> 0);
 let state: State = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
 const rawSemanticReducer = new RawSemanticReducer();
 const teachingReducer = new TeachingReducer();
@@ -1128,6 +1166,46 @@ function resetSemanticStreams(): void {
   semanticCollector.clear();
   rawSemanticReducer.reset();
   teachingReducer.reset();
+}
+
+function isPuzzleModeId(value: string): value is PuzzleModeId {
+  return (PUZZLE_MODE_IDS as string[]).includes(value);
+}
+
+function isAssistLevelId(value: string): value is AssistLevelId {
+  return (ASSIST_LEVEL_IDS as string[]).includes(value);
+}
+
+function clampSnapshotAssistLevels(
+  snapshotLevels: Record<string, string>,
+  fallback: Record<PuzzleModeId, AssistLevelId>
+): Record<PuzzleModeId, AssistLevelId> {
+  const next = { ...fallback };
+  for (const [modeId, rawLevel] of Object.entries(snapshotLevels)) {
+    if (!isPuzzleModeId(modeId)) continue;
+    if (!isAssistLevelId(rawLevel)) continue;
+    const allowed = ASSIST_LEVELS_BY_MODE[modeId].some((option) => option.id === rawLevel);
+    if (!allowed) continue;
+    next[modeId] = rawLevel;
+  }
+  return next;
+}
+
+function clampCardHistoryToLegalPrefix(history: CardId[]): CardId[] {
+  const clamped: CardId[] = [];
+  let replayState = init({ ...withDdSource(currentProblem), rngSeed: currentSeed });
+  replayState.userControls = ['N', 'E', 'S', 'W'];
+  for (const cardId of history) {
+    if (replayState.phase === 'end') break;
+    const legal = legalPlays(replayState).filter((candidate) => candidate.seat === replayState.turn);
+    const play = legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === cardId);
+    if (!play) break;
+    const result = apply({ ...replayState, userControls: ['N', 'E', 'S', 'W'] }, play);
+    replayState = result.state;
+    replayState.userControls = ['N', 'E', 'S', 'W'];
+    clamped.push(cardId);
+  }
+  return clamped;
 }
 
 function variantLabelPrefix(variantId: string): string {
@@ -6218,6 +6296,25 @@ function renderTeachingEventsPane(mode: 'analysis' | 'widget' = 'analysis'): HTM
 
 let readingInteractionTrackingBound = false;
 let widgetSnapshotDebugShortcutBound = false;
+type WidgetSnapshotCopyStatus =
+  | 'idle'
+  | 'copied-json'
+  | 'copied-permalink'
+  | 'copy-blocked-json'
+  | 'copy-blocked-permalink';
+type WidgetSnapshotExportPanelState = {
+  open: boolean;
+  snapshotJson: string;
+  snapshotPermalink: string;
+  copyStatus: WidgetSnapshotCopyStatus;
+};
+let widgetSnapshotExportPanelState: WidgetSnapshotExportPanelState = {
+  open: false,
+  snapshotJson: '',
+  snapshotPermalink: '',
+  copyStatus: 'idle'
+};
+let widgetSnapshotCopyAttemptSeq = 0;
 
 function ensureReadingInteractionTracking(): void {
   if (readingInteractionTrackingBound || typeof document === 'undefined') return;
@@ -6293,10 +6390,11 @@ function captureCurrentWidgetStateSnapshot() {
     readingProfileEnabledFromUrl: widgetReadingProfileEnabledFromUrl,
     companionPanelEnabledFromUrl: widgetCompanionPanelEnabledFromUrl,
     startupGateEnabledFromUrl,
-    userHistory,
+    userHistory: userPlayHistory,
     scriptedOpening: startupOpeningForProblem(currentProblem),
     articleScriptState,
     activeInteractionProfile: journey.activeInteractionProfile,
+    startupGatePhase: startPending ? 'pending' : 'started',
     assistLevelByPuzzleMode: assistLevelByMode,
     overrideToggles: {
       alwaysHint,
@@ -6311,19 +6409,246 @@ function captureCurrentWidgetStateSnapshot() {
   });
 }
 
-async function copyCurrentWidgetSnapshotJson(): Promise<void> {
-  if (displayMode !== 'widget') return;
-  const snapshotJson = serializeWidgetStateSnapshotV1(captureCurrentWidgetStateSnapshot());
+async function tryCopyWidgetSnapshotText(text: string): Promise<boolean> {
   try {
-    await copyTextToClipboard(snapshotJson);
-    return;
+    await copyTextToClipboard(text);
+    return true;
   } catch {
-    if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
-      window.prompt('Copy widget snapshot JSON (Cmd+C, then Enter):', snapshotJson);
-      return;
-    }
-    throw new Error('Clipboard copy failed');
+    return false;
   }
+}
+
+function applyWidgetSnapshotCopyResult(args: {
+  seq: number;
+  copyText: string;
+  target: 'json' | 'permalink';
+  copied: boolean;
+}): void {
+  const { seq, copyText, target, copied } = args;
+  if (seq !== widgetSnapshotCopyAttemptSeq) return;
+  if (!widgetSnapshotExportPanelState.open) return;
+  if (target === 'json' && widgetSnapshotExportPanelState.snapshotJson !== copyText) return;
+  if (target === 'permalink' && widgetSnapshotExportPanelState.snapshotPermalink !== copyText) return;
+  widgetSnapshotExportPanelState = {
+    ...widgetSnapshotExportPanelState,
+    copyStatus: copied
+      ? (target === 'json' ? 'copied-json' : 'copied-permalink')
+      : (target === 'json' ? 'copy-blocked-json' : 'copy-blocked-permalink')
+  };
+  render();
+}
+
+function openWidgetSnapshotExportPanel(options: { attemptCopy?: boolean } = {}): void {
+  if (displayMode !== 'widget') return;
+  const snapshot = captureCurrentWidgetStateSnapshot();
+  const snapshotJson = serializeWidgetStateSnapshotV1(snapshot);
+  const snapshotPermalink = typeof window !== 'undefined'
+    ? buildWidgetStateSnapshotPermalink(window.location.href, snapshot)
+    : '';
+  const seq = ++widgetSnapshotCopyAttemptSeq;
+  widgetSnapshotExportPanelState = {
+    open: true,
+    snapshotJson,
+    snapshotPermalink,
+    copyStatus: 'idle'
+  };
+  render();
+  if (options.attemptCopy === false) return;
+  void tryCopyWidgetSnapshotText(snapshotJson)
+    .then((copied) => {
+      applyWidgetSnapshotCopyResult({
+        seq,
+        copyText: snapshotJson,
+        target: 'json',
+        copied
+      });
+    });
+}
+
+function closeWidgetSnapshotExportPanel(): void {
+  if (!widgetSnapshotExportPanelState.open) return;
+  widgetSnapshotCopyAttemptSeq += 1;
+  widgetSnapshotExportPanelState = {
+    open: false,
+    snapshotJson: '',
+    snapshotPermalink: '',
+    copyStatus: 'idle'
+  };
+  render();
+}
+
+function retryWidgetSnapshotExportCopy(target: 'json' | 'permalink'): void {
+  if (!widgetSnapshotExportPanelState.open) return;
+  const copyText = target === 'json'
+    ? widgetSnapshotExportPanelState.snapshotJson
+    : widgetSnapshotExportPanelState.snapshotPermalink;
+  if (!copyText) return;
+  const seq = ++widgetSnapshotCopyAttemptSeq;
+  widgetSnapshotExportPanelState = {
+    ...widgetSnapshotExportPanelState,
+    copyStatus: 'idle'
+  };
+  render();
+  void tryCopyWidgetSnapshotText(copyText)
+    .then((copied) => {
+      applyWidgetSnapshotCopyResult({ seq, copyText, target, copied });
+    });
+}
+
+function renderWidgetSnapshotExportPanel(): HTMLElement {
+  const overlay = document.createElement('section');
+  overlay.className = 'widget-snapshot-export-overlay';
+  overlay.style.position = 'fixed';
+  overlay.style.inset = '0';
+  overlay.style.zIndex = '2200';
+  overlay.style.background = 'rgba(15, 23, 42, 0.42)';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+  overlay.style.padding = '16px';
+  overlay.onclick = (event) => {
+    if (event.target === overlay) closeWidgetSnapshotExportPanel();
+  };
+
+  const panel = document.createElement('div');
+  panel.className = 'widget-snapshot-export-panel';
+  panel.style.width = 'min(960px, 100%)';
+  panel.style.maxHeight = 'min(86vh, 900px)';
+  panel.style.background = '#f8fafc';
+  panel.style.color = '#0f172a';
+  panel.style.border = '1px solid #cbd5e1';
+  panel.style.borderRadius = '10px';
+  panel.style.boxShadow = '0 14px 34px rgba(15, 23, 42, 0.28)';
+  panel.style.display = 'flex';
+  panel.style.flexDirection = 'column';
+  panel.style.gap = '10px';
+  panel.style.padding = '12px';
+  panel.onclick = (event) => event.stopPropagation();
+
+  const header = document.createElement('div');
+  header.style.display = 'flex';
+  header.style.alignItems = 'center';
+  header.style.justifyContent = 'space-between';
+  header.style.gap = '10px';
+
+  const title = document.createElement('strong');
+  title.textContent = 'Widget Snapshot JSON';
+  header.appendChild(title);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = 'Close';
+  closeBtn.onclick = () => closeWidgetSnapshotExportPanel();
+  header.appendChild(closeBtn);
+  panel.appendChild(header);
+
+  const statusLine = document.createElement('div');
+  statusLine.style.fontSize = '12px';
+  statusLine.style.color = '#334155';
+  switch (widgetSnapshotExportPanelState.copyStatus) {
+    case 'copied-json':
+      statusLine.textContent = 'Snapshot JSON copied to clipboard.';
+      break;
+    case 'copied-permalink':
+      statusLine.textContent = 'Snapshot permalink copied to clipboard.';
+      break;
+    case 'copy-blocked-json':
+      statusLine.textContent = 'Clipboard blocked. Copy JSON manually from the panel.';
+      break;
+    case 'copy-blocked-permalink':
+      statusLine.textContent = 'Clipboard blocked. Copy permalink manually from the panel.';
+      break;
+    default:
+      statusLine.textContent = 'Snapshot export ready.';
+      break;
+  }
+  panel.appendChild(statusLine);
+
+  const permalinkLabel = document.createElement('label');
+  permalinkLabel.textContent = 'Permalink';
+  permalinkLabel.style.fontSize = '12px';
+  permalinkLabel.style.fontWeight = '600';
+  panel.appendChild(permalinkLabel);
+
+  const permalinkArea = document.createElement('textarea');
+  permalinkArea.readOnly = true;
+  permalinkArea.value = widgetSnapshotExportPanelState.snapshotPermalink;
+  permalinkArea.spellcheck = false;
+  permalinkArea.wrap = 'off';
+  permalinkArea.style.width = '100%';
+  permalinkArea.style.minHeight = '84px';
+  permalinkArea.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+  permalinkArea.style.fontSize = '12px';
+  permalinkArea.style.lineHeight = '1.4';
+  permalinkArea.style.color = '#0f172a';
+  permalinkArea.style.background = '#ffffff';
+  permalinkArea.style.border = '1px solid #cbd5e1';
+  permalinkArea.style.borderRadius = '8px';
+  permalinkArea.style.padding = '10px';
+  permalinkArea.onclick = () => {
+    permalinkArea.focus();
+    permalinkArea.select();
+  };
+  panel.appendChild(permalinkArea);
+
+  const jsonLabel = document.createElement('label');
+  jsonLabel.textContent = 'Snapshot JSON';
+  jsonLabel.style.fontSize = '12px';
+  jsonLabel.style.fontWeight = '600';
+  panel.appendChild(jsonLabel);
+
+  const textArea = document.createElement('textarea');
+  textArea.readOnly = true;
+  textArea.value = widgetSnapshotExportPanelState.snapshotJson;
+  textArea.spellcheck = false;
+  textArea.wrap = 'off';
+  textArea.style.width = '100%';
+  textArea.style.minHeight = '220px';
+  textArea.style.flex = '1';
+  textArea.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+  textArea.style.fontSize = '12px';
+  textArea.style.lineHeight = '1.4';
+  textArea.style.color = '#0f172a';
+  textArea.style.background = '#ffffff';
+  textArea.style.border = '1px solid #cbd5e1';
+  textArea.style.borderRadius = '8px';
+  textArea.style.padding = '10px';
+  textArea.onclick = () => {
+    textArea.focus();
+    textArea.select();
+  };
+  panel.appendChild(textArea);
+
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '8px';
+  actions.style.justifyContent = 'flex-end';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.textContent = 'Copy JSON';
+  copyBtn.onclick = () => {
+    void retryWidgetSnapshotExportCopy('json');
+  };
+  actions.appendChild(copyBtn);
+
+  const copyPermalinkBtn = document.createElement('button');
+  copyPermalinkBtn.type = 'button';
+  copyPermalinkBtn.textContent = 'Copy Permalink';
+  copyPermalinkBtn.onclick = () => {
+    void retryWidgetSnapshotExportCopy('permalink');
+  };
+  actions.appendChild(copyPermalinkBtn);
+
+  const doneBtn = document.createElement('button');
+  doneBtn.type = 'button';
+  doneBtn.textContent = 'Done';
+  doneBtn.onclick = () => closeWidgetSnapshotExportPanel();
+  actions.appendChild(doneBtn);
+
+  panel.appendChild(actions);
+  overlay.appendChild(panel);
+  return overlay;
 }
 
 function ensureWidgetSnapshotDebugShortcut(): void {
@@ -6331,21 +6656,17 @@ function ensureWidgetSnapshotDebugShortcut(): void {
   widgetSnapshotDebugShortcutBound = true;
   document.addEventListener('keydown', (event: KeyboardEvent) => {
     if (displayMode !== 'widget') return;
+    if (widgetSnapshotExportPanelState.open && event.key === 'Escape') {
+      event.preventDefault();
+      closeWidgetSnapshotExportPanel();
+      return;
+    }
     if (event.defaultPrevented) return;
     if (isTextEntryTarget(event.target)) return;
     if (event.metaKey || event.ctrlKey || !event.altKey || !event.shiftKey) return;
     if (event.code !== 'KeyS') return;
     event.preventDefault();
-    void copyCurrentWidgetSnapshotJson()
-      .then(() => {
-        setMessage(handDiagramSession, 'Widget snapshot JSON copied.');
-        render();
-      })
-      .catch((error: unknown) => {
-        console.error('Failed to copy widget snapshot JSON', error);
-        setMessage(handDiagramSession, 'Widget snapshot copy failed.');
-        render();
-      });
+    openWidgetSnapshotExportPanel({ attemptCopy: true });
   }, true);
 }
 
@@ -6501,6 +6822,7 @@ function render(): void {
     currentArticleScriptStateId,
     currentArticleScriptReplayCard,
     resolveExplicitBranchAdvanceAction,
+    openWidgetSnapshotExportPanel: () => openWidgetSnapshotExportPanel({ attemptCopy: false }),
     secondaryActionRow: currentWidgetSecondaryActionRow()
   };
   const navigationArea = renderHandDiagramNavigationArea(view, handDiagramNavigationDeps);
@@ -6556,6 +6878,9 @@ function render(): void {
     mainRow.appendChild(renderTeachingEventsPane('widget'));
   }
   root.appendChild(mainRow);
+  if (displayMode === 'widget' && widgetSnapshotExportPanelState.open) {
+    root.appendChild(renderWidgetSnapshotExportPanel());
+  }
   applyFrozenDiagramRowHeight(tableCanvas);
   applyCompactTableAlignment(tableCanvas);
   applyUnknownSlashLinePlacement(tableCanvas);
@@ -6604,6 +6929,52 @@ function replayInitialUserHistoryIfPresent(): void {
   refreshThreatModel(currentProblemId, false);
 }
 
+function applyInitialWidgetSnapshotRestore(snapshot: WidgetStateSnapshotV1): void {
+  if (displayMode !== 'widget' || snapshot.initialConfig.displayMode !== 'widget') return;
+
+  assistLevelByMode = clampSnapshotAssistLevels(snapshot.journey.assistLevelByPuzzleMode, assistLevelByMode);
+  alwaysHint = snapshot.journey.overrideToggles.alwaysHint;
+  narrate = snapshot.journey.overrideToggles.narrate;
+  cardColoringEnabled = snapshot.journey.overrideToggles.cardColoringEnabled;
+  hideEastWest = snapshot.journey.overrideToggles.hideEastWest;
+  userPlayHistory = [...snapshot.runtime.userHistory];
+  widgetCompanionPanelHidden = snapshot.chrome.companionPanelHidden;
+
+  if (snapshot.articleScript && articleScriptState && articleScriptState.spec.id === snapshot.articleScript.scriptId) {
+    const scriptSnapshot = snapshot.articleScript;
+    const resolvedCheckpoint = resolveArticleScriptCheckpoint(articleScriptState.spec, scriptSnapshot.checkpointId);
+    const clampedHistory = clampCardHistoryToLegalPrefix(scriptSnapshot.history);
+    const clampedInitialCursor = Math.max(0, Math.min(scriptSnapshot.initialCursor, clampedHistory.length));
+    const clampedCursor = Math.max(0, Math.min(scriptSnapshot.cursor, clampedHistory.length));
+    const clampedChoiceSelections: Record<number, CardId> = {};
+    for (const [rawCursor, selectedCardId] of Object.entries(scriptSnapshot.choiceSelections)) {
+      const cursor = Number(rawCursor);
+      if (!Number.isInteger(cursor) || cursor < 0 || cursor >= clampedHistory.length) continue;
+      if (clampedHistory[cursor] !== selectedCardId) continue;
+      clampedChoiceSelections[cursor] = selectedCardId;
+    }
+
+    articleScriptState.checkpointId = resolvedCheckpoint.id;
+    articleScriptState.initialCursor = clampedInitialCursor;
+    articleScriptState.history = clampedHistory;
+    articleScriptState.choiceSelections = clampedChoiceSelections;
+    articleScriptState.interactionProfileOverride =
+      scriptSnapshot.interactionProfileOverride === articleScriptState.spec.interactionProfile
+        ? null
+        : scriptSnapshot.interactionProfileOverride;
+    replayArticleScriptToCursor(clampedCursor);
+  }
+
+  setReadingControlsRevealStage(handDiagramSession, snapshot.chrome.readingControlsRevealStage);
+  handDiagramSession.readingQuietControlsEntered = snapshot.chrome.readingControlsRevealStage !== 'collapsed';
+  handDiagramSession.readingInteractionStarted =
+    snapshot.chrome.readingControlsRevealStage === 'collapsed'
+      ? false
+      : snapshot.chrome.readingInteractionStarted;
+
+  startPending = snapshot.journey.startupGatePhase === 'pending';
+}
+
 function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void {
   if (!startPending) return;
   startPending = false;
@@ -6645,6 +7016,16 @@ function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void 
     clearDdErrorVisual();
     refreshThreatModel(currentProblemId, false);
     render();
+    return;
+  }
+
+  if (articleScriptModeEnabled()) {
+    const advanced = advanceWidgetStartupFromScript({
+      mode,
+      startupOpeningLength: startupOpening.length,
+      advanceOneWidgetCard
+    });
+    if (advanced === 0) render();
     return;
   }
 
@@ -6786,6 +7167,9 @@ if (articleScriptModeEnabled()) {
   autoplaySingletons = false;
   autoplayEw = false;
   resetToCurrentArticleCheckpoint();
+}
+if (initialWidgetSnapshotForRestore) {
+  applyInitialWidgetSnapshotRestore(initialWidgetSnapshotForRestore);
 }
 ensureReadingInteractionTracking();
 ensureWidgetSnapshotDebugShortcut();

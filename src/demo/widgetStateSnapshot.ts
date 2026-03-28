@@ -35,6 +35,7 @@ export type WidgetStateSnapshotV1 = {
   };
   journey: {
     activeInteractionProfile: InteractionProfile | null;
+    startupGatePhase: 'pending' | 'started';
     assistLevelByPuzzleMode: Record<string, string>;
     overrideToggles: {
       alwaysHint: boolean;
@@ -64,6 +65,7 @@ export type CaptureWidgetStateSnapshotV1Input = {
   scriptedOpening: CardId[];
   articleScriptState: ArticleScriptCoordinatorState | null;
   activeInteractionProfile: InteractionProfile | null;
+  startupGatePhase: 'pending' | 'started';
   assistLevelByPuzzleMode: Record<string, string>;
   overrideToggles: {
     alwaysHint: boolean;
@@ -133,6 +135,7 @@ export function normalizeWidgetStateSnapshotV1(snapshot: WidgetStateSnapshotV1):
     },
     journey: {
       activeInteractionProfile: snapshot.journey.activeInteractionProfile,
+      startupGatePhase: snapshot.journey.startupGatePhase,
       assistLevelByPuzzleMode: normalizeStringRecord(snapshot.journey.assistLevelByPuzzleMode),
       overrideToggles: {
         alwaysHint: snapshot.journey.overrideToggles.alwaysHint,
@@ -185,6 +188,7 @@ export function captureWidgetStateSnapshotV1(
     },
     journey: {
       activeInteractionProfile: input.activeInteractionProfile,
+      startupGatePhase: input.startupGatePhase,
       assistLevelByPuzzleMode: normalizeStringRecord(input.assistLevelByPuzzleMode),
       overrideToggles: {
         alwaysHint: input.overrideToggles.alwaysHint,

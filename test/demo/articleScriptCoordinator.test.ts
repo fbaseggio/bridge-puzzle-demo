@@ -4,7 +4,11 @@ import {
   createArticleScriptCoordinator,
   type ArticleScriptCoordinatorState
 } from '../../src/demo/articleScriptCoordinator';
-import { ARTICLE_SCRIPT_NAVIGATION_MODE, type ArticleScriptSpec } from '../../src/demo/articleScripts';
+import {
+  ARTICLE_SCRIPT_NAVIGATION_MODE,
+  experimentalDraftIntroScript,
+  type ArticleScriptSpec
+} from '../../src/demo/articleScripts';
 import { createHandDiagramSession } from '../../src/demo/handDiagramSession';
 import type { InteractionProfile } from '../../src/demo/interactionProfiles';
 import { doubleDummy01 } from '../../src/puzzles/double_dummy_01';
@@ -296,6 +300,24 @@ describe('article script coordinator', () => {
     harness.coordinator.revealKnownArticleScriptBranchesFromCurrentPath();
 
     expect([...harness.handDiagramSession.knownBranches].sort()).toEqual(['SK', 'SKDJ', 'SKST']);
+  });
+
+  it('appends multi-step pause replay cards at explicit loop cursors without overwriting prior cards', () => {
+    const scriptState = createScriptState({
+      spec: experimentalDraftIntroScript,
+      history: ['S7', 'SA', 'S6', 'S5'],
+      cursor: 4
+    });
+    const harness = createCoordinatorHarness({ scriptState });
+
+    const firstCursor = harness.coordinator.appendReplayCardAtCursor('H2', 4);
+    const secondCursor = harness.coordinator.appendReplayCardAtCursor('H6', 5);
+
+    expect(firstCursor).toBe(4);
+    expect(secondCursor).toBe(5);
+    expect(scriptState.cursor).toBe(4);
+    expect(scriptState.history.slice(0, 6)).toEqual(['S7', 'SA', 'S6', 'S5', 'H2', 'H6']);
+    expect(scriptState.history[4]).toBe('H2');
   });
 
   it('activates companion narrative segments on matching scripted plays', () => {

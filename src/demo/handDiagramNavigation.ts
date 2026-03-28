@@ -104,6 +104,7 @@ type HandDiagramNavigationDeps = {
   currentArticleScriptStateId: () => string | null;
   currentArticleScriptReplayCard: () => CardId | null;
   resolveExplicitBranchAdvanceAction: (args: { unresolvedOptionCount: number; followPromptActive: boolean }) => 'prompt' | 'choose' | 'choose-single' | 'none';
+  openWidgetSnapshotExportPanel: () => void;
   secondaryActionRow: HandDiagramSecondaryActionRow | null;
 };
 
@@ -368,6 +369,7 @@ function renderReadingQuietTransportRow(args: {
     advanceOneWidgetCard,
     advanceWidgetToNextPauseBoundary,
     resolveExplicitBranchAdvanceAction,
+    openWidgetSnapshotExportPanel,
     render
   } = deps;
 
@@ -561,6 +563,24 @@ function renderReadingQuietTransportRow(args: {
     render();
   };
   transport.appendChild(toolsBtn);
+
+  const snapshotDebugBtn = document.createElement('button');
+  snapshotDebugBtn.type = 'button';
+  snapshotDebugBtn.classList.add(
+    'icon-btn',
+    'script-transport-btn',
+    'reading-quiet-btn',
+    'reading-debug-export-toggle',
+    'control',
+    'control--debug'
+  );
+  snapshotDebugBtn.title = 'Snapshot export';
+  snapshotDebugBtn.setAttribute('aria-label', 'Open snapshot export');
+  snapshotDebugBtn.appendChild(renderLucideIcon('sliders-horizontal', 'reading-lucide-icon reading-lucide-sliders-horizontal'));
+  snapshotDebugBtn.onclick = () => {
+    openWidgetSnapshotExportPanel();
+  };
+  transport.appendChild(snapshotDebugBtn);
 
   return transport;
 }

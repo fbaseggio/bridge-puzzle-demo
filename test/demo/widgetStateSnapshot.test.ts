@@ -46,6 +46,7 @@ describe('widgetStateSnapshot', () => {
       scriptedOpening,
       articleScriptState: createArticleState(),
       activeInteractionProfile: 'solution-viewing',
+      startupGatePhase: 'pending',
       assistLevelByPuzzleMode,
       overrideToggles: {
         alwaysHint: true,
@@ -95,6 +96,7 @@ describe('widgetStateSnapshot', () => {
       },
       journey: {
         activeInteractionProfile: 'solution-viewing',
+        startupGatePhase: 'pending',
         assistLevelByPuzzleMode: {
           draft: 'guided',
           scripted: 'puzzle',
@@ -139,6 +141,7 @@ describe('widgetStateSnapshot', () => {
       },
       journey: {
         activeInteractionProfile: null,
+        startupGatePhase: 'started',
         assistLevelByPuzzleMode: {
           scripted: 'puzzle',
           draft: 'guided'
@@ -180,6 +183,7 @@ describe('widgetStateSnapshot', () => {
       scriptedOpening: ['SK'],
       articleScriptState: createArticleState(),
       activeInteractionProfile: 'puzzle-solving',
+      startupGatePhase: 'started',
       assistLevelByPuzzleMode: {
         scripted: 'puzzle',
         standard: 'light'

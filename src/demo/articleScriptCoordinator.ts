@@ -977,11 +977,11 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
       scriptState.history = defaultArticleScriptHistory(scriptState.spec, firstCheckpoint.cursor);
       resetArticleScriptTracking(handDiagramSession);
     },
-    appendReplayCardAtCursor(nextCardId: CardId): number | null {
+    appendReplayCardAtCursor(nextCardId: CardId, cursorOverride?: number): number | null {
       const scriptState = stateRef();
       if (!scriptState) return null;
-      const playCursor = scriptState.cursor;
-      scriptState.history = scriptState.history.slice(0, scriptState.cursor);
+      const playCursor = cursorOverride ?? scriptState.cursor;
+      scriptState.history = scriptState.history.slice(0, playCursor);
       scriptState.history.push(nextCardId);
       return playCursor;
     }

@@ -2183,11 +2183,20 @@ html.mode-widget {
   opacity: 0.7;
 }
 
+.mode-widget .transport-bar.reading-quiet-transport .control--debug {
+  margin-left: 2px;
+  opacity: 0.55;
+}
+
 .mode-widget .transport-bar.reading-quiet-transport .control--step {
   margin: 0 4px;
 }
 
 .mode-widget .transport-bar.reading-quiet-transport .reading-tools-toggle {
+  min-width: 1.62rem;
+}
+
+.mode-widget .transport-bar.reading-quiet-transport .reading-debug-export-toggle {
   min-width: 1.62rem;
 }
 
