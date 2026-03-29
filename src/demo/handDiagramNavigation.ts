@@ -85,6 +85,7 @@ type HandDiagramNavigationDeps = {
   chooseCurrentArticleScriptBranchOption: () => CardId | null;
   clearArticleScriptFollowPrompt: () => void;
   runTurn: (play: any) => void;
+  performWidgetNextTransportAction: () => void;
   advanceOneWidgetCard: () => boolean;
   advanceWidgetToNextPauseBoundary: () => void;
   playAgainAvailable: boolean;
@@ -359,16 +360,9 @@ function renderReadingQuietTransportRow(args: {
     backupLastUserPlay,
     undoStack,
     handDiagramSession,
-    followCurrentArticleScriptUserTurn,
-    seatName,
-    legalPlays,
-    toCardId,
-    chooseCurrentArticleScriptBranchOption,
-    clearArticleScriptFollowPrompt,
-    runTurn,
+    performWidgetNextTransportAction,
     advanceOneWidgetCard,
     advanceWidgetToNextPauseBoundary,
-    resolveExplicitBranchAdvanceAction,
     openWidgetSnapshotExportPanel,
     render
   } = deps;
@@ -459,64 +453,9 @@ function renderReadingQuietTransportRow(args: {
   }
   forwardBtn.onclick = () => {
     dismissTransientWidgetOutcome(currentViewState());
-    if (widgetArticleScript && articleScriptUserAdvanceBlocked) {
-      if (handDiagramSession.followPromptCursor === widgetArticleScript.cursor && followCurrentArticleScriptUserTurn()) {
-        render();
-        return;
-      }
-      handDiagramSession.followPromptCursor = widgetArticleScript.cursor;
-      handDiagramSession.stickyMessage = false;
-      setMessage(handDiagramSession, `Select ${seatName[view.turn]}'s next play, or click > again to follow script.`);
-      render();
+    if (widgetArticleScript) {
+      performWidgetNextTransportAction();
       return;
-    }
-    if (widgetArticleScript && scriptedChoicePresentation && (scriptedChoicePresentation.rawChoice.optionMode ?? 'explicit') === 'explicit') {
-      const unresolvedOptions = scriptedChoicePresentation.unresolvedOptions;
-      const branchAdvanceAction = resolveExplicitBranchAdvanceAction({
-        unresolvedOptionCount: unresolvedOptions.length,
-        followPromptActive: handDiagramSession.followPromptCursor === widgetArticleScript.cursor
-      });
-      if (branchAdvanceAction === 'choose') {
-        const chosenCardId = chooseCurrentArticleScriptBranchOption();
-        const legal = legalPlays(state).filter((candidate: any) => candidate.seat === state.turn);
-        const play = chosenCardId
-          ? legal.find((candidate: any) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId)
-          : null;
-        if (play) {
-          const choiceMessage = scriptedChoicePresentation.rawChoice.choiceMessages?.[chosenCardId];
-          clearArticleScriptFollowPrompt();
-          runTurn(play);
-          if (!choiceMessage) {
-            handDiagramSession.stickyMessage = true;
-            setMessage(handDiagramSession, `Choosing ${chosenCardId}.`);
-          }
-          render();
-          return;
-        }
-      }
-      if (branchAdvanceAction === 'prompt') {
-        handDiagramSession.followPromptCursor = widgetArticleScript.cursor;
-        handDiagramSession.stickyMessage = false;
-        setMessage(handDiagramSession, `Choose ${seatName[view.turn]}'s play, or click > again to choose the lowest.`);
-        render();
-        return;
-      }
-      if (branchAdvanceAction === 'choose-single') {
-        const chosenCardId = chooseCurrentArticleScriptBranchOption() ?? unresolvedOptions[0];
-        const legal = legalPlays(state).filter((candidate: any) => candidate.seat === state.turn);
-        const play = legal.find((candidate: any) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId);
-        if (play) {
-          const choiceMessage = scriptedChoicePresentation.rawChoice.choiceMessages?.[chosenCardId];
-          clearArticleScriptFollowPrompt();
-          runTurn(play);
-          if (!choiceMessage) {
-            handDiagramSession.stickyMessage = true;
-            setMessage(handDiagramSession, `Choosing ${chosenCardId}.`);
-          }
-          render();
-          return;
-        }
-      }
     }
     if (practiceAdvanceTransport && !practiceAdvanceEnabled) return;
     advanceOneWidgetCard();
@@ -714,14 +653,7 @@ function renderTransportRow(args: {
     articleScriptUndoTargetCursor,
     backupLastUserPlay,
     undoStack,
-    seatName,
-    handDiagramSession,
-    followCurrentArticleScriptUserTurn,
-    legalPlays,
-    toCardId,
-    chooseCurrentArticleScriptBranchOption,
-    clearArticleScriptFollowPrompt,
-    runTurn,
+    performWidgetNextTransportAction,
     advanceOneWidgetCard,
     advanceWidgetToNextPauseBoundary,
     playAgainAvailable,
@@ -736,7 +668,6 @@ function renderTransportRow(args: {
     encodeUserHistoryForUrl,
     renderSettingsButton,
     render,
-    resolveExplicitBranchAdvanceAction,
     hintDiag,
   } = deps;
 
@@ -837,64 +768,9 @@ function renderTransportRow(args: {
     }
     forwardBtn.onclick = () => {
       dismissTransientWidgetOutcome(currentViewState());
-      if (widgetArticleScript && articleScriptUserAdvanceBlocked) {
-        if (handDiagramSession.followPromptCursor === widgetArticleScript.cursor && followCurrentArticleScriptUserTurn()) {
-          render();
-          return;
-        }
-        handDiagramSession.followPromptCursor = widgetArticleScript.cursor;
-        handDiagramSession.stickyMessage = false;
-        setMessage(handDiagramSession, `Select ${seatName[view.turn]}'s next play, or click > again to follow script.`);
-        render();
+      if (widgetArticleScript) {
+        performWidgetNextTransportAction();
         return;
-      }
-      if (widgetArticleScript && scriptedChoicePresentation && (scriptedChoicePresentation.rawChoice.optionMode ?? 'explicit') === 'explicit') {
-        const unresolvedOptions = scriptedChoicePresentation.unresolvedOptions;
-        const branchAdvanceAction = resolveExplicitBranchAdvanceAction({
-          unresolvedOptionCount: unresolvedOptions.length,
-          followPromptActive: handDiagramSession.followPromptCursor === widgetArticleScript.cursor
-        });
-        if (branchAdvanceAction === 'choose') {
-          const chosenCardId = chooseCurrentArticleScriptBranchOption();
-          const legal = legalPlays(state).filter((candidate: any) => candidate.seat === state.turn);
-          const play = chosenCardId
-            ? legal.find((candidate: any) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId)
-            : null;
-          if (play) {
-            const choiceMessage = scriptedChoicePresentation.rawChoice.choiceMessages?.[chosenCardId];
-            clearArticleScriptFollowPrompt();
-            runTurn(play);
-            if (!choiceMessage) {
-              handDiagramSession.stickyMessage = true;
-              setMessage(handDiagramSession, `Choosing ${chosenCardId}.`);
-            }
-            render();
-            return;
-          }
-        }
-        if (branchAdvanceAction === 'prompt') {
-          handDiagramSession.followPromptCursor = widgetArticleScript.cursor;
-          handDiagramSession.stickyMessage = false;
-          setMessage(handDiagramSession, `Choose ${seatName[view.turn]}'s play, or click > again to choose the lowest.`);
-          render();
-          return;
-        }
-        if (branchAdvanceAction === 'choose-single') {
-          const chosenCardId = chooseCurrentArticleScriptBranchOption() ?? unresolvedOptions[0];
-          const legal = legalPlays(state).filter((candidate: any) => candidate.seat === state.turn);
-          const play = legal.find((candidate: any) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId);
-          if (play) {
-            const choiceMessage = scriptedChoicePresentation.rawChoice.choiceMessages?.[chosenCardId];
-            clearArticleScriptFollowPrompt();
-            runTurn(play);
-            if (!choiceMessage) {
-              handDiagramSession.stickyMessage = true;
-              setMessage(handDiagramSession, `Choosing ${chosenCardId}.`);
-            }
-            render();
-            return;
-          }
-        }
       }
       if (practiceAdvanceTransport && !practiceAdvanceEnabled) return;
       advanceOneWidgetCard();

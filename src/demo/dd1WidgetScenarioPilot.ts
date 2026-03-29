@@ -1,8 +1,9 @@
 import type { CardId } from '../core';
-import { experimentalDraft01 } from '../puzzles/experimental_draft';
+import { doubleDummy01 } from '../puzzles/double_dummy_01';
 import {
-  experimentalDraftIntroScript,
-  resolveArticleScriptCardAtCursor
+  doubleDummy01Script,
+  resolveArticleScriptAuthoredBranchName,
+  resolvePendingArticleScriptChoice
 } from './articleScripts';
 import { matchArticleScriptHistory } from './articleScriptRuntime';
 import { applyArticleScriptWidgetActionCore } from './articleScriptWidgetActionCore';
@@ -11,57 +12,49 @@ import {
   type WidgetStateSnapshotV1
 } from './widgetStateSnapshot';
 import { buildWidgetStateSnapshotPermalink } from './widgetStateSnapshotUrl';
+import type { InteractionProfile } from './interactionProfiles';
 
-export type VscWidgetScenarioAction = 'start' | 'next' | 'nextPause' | 'revealQuiet' | 'openFullControls';
-export type VscWidgetScenarioClassification = 'locked' | 'review' | 'open-question';
+export type Dd1WidgetScenarioAction = 'start' | 'next' | 'nextPause';
+export type Dd1WidgetScenarioClassification = 'locked' | 'review' | 'open-question';
 
-export type VscWidgetScenarioDefinition = {
+export type Dd1WidgetScenarioDefinition = {
   id: string;
-  classification: VscWidgetScenarioClassification;
+  classification: Dd1WidgetScenarioClassification;
   description: string;
-  actions: VscWidgetScenarioAction[];
+  actions: Dd1WidgetScenarioAction[];
   startSnapshot: WidgetStateSnapshotV1;
 };
 
-export type VscWidgetScenarioSummary = {
+export type Dd1WidgetScenarioSummary = {
   startupGatePhase: WidgetStateSnapshotV1['journey']['startupGatePhase'];
-  readingControlsRevealStage: WidgetStateSnapshotV1['chrome']['readingControlsRevealStage'];
   activeInteractionProfile: WidgetStateSnapshotV1['journey']['activeInteractionProfile'];
   scriptCursor: number;
   scriptHistoryLength: number;
   scriptStateId: string;
-  scriptHistoryPrefix: CardId[];
   scriptedPrefixValid: boolean;
+  pendingChoiceSeat: string | null;
+  pendingChoiceOptions: CardId[];
+  branchName: string | null;
+  interactionProfileOverride: InteractionProfile | null;
 };
 
-export type VscWidgetScenarioResult = {
-  scenario: VscWidgetScenarioDefinition;
+export type Dd1WidgetScenarioResult = {
+  scenario: Dd1WidgetScenarioDefinition;
   endSnapshot: WidgetStateSnapshotV1;
-  summary: VscWidgetScenarioSummary;
+  summary: Dd1WidgetScenarioSummary;
   permalink: string | null;
 };
 
-const VSC_WIDGET_BASE_URL = 'http://localhost:5173/workbench/?mode=widget';
-const VSC_CHECKPOINT_OPENING_CURSOR = 24;
-const VSC_TRIGGER_CARDS = new Set<CardId>(
-  Object.keys(experimentalDraftIntroScript.companionPanel?.narrative?.activeSegmentByPlayCardId ?? {}) as CardId[]
+const DD1_WIDGET_BASE_URL = 'http://localhost:5173/workbench/?mode=widget';
+const DD1_TRIGGER_CARDS = new Set<CardId>(
+  Object.keys(doubleDummy01Script.companionPanel?.narrative?.activeSegmentByPlayCardId ?? {}) as CardId[]
 );
 
 function cloneSnapshot(snapshot: WidgetStateSnapshotV1): WidgetStateSnapshotV1 {
   return normalizeWidgetStateSnapshotV1(snapshot);
 }
 
-function buildVscScriptedOpening(): CardId[] {
-  const opening: CardId[] = [];
-  for (let cursor = 0; cursor < VSC_CHECKPOINT_OPENING_CURSOR; cursor += 1) {
-    const cardId = resolveArticleScriptCardAtCursor(experimentalDraftIntroScript, cursor);
-    if (!cardId) break;
-    opening.push(cardId);
-  }
-  return opening;
-}
-
-function applyArticleScriptAction(snapshot: WidgetStateSnapshotV1, action: 'start' | 'next' | 'nextPause'): void {
+function applyAction(snapshot: WidgetStateSnapshotV1, action: Dd1WidgetScenarioAction): void {
   const scriptState = snapshot.articleScript;
   if (!scriptState) return;
   const result = applyArticleScriptWidgetActionCore({
@@ -74,12 +67,12 @@ function applyArticleScriptAction(snapshot: WidgetStateSnapshotV1, action: 'star
       cursor: scriptState.cursor,
       history: scriptState.history
     },
-    spec: experimentalDraftIntroScript,
-    problem: experimentalDraft01,
+    spec: doubleDummy01Script,
+    problem: doubleDummy01,
     seed: snapshot.problem.seed,
-    pauseTriggerCards: VSC_TRIGGER_CARDS,
+    pauseTriggerCards: DD1_TRIGGER_CARDS,
     startupOpeningLength: snapshot.runtime.scriptedOpening.length,
-    startupMode: 'single-step'
+    startupMode: 'default'
   });
   snapshot.journey.startupGatePhase = result.nextState.startupGatePhase;
   snapshot.chrome.readingControlsRevealStage = result.nextState.readingControlsRevealStage;
@@ -88,98 +81,82 @@ function applyArticleScriptAction(snapshot: WidgetStateSnapshotV1, action: 'star
   scriptState.history = result.nextState.history;
 }
 
-function applyAction(snapshot: WidgetStateSnapshotV1, action: VscWidgetScenarioAction): void {
-  if (action === 'start') {
-    applyArticleScriptAction(snapshot, 'start');
-    return;
-  }
-  if (action === 'next') {
-    applyArticleScriptAction(snapshot, 'next');
-    return;
-  }
-  if (action === 'nextPause') {
-    applyArticleScriptAction(snapshot, 'nextPause');
-    return;
-  }
-  if (action === 'revealQuiet') {
-    snapshot.chrome.readingControlsRevealStage = 'quiet';
-    return;
-  }
-  if (action === 'openFullControls') {
-    snapshot.chrome.readingControlsRevealStage = 'full';
-  }
-}
-
-function scriptHistoryIsAuthoredPrefix(history: CardId[]): boolean {
-  for (let idx = 0; idx < history.length; idx += 1) {
-    const expected = resolveArticleScriptCardAtCursor(experimentalDraftIntroScript, idx);
-    if (!expected || expected !== history[idx]) return false;
-  }
-  return true;
-}
-
-function buildSummary(snapshot: WidgetStateSnapshotV1): VscWidgetScenarioSummary {
+function buildSummary(snapshot: WidgetStateSnapshotV1): Dd1WidgetScenarioSummary {
   const scriptState = snapshot.articleScript;
   if (!scriptState) {
     return {
       startupGatePhase: snapshot.journey.startupGatePhase,
-      readingControlsRevealStage: snapshot.chrome.readingControlsRevealStage,
       activeInteractionProfile: snapshot.journey.activeInteractionProfile,
       scriptCursor: 0,
       scriptHistoryLength: 0,
       scriptStateId: 'missing-script',
-      scriptHistoryPrefix: [],
-      scriptedPrefixValid: false
+      scriptedPrefixValid: false,
+      pendingChoiceSeat: null,
+      pendingChoiceOptions: [],
+      branchName: null,
+      interactionProfileOverride: null
     };
   }
   const matched = matchArticleScriptHistory(
-    experimentalDraftIntroScript,
+    doubleDummy01Script,
     scriptState.checkpointId,
     scriptState.history,
     scriptState.cursor
   );
+  const pendingChoice = resolvePendingArticleScriptChoice(
+    doubleDummy01Script,
+    scriptState.cursor,
+    matched.choiceSelections
+  );
+  const branchName = resolveArticleScriptAuthoredBranchName(
+    doubleDummy01Script,
+    matched.choiceSelections,
+    scriptState.cursor
+  );
   return {
     startupGatePhase: snapshot.journey.startupGatePhase,
-    readingControlsRevealStage: snapshot.chrome.readingControlsRevealStage,
     activeInteractionProfile: snapshot.journey.activeInteractionProfile,
     scriptCursor: scriptState.cursor,
     scriptHistoryLength: scriptState.history.length,
     scriptStateId: matched.stateId,
-    scriptHistoryPrefix: scriptState.history.slice(0, scriptState.cursor),
-    scriptedPrefixValid: scriptHistoryIsAuthoredPrefix(scriptState.history.slice(0, scriptState.cursor))
+    scriptedPrefixValid: matched.stateId !== 'off-script' && matched.assertionFailure === null,
+    pendingChoiceSeat: pendingChoice?.seat ?? null,
+    pendingChoiceOptions: [...(pendingChoice?.options ?? [])],
+    branchName: branchName || null,
+    interactionProfileOverride: scriptState.interactionProfileOverride
   };
 }
 
 function buildPermalink(snapshot: WidgetStateSnapshotV1): string | null {
   try {
-    return buildWidgetStateSnapshotPermalink(VSC_WIDGET_BASE_URL, snapshot);
+    return buildWidgetStateSnapshotPermalink(DD1_WIDGET_BASE_URL, snapshot);
   } catch {
     return null;
   }
 }
 
-export function createVscPilotStartSnapshot(overrides: Partial<WidgetStateSnapshotV1> = {}): WidgetStateSnapshotV1 {
+export function createDd1PilotStartSnapshot(overrides: Partial<WidgetStateSnapshotV1> = {}): WidgetStateSnapshotV1 {
   const base: WidgetStateSnapshotV1 = {
     version: 1,
     problem: {
-      problemId: 'experimental_draft_01',
+      problemId: 'double_dummy_01',
       variantId: null,
-      seed: 1975
+      seed: 2501
     },
     initialConfig: {
       displayMode: 'widget',
       widgetUiMode: 'default',
-      readingProfileEnabledFromUrl: true,
-      companionPanelEnabledFromUrl: true,
+      readingProfileEnabledFromUrl: false,
+      companionPanelEnabledFromUrl: false,
       startupGateEnabledFromUrl: false
     },
     runtime: {
       userHistory: [],
-      scriptedOpening: buildVscScriptedOpening()
+      scriptedOpening: []
     },
     journey: {
-      activeInteractionProfile: 'story-viewing',
-      startupGatePhase: 'pending',
+      activeInteractionProfile: 'puzzle-solving',
+      startupGatePhase: 'started',
       assistLevelByPuzzleMode: {
         draft: 'solution',
         'multi-ew': 'puzzle',
@@ -195,13 +172,13 @@ export function createVscPilotStartSnapshot(overrides: Partial<WidgetStateSnapsh
       }
     },
     chrome: {
-      readingRevealEnabled: true,
+      readingRevealEnabled: false,
       readingControlsRevealStage: 'collapsed',
       readingInteractionStarted: false,
       companionPanelHidden: false
     },
     articleScript: {
-      scriptId: 'experimental-draft-intro',
+      scriptId: 'double-dummy-01',
       checkpointId: '1',
       initialCursor: 0,
       cursor: 0,
@@ -213,9 +190,9 @@ export function createVscPilotStartSnapshot(overrides: Partial<WidgetStateSnapsh
   return normalizeWidgetStateSnapshotV1({ ...base, ...overrides } as WidgetStateSnapshotV1);
 }
 
-export function runVscWidgetScenario(
-  scenario: VscWidgetScenarioDefinition
-): VscWidgetScenarioResult {
+export function runDd1WidgetScenario(
+  scenario: Dd1WidgetScenarioDefinition
+): Dd1WidgetScenarioResult {
   const working = cloneSnapshot(scenario.startSnapshot);
   for (const action of scenario.actions) applyAction(working, action);
   const endSnapshot = normalizeWidgetStateSnapshotV1(working);

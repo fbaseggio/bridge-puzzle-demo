@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { resolveArticleScript } from '../../src/demo/articleScripts';
+import { resolveWidgetJourneyState, resolveWidgetStartupGatePending } from '../../src/demo/widgetJourneyState';
 import type { VscWidgetScenarioDefinition } from '../../src/demo/vscWidgetScenarioPilot';
 import {
   createVscPilotStartSnapshot,
@@ -9,6 +11,30 @@ import {
 
 function repeated(action: 'nextPause' | 'next', count: number): Array<'nextPause' | 'next'> {
   return Array.from({ length: count }, () => action);
+}
+
+function parseFlag(rawValue: string | null): boolean {
+  const raw = (rawValue ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+function extractIframeSrcs(articlePath: string): string[] {
+  const html = readFileSync(articlePath, 'utf8');
+  return [...html.matchAll(/<iframe[^>]*\ssrc="([^"]+)"/g)]
+    .map((match) => (match[1] ?? '').replace(/&amp;/g, '&'))
+    .filter((src) => src.length > 0);
+}
+
+function findWidgetEmbedUrl(
+  articlePath: string,
+  predicate: (url: URL) => boolean
+): URL {
+  const srcs = extractIframeSrcs(articlePath);
+  for (const src of srcs) {
+    const url = new URL(src, 'http://localhost:5173');
+    if (predicate(url)) return url;
+  }
+  throw new Error(`No matching widget iframe found in ${articlePath}`);
 }
 
 // These scenarios intentionally mix invariant checks with script-exact checks.
@@ -78,6 +104,40 @@ const reviewScenarios: VscWidgetScenarioDefinition[] = [
 ];
 
 const reviewPermalinkArtifactPath = resolve(process.cwd(), 'tmp', 'vsc-widget-review-permalinks.txt');
+const vscArticlePath = resolve(process.cwd(), 'articles', 'experimental-draft', 'index.html');
+
+describe('vscWidgetScenarioPilot baseline parity', () => {
+  it('matches article embed baseline inputs and resolver-derived startup posture', () => {
+    const snapshot = createVscPilotStartSnapshot();
+    const url = findWidgetEmbedUrl(vscArticlePath, (candidate) => {
+      const params = candidate.searchParams;
+      return params.get('problem') === 'experimental_draft_01'
+        && params.get('articleScript') === 'experimental-draft-intro'
+        && params.get('checkpoint') === '1';
+    });
+    const params = url.searchParams;
+
+    expect(snapshot.problem.problemId).toBe(params.get('problem'));
+    expect(snapshot.articleScript?.scriptId).toBe(params.get('articleScript'));
+    expect(snapshot.articleScript?.checkpointId).toBe(params.get('checkpoint'));
+    expect(snapshot.initialConfig.readingProfileEnabledFromUrl).toBe(parseFlag(params.get('reading')));
+    expect(snapshot.initialConfig.companionPanelEnabledFromUrl).toBe(parseFlag(params.get('companionPanel')));
+    expect(snapshot.initialConfig.startupGateEnabledFromUrl).toBe(parseFlag(params.get('start')));
+
+    const scriptSpec = resolveArticleScript(snapshot.articleScript?.scriptId ?? null);
+    const journey = resolveWidgetJourneyState({
+      displayMode: 'widget',
+      widgetReadingProfileEnabledFromUrl: snapshot.initialConfig.readingProfileEnabledFromUrl,
+      articleScriptModeEnabled: Boolean(scriptSpec),
+      articleScriptInteractionProfile: scriptSpec?.interactionProfile ?? null
+    });
+    const pending = resolveWidgetStartupGatePending({
+      startupGateEnabledFromUrl: snapshot.initialConfig.startupGateEnabledFromUrl,
+      journey
+    });
+    expect(snapshot.journey.startupGatePhase).toBe(pending ? 'pending' : 'started');
+  });
+});
 
 describe('vscWidgetScenarioPilot locked scenarios', () => {
   for (const scenario of lockedScenarios) {

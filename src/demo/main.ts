@@ -136,7 +136,15 @@ import {
   buildWidgetStateSnapshotPermalink,
   readWidgetStateSnapshotFromHash
 } from './widgetStateSnapshotUrl';
-import { advanceWidgetStartupFromScript } from './widgetStartupProgression';
+import {
+  applyArticleScriptWidgetActionCore,
+  type ArticleScriptWidgetAction,
+  type ArticleScriptWidgetProgressionStep
+} from './articleScriptWidgetActionCore';
+import {
+  createArticleScriptWidgetTransport,
+  type ArticleScriptWidgetTransportEffect
+} from './articleScriptWidgetTransport';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -725,39 +733,135 @@ function nextArticleScriptRememberedPauseCursor(): number | null {
   return null;
 }
 
-function advanceArticleScriptToNextPauseOrEnd(): void {
-  const scriptSession = articleScriptCoordinator.getArticleScriptState();
-  if (!scriptSession) return;
-  const scriptStateId = currentArticleScriptStateId();
-  if (scriptStateId !== 'in-script' && scriptStateId !== 'pre-script') return;
-  const endCursor = currentArticleScriptEndCursor() ?? resolveArticleScriptLength(scriptSession.spec);
-  let cursor = scriptSession.cursor;
-  const triggerCards = currentArticleScriptNarrativeTriggerCards();
-  let previousReplay = currentArticleScriptReplayAtCursor(cursor);
-  while (cursor < endCursor) {
-    const nextCardId = resolveArticleScriptReplayCardAtCursor(cursor);
-    if (nextCardId) {
-      const playCursor = articleScriptCoordinator.appendReplayCardAtCursor(nextCardId, cursor);
-      if (playCursor === null) break;
-      cursor += 1;
-      applyArticleScriptPlayStepFeedbackAtCursor(playCursor, nextCardId);
-      const nextReplay = currentArticleScriptReplayAtCursor(cursor);
-      const completedTrick = Boolean(
-        previousReplay
-        && nextReplay
-        && previousReplay.state.trick.length > 0
-        && nextReplay.state.trick.length === 0
-      );
-      if (triggerCards.has(nextCardId) || completedTrick) break;
-      if (resolvePendingArticleScriptChoice(scriptSession.spec, cursor, matchCurrentArticleScriptHistory(cursor)?.choiceSelections ?? {})) break;
-      previousReplay = nextReplay;
+function planArticleScriptWidgetAction(
+  action: ArticleScriptWidgetAction,
+  options: { startupMode?: 'default' | 'single-step' } = {}
+) {
+  const scriptState = articleScriptCoordinator.getArticleScriptState();
+  if (!scriptState) return null;
+  return applyArticleScriptWidgetActionCore({
+    action,
+    state: {
+      startupGatePhase: startPending ? 'pending' : 'started',
+      readingRevealEnabled: currentWidgetJourneyState().readingRevealEnabled,
+      readingControlsRevealStage: handDiagramSession.readingControlsRevealStage,
+      checkpointId: scriptState.checkpointId,
+      cursor: scriptState.cursor,
+      history: scriptState.history
+    },
+    spec: scriptState.spec,
+    problem: withDdSource(currentProblem),
+    seed: currentSeed,
+    pauseTriggerCards: currentArticleScriptNarrativeTriggerCards(),
+    startupOpeningLength: startupOpeningForProblem(currentProblem).length,
+    startupMode: options.startupMode
+  });
+}
+
+function applyPlannedArticleScriptProgressionSteps(steps: ArticleScriptWidgetProgressionStep[]): number {
+  const scriptState = articleScriptCoordinator.getArticleScriptState();
+  if (!scriptState) return 0;
+  let finalCursor = scriptState.cursor;
+  for (const step of steps) {
+    const playCursor = articleScriptCoordinator.appendReplayCardAtCursor(step.cardId, step.cursor);
+    if (playCursor === null) break;
+    finalCursor = playCursor + 1;
+    applyArticleScriptPlayStepFeedbackAtCursor(playCursor, step.cardId);
+  }
+  return finalCursor;
+}
+
+function applyPlannedArticleScriptCoreResult(planned: ReturnType<typeof planArticleScriptWidgetAction>): number {
+  if (!planned) {
+    const scriptState = articleScriptCoordinator.getArticleScriptState();
+    return scriptState?.cursor ?? 0;
+  }
+  startPending = planned.nextState.startupGatePhase === 'pending';
+  if (handDiagramSession.readingControlsRevealStage !== planned.nextState.readingControlsRevealStage) {
+    setReadingControlsRevealStage(handDiagramSession, planned.nextState.readingControlsRevealStage);
+  }
+  const scriptState = articleScriptCoordinator.getArticleScriptState();
+  if (scriptState) scriptState.checkpointId = planned.nextState.checkpointId;
+  if (planned.steps.length === 0) {
+    return scriptState?.cursor ?? 0;
+  }
+  const cursor = applyPlannedArticleScriptProgressionSteps(planned.steps);
+  replayArticleScriptToCursor(cursor);
+  return cursor;
+}
+
+function applyArticleScriptWidgetTransportEffects(effects: ArticleScriptWidgetTransportEffect[]): void {
+  for (const effect of effects) {
+    if (effect.type === 'set-follow-prompt') {
+      handDiagramSession.stickyMessage = false;
+      const message = effect.promptKind === 'follow-user-turn'
+        ? `Select ${seatName[effect.seat]}'s next play, or click > again to follow script.`
+        : `Choose ${seatName[effect.seat]}'s play, or click > again to choose the lowest.`;
+      setMessage(handDiagramSession, message);
       continue;
     }
-    if (resolvePendingArticleScriptChoice(scriptSession.spec, cursor, matchCurrentArticleScriptHistory(cursor)?.choiceSelections ?? {})) break;
-    break;
+    if (effect.type === 'choice-confirmation') {
+      handDiagramSession.stickyMessage = true;
+      setMessage(handDiagramSession, `Choosing ${effect.cardId}.`);
+    }
   }
-  clearArticleScriptFollowPrompt();
-  replayArticleScriptToCursor(cursor);
+}
+
+function createArticleScriptWidgetTransportDriver() {
+  return createArticleScriptWidgetTransport({
+    readSnapshot: () => {
+      const scriptState = articleScriptCoordinator.getArticleScriptState();
+      const scriptedChoicePresentation = currentArticleScriptChoicePresentation();
+      return {
+        scriptStateId: currentArticleScriptStateId(),
+        scriptCursor: scriptState?.cursor ?? null,
+        followPromptCursor: handDiagramSession.followPromptCursor,
+        interactionProfile: currentArticleScriptInteractionProfile(),
+        phase: state.phase,
+        turn: state.turn,
+        isUserTurn: currentProblem.userControls.includes(state.turn),
+        hasRememberedTail: currentArticleScriptHasRememberedTail(),
+        trickFrozen,
+        canLeadDismiss,
+        explicitChoice: scriptedChoicePresentation
+          ? {
+              seat: scriptedChoicePresentation.rawChoice.seat,
+              unresolvedOptions: [...scriptedChoicePresentation.unresolvedOptions],
+              optionMode: scriptedChoicePresentation.rawChoice.optionMode ?? 'explicit',
+              choiceMessages: scriptedChoicePresentation.rawChoice.choiceMessages ?? {}
+            }
+          : null
+      };
+    },
+    planAction: (action, options = {}) => planArticleScriptWidgetAction(action, {
+      startupMode: options.startupMode
+    }),
+    applyCoreResult: (planned) => applyPlannedArticleScriptCoreResult(planned),
+    followPromptAdvance: () => followCurrentArticleScriptUserTurn(),
+    chooseExplicitBranchOption: () => chooseCurrentArticleScriptBranchOption(),
+    playCardById: (cardId) => {
+      const scriptedChoicePresentation = currentArticleScriptChoicePresentation();
+      const choiceMessage = scriptedChoicePresentation?.rawChoice.choiceMessages?.[cardId];
+      const legal = legalPlays(state).filter((candidate) => candidate.seat === state.turn);
+      const play = legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === cardId);
+      if (!play) return { played: false, usedChoiceMessage: false };
+      runTurn(play);
+      return { played: true, usedChoiceMessage: Boolean(choiceMessage) };
+    },
+    setFollowPromptCursor: (cursor) => {
+      handDiagramSession.followPromptCursor = cursor;
+    },
+    clearFollowPromptCursor: () => {
+      clearArticleScriptFollowPrompt();
+    }
+  });
+}
+
+function advanceArticleScriptToNextPauseOrEnd(): void {
+  const result = createArticleScriptWidgetTransportDriver().nextPause();
+  if (result.outcome === 'noop') return;
+  applyArticleScriptWidgetTransportEffects(result.effects);
+  render();
 }
 
 function resolveProblemById(problemId: string, variantId?: string | null): ProblemWithThreats {
@@ -2152,14 +2256,12 @@ function advanceOneWidgetCard(): boolean {
   }
   if (articleScriptModeEnabled()) {
     const scriptStateId = currentArticleScriptStateId();
-    const scriptSession = articleScriptCoordinator.getArticleScriptState();
-    const nextCard = currentArticleScriptReplayCard();
-    if (nextCard && scriptSession && (scriptStateId === 'in-script' || scriptStateId === 'pre-script')) {
-      const playCursor = articleScriptCoordinator.appendReplayCardAtCursor(nextCard);
-      if (playCursor !== null) {
+    if (scriptStateId === 'in-script' || scriptStateId === 'pre-script') {
+      const planned = planArticleScriptWidgetAction('next');
+      if (planned && planned.steps.length > 0) {
+        const cursor = applyPlannedArticleScriptProgressionSteps(planned.steps);
         clearArticleScriptFollowPrompt();
-        replayArticleScriptToCursor(scriptSession.cursor + 1);
-        applyArticleScriptPlayStepFeedbackAtCursor(playCursor, nextCard);
+        replayArticleScriptToCursor(cursor);
         render();
         return true;
       }
@@ -2232,18 +2334,25 @@ function advanceOneWidgetCard(): boolean {
   return true;
 }
 
+function performWidgetNextTransportAction(options: { renderOnPause?: boolean } = {}): 'advanced' | 'paused' | 'noop' {
+  const renderOnPause = options.renderOnPause !== false;
+  if (articleScriptModeEnabled()) {
+    const transportResult = createArticleScriptWidgetTransportDriver().next();
+    if (transportResult.outcome !== 'noop') {
+      applyArticleScriptWidgetTransportEffects(transportResult.effects);
+      if (transportResult.outcome === 'paused' && renderOnPause) render();
+      return transportResult.outcome;
+    }
+  }
+  const moved = advanceOneWidgetCard();
+  return moved ? 'advanced' : 'paused';
+}
+
 function advanceWidgetToNextPauseBoundary(): void {
   if (articleScriptModeEnabled()) {
-    const scriptState = currentArticleScriptStateId();
-    if (scriptState === 'in-script' || scriptState === 'pre-script') {
-      const rememberedBoundary = nextArticleScriptRememberedPauseCursor();
-      if (rememberedBoundary !== null) {
-        clearArticleScriptFollowPrompt();
-        replayArticleScriptToCursor(rememberedBoundary);
-        render();
-        return;
-      }
-      advanceArticleScriptToNextPauseOrEnd();
+    const transportResult = createArticleScriptWidgetTransportDriver().nextPause();
+    if (transportResult.outcome !== 'noop') {
+      applyArticleScriptWidgetTransportEffects(transportResult.effects);
       render();
       return;
     }
@@ -5903,9 +6012,6 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
     }
     startBtn.onclick = () => {
       dismissTransientWidgetOutcome(currentViewState());
-      if (readingStartup) {
-        setReadingControlsRevealStage(handDiagramSession, 'quiet');
-      }
       launchStartSequence(readingStartup ? 'single-step' : 'default');
     };
     table.appendChild(startBtn);
@@ -6442,8 +6548,11 @@ function openWidgetSnapshotExportPanel(options: { attemptCopy?: boolean } = {}):
   if (displayMode !== 'widget') return;
   const snapshot = captureCurrentWidgetStateSnapshot();
   const snapshotJson = serializeWidgetStateSnapshotV1(snapshot);
+  const widgetPermalinkBase = typeof window !== 'undefined'
+    ? `${window.location.origin}/workbench/?mode=widget`
+    : '';
   const snapshotPermalink = typeof window !== 'undefined'
-    ? buildWidgetStateSnapshotPermalink(window.location.href, snapshot)
+    ? buildWidgetStateSnapshotPermalink(widgetPermalinkBase, snapshot)
     : '';
   const seq = ++widgetSnapshotCopyAttemptSeq;
   widgetSnapshotExportPanelState = {
@@ -6803,6 +6912,9 @@ function render(): void {
     chooseCurrentArticleScriptBranchOption,
     clearArticleScriptFollowPrompt,
     runTurn,
+    performWidgetNextTransportAction: () => {
+      void performWidgetNextTransportAction();
+    },
     advanceOneWidgetCard,
     advanceWidgetToNextPauseBoundary,
     playAgainAvailable,
@@ -6977,9 +7089,19 @@ function applyInitialWidgetSnapshotRestore(snapshot: WidgetStateSnapshotV1): voi
 
 function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void {
   if (!startPending) return;
-  startPending = false;
   const startupOpening = startupOpeningForProblem(currentProblem);
   const singleStep = mode === 'single-step';
+  if (articleScriptModeEnabled()) {
+    const transportResult = createArticleScriptWidgetTransportDriver().start({
+      startupMode: mode
+    });
+    if (transportResult.outcome === 'noop') startPending = false;
+    applyArticleScriptWidgetTransportEffects(transportResult.effects);
+    render();
+    return;
+  }
+
+  startPending = false;
   if (startupOpening.length === 0) {
     if (singleStep) {
       const moved = advanceOneWidgetCard();
@@ -7016,16 +7138,6 @@ function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void 
     clearDdErrorVisual();
     refreshThreatModel(currentProblemId, false);
     render();
-    return;
-  }
-
-  if (articleScriptModeEnabled()) {
-    const advanced = advanceWidgetStartupFromScript({
-      mode,
-      startupOpeningLength: startupOpening.length,
-      advanceOneWidgetCard
-    });
-    if (advanced === 0) render();
     return;
   }
 
