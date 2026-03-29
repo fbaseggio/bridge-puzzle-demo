@@ -54,6 +54,7 @@ import type { InteractionProfile } from './interactionProfiles';
 type RunStatus = 'running' | 'success' | 'failure';
 type DisplayMode = 'analysis' | 'widget' | 'practice';
 type ProblemWithThreats = Problem & { threatCardIds?: CardId[] };
+const OFF_SCRIPT_COMPANION_TEXT = 'You have departed from the script, feel free to explore.';
 
 export type ArticleScriptCoordinatorState = {
   spec: ArticleScriptSpec;
@@ -575,6 +576,8 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
   function applyArticleScriptPlayStepFeedbackAtCursor(cursor: number, playedCardId: CardId): void {
     const scriptState = stateRef();
     if (!scriptState) return;
+    const scriptStateId = currentArticleScriptStateId();
+    if (scriptStateId !== 'in-script' && scriptStateId !== 'pre-script') return;
     const activeProfile = currentArticleScriptInteractionProfile();
     if (
       activeProfile === 'story-viewing'
@@ -739,6 +742,7 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
     const scripted = articleScriptModeEnabled();
     const scriptedPuzzleProfile = scripted && !articleScriptIsStoryViewing();
     const activeProfile = currentArticleScriptInteractionProfile();
+    const scriptStateId = scripted ? currentArticleScriptStateId() : null;
     const companionPanelConfig = scriptState?.spec.companionPanel;
     const profileEnabledByScript = scripted
       && Boolean(companionPanelConfig?.enabledProfiles?.includes(activeProfile))
@@ -761,7 +765,16 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
         ? companionPanelConfig.defaultContent
         : null
       );
-    const content = sessionContent ?? scriptDefaultContent;
+    const offScriptStoryContent =
+      profileEnabledByScript
+      && activeProfile === 'story-viewing'
+      && scriptStateId === 'off-script'
+        ? {
+            text: OFF_SCRIPT_COMPANION_TEXT,
+            html: false
+          }
+        : null;
+    const content = offScriptStoryContent ?? sessionContent ?? scriptDefaultContent;
     const enabled = scriptedPuzzleProfile || profileEnabledByScript || (deps.widgetCompanionPanelEnabledFromUrl && Boolean(content));
     if (!enabled) {
       return {

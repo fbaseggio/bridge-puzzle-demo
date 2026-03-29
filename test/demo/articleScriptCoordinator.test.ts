@@ -89,6 +89,30 @@ const STORY_NARRATIVE_SPEC: ArticleScriptSpec = {
   ]
 };
 
+const OFF_SCRIPT_FEEDBACK_SPEC: ArticleScriptSpec = {
+  id: 'coordinator-off-script-feedback',
+  parentProblemId: doubleDummy01.id,
+  navigationMode: ARTICLE_SCRIPT_NAVIGATION_MODE,
+  interactionProfile: 'story-viewing',
+  companionPanel: {
+    enabledProfiles: ['story-viewing'],
+    defaultContent: {
+      text: 'Script companion default',
+      html: false
+    }
+  },
+  checkpoints: [{ id: '1', cursor: 0 }],
+  steps: [
+    { kind: 'play', cardId: 'S7' },
+    {
+      kind: 'play',
+      cardId: 'SA',
+      onPlayMessage: 'Scripted step message',
+      onPlayCompanionText: 'Scripted step companion'
+    }
+  ]
+};
+
 function createScriptState(args: {
   spec: ArticleScriptSpec;
   history: CardId[];
@@ -348,6 +372,53 @@ describe('article script coordinator', () => {
     expect(harness.handDiagramSession.companionNarrativeActiveSegmentIds.has('win-sa')).toBe(true);
     expect(afterWin.content?.text).toContain('you win in dummy,');
     expect(afterWin.futureTransitioning).toBe(true);
+  });
+
+  it('suppresses scripted feedback when applying plays from an off-script state', () => {
+    const scriptState = createScriptState({
+      spec: OFF_SCRIPT_FEEDBACK_SPEC,
+      history: ['S9'],
+      cursor: 1
+    });
+    const harness = createCoordinatorHarness({
+      scriptState,
+      widgetCompanionPanelEnabledFromUrl: true
+    });
+
+    harness.coordinator.applyTurnPlay(playFor('N', 'SA'));
+
+    expect(scriptState.history).toEqual(['S9', 'SA']);
+    expect(scriptState.cursor).toBe(2);
+    expect(harness.handDiagramSession.status.type).toBe('default');
+    expect(harness.handDiagramSession.companionContent).toBeNull();
+    expect(harness.getClearHintCalls()).toBe(0);
+  });
+
+  it('shows a departed-script companion message only while runtime state is off-script', () => {
+    const scriptState = createScriptState({
+      spec: STORY_NARRATIVE_SPEC,
+      history: ['S9'],
+      cursor: 1
+    });
+    const harness = createCoordinatorHarness({
+      scriptState,
+      widgetCompanionPanelEnabledFromUrl: true
+    });
+
+    const offScriptPanel = harness.coordinator.currentWidgetCompanionPanelState();
+    expect(offScriptPanel.enabled).toBe(true);
+    expect(offScriptPanel.content).toEqual({
+      text: 'You have departed from the script, feel free to explore.',
+      html: false
+    });
+
+    scriptState.history = ['S7'];
+    scriptState.cursor = 1;
+    const inScriptPanel = harness.coordinator.currentWidgetCompanionPanelState();
+    expect(inScriptPanel.enabled).toBe(true);
+    expect(inScriptPanel.content?.html).toBe(true);
+    expect(inScriptPanel.content?.text).toContain('Intro.');
+    expect(inScriptPanel.content?.text).not.toContain('departed from the script');
   });
 
   it('attributes completion stats once per leaf branch', () => {
