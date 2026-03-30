@@ -8,7 +8,10 @@ import {
   resolvePendingArticleScriptChoice,
   type ArticleScriptSpec
 } from '../../src/demo/articleScripts';
-import { chooseLowestCardId } from '../../src/demo/articleScriptInteractionPolicy';
+import {
+  chooseLowestCardId,
+  shouldBlockArticleScriptUserAdvance
+} from '../../src/demo/articleScriptInteractionPolicy';
 import { matchArticleScriptHistory, replayArticleHistory } from '../../src/demo/articleScriptRuntime';
 import {
   createArticleScriptWidgetTransport,
@@ -209,6 +212,7 @@ function createTransportHarness(config: TransportHarnessConfig) {
 
 type DerivedDd1ReferenceStates = {
   followPrompt: { cursor: number; history: CardId[] };
+  midLoopFollowPromptStart: { cursor: number; history: CardId[] };
   explicitChoice: { cursor: number; history: CardId[]; options: CardId[] };
 };
 
@@ -285,12 +289,33 @@ function deriveDd1ReferenceStates(): DerivedDd1ReferenceStates {
 
   if (!followPrompt) throw new Error('Failed to locate DD1 user-turn follow-prompt state for transport test');
   if (!explicitChoice) throw new Error('Failed to locate DD1 explicit-choice state for transport test');
-  return { followPrompt, explicitChoice };
+  let midLoopFollowPromptStart: DerivedDd1ReferenceStates['midLoopFollowPromptStart'] | null = null;
+  for (let cursor = Math.max(0, followPrompt.cursor - 1); cursor >= 0; cursor -= 1) {
+    const history = followPrompt.history.slice(0, cursor);
+    const replayed = replayArticleHistory(doubleDummy01, history, cursor, 2501).state;
+    const blocked = shouldBlockArticleScriptUserAdvance({
+      profile: 'puzzle-solving',
+      isUserTurn: doubleDummy01.userControls.includes(replayed.turn),
+      hasRememberedTail: false,
+      trickFrozen: false,
+      canLeadDismiss: false,
+      phase: replayed.phase
+    });
+    if (blocked) continue;
+    midLoopFollowPromptStart = { cursor, history };
+    break;
+  }
+  if (!midLoopFollowPromptStart) {
+    throw new Error('Failed to locate DD1 non-blocked start state before follow-prompt boundary');
+  }
+  return { followPrompt, midLoopFollowPromptStart, explicitChoice };
 }
 
 const dd1ReferenceStates = deriveDd1ReferenceStates();
 
-describe('articleScriptWidgetTransport', () => {
+// Transport-authoritative coverage:
+// These tests exercise the shared prompt-aware transport seam directly.
+describe('articleScriptWidgetTransport (transport-authoritative)', () => {
   it('pauses first DD1 next on follow prompt, then advances on second next at same cursor', () => {
     const { followPrompt } = dd1ReferenceStates;
     const harness = createTransportHarness({
@@ -372,6 +397,31 @@ describe('articleScriptWidgetTransport', () => {
     expect(result.pauseReason).toBe('follow-prompt');
     expect(result.iterations).toBe(1);
     expect(harness.current().progression.cursor).toBe(followPrompt.cursor);
+  });
+
+  it('DD1 nextPause advances and then pauses when follow prompt is reached mid-loop', () => {
+    const { midLoopFollowPromptStart, followPrompt } = dd1ReferenceStates;
+    const harness = createTransportHarness({
+      spec: doubleDummy01Script,
+      problem: doubleDummy01,
+      seed: 2501,
+      startupOpeningLength: 0,
+      interactionProfile: 'puzzle-solving',
+      startupGatePhase: 'started',
+      readingRevealEnabled: false,
+      readingControlsRevealStage: 'collapsed',
+      checkpointId: '1',
+      cursor: midLoopFollowPromptStart.cursor,
+      history: [...midLoopFollowPromptStart.history]
+    });
+
+    const result = harness.transport.nextPause();
+    expect(result.outcome).toBe('advanced');
+    expect(result.pauseReason).toBe('follow-prompt');
+    expect(result.steps.length).toBeGreaterThan(0);
+    expect(result.iterations).toBeGreaterThan(1);
+    expect(harness.current().progression.cursor).toBe(followPrompt.cursor);
+    expect(harness.current().followPromptCursor).toBe(followPrompt.cursor);
   });
 
   it('uses VSC start + nextPause to advance by repeated next and pause at trick boundary', () => {

@@ -14,6 +14,10 @@ import {
 import { buildWidgetStateSnapshotPermalink } from './widgetStateSnapshotUrl';
 import type { InteractionProfile } from './interactionProfiles';
 
+// Pilot scope note:
+// This runner intentionally uses articleScriptWidgetActionCore only.
+// It is progression-only coverage and does not model prompt-aware transport
+// semantics like followPromptCursor second-click behavior.
 export type Dd1WidgetScenarioAction = 'start' | 'next' | 'nextPause';
 export type Dd1WidgetScenarioClassification = 'locked' | 'review' | 'open-question';
 

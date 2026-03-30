@@ -36,21 +36,25 @@ function findWidgetEmbedUrl(
 const dd1ArticlePath = resolve(process.cwd(), 'articles', 'double-dummy-1', 'index.html');
 const reviewPermalinkArtifactPath = resolve(process.cwd(), 'tmp', 'dd1-widget-review-permalinks.txt');
 
-const lockedScenario: Dd1WidgetScenarioDefinition = {
-  id: 'dd1-locked-nextPause-first-trick',
-  classification: 'locked',
-  description: 'From live DD1 baseline posture, nextPause should advance to first trick completion boundary.',
-  startSnapshot: createDd1PilotStartSnapshot(),
-  actions: ['nextPause']
-};
-
-const reviewScenario: Dd1WidgetScenarioDefinition = {
-  id: 'dd1-review-nextPause-to-first-choice',
-  classification: 'review',
-  description: 'Continue from live baseline into first explicit E choice boundary.',
-  startSnapshot: createDd1PilotStartSnapshot(),
-  actions: ['nextPause', 'nextPause']
-};
+// Seam note:
+// DD1 pilot scenarios are progression-only (articleScriptWidgetActionCore) and
+// do not claim prompt-aware `>`/`>>|` transport authority.
+const reviewScenarios: Dd1WidgetScenarioDefinition[] = [
+  {
+    id: 'dd1-review-nextPause-first-trick-progression',
+    classification: 'review',
+    description: 'Progression-only nextPause from DD1 baseline through early trick progression.',
+    startSnapshot: createDd1PilotStartSnapshot(),
+    actions: ['nextPause']
+  },
+  {
+    id: 'dd1-review-nextPause-to-first-choice-progression',
+    classification: 'review',
+    description: 'Progression-only continuation into first explicit choice boundary for manual vetting.',
+    startSnapshot: createDd1PilotStartSnapshot(),
+    actions: ['nextPause', 'nextPause']
+  }
+];
 
 describe('dd1WidgetScenarioPilot baseline parity', () => {
   it('matches article embed baseline inputs and resolver-derived startup posture', () => {
@@ -85,31 +89,21 @@ describe('dd1WidgetScenarioPilot baseline parity', () => {
   });
 });
 
-describe('dd1WidgetScenarioPilot locked scenario', () => {
-  it(lockedScenario.id, () => {
-    const result = runDd1WidgetScenario(lockedScenario);
-    expect(result.summary.scriptedPrefixValid).toBe(true);
-    expect(result.summary.startupGatePhase).toBe('started');
-    expect(result.summary.scriptCursor).toBe(4);
-    expect(result.endSnapshot.articleScript?.history.slice(0, 4)).toEqual(['SK', 'S7', 'S8', 'SA']);
-    expect(result.summary.pendingChoiceSeat).toBeNull();
-  });
-});
-
-describe('dd1WidgetScenarioPilot review scenario', () => {
-  it('runs review scenario and writes raw permalink to a local artifact file', () => {
-    const result = runDd1WidgetScenario(reviewScenario);
-    expect(result.summary.scriptedPrefixValid).toBe(true);
-    expect(result.summary.scriptCursor).toBe(7);
-    expect(result.summary.pendingChoiceSeat).toBe('E');
-    expect(result.summary.pendingChoiceOptions.sort()).toEqual(['D4', 'DJ']);
-    expect(result.permalink).toBeTruthy();
-
-    const lines = [
-      `${reviewScenario.id} :: actions=${reviewScenario.actions.join(' > ')} :: cursor=${result.summary.scriptCursor} state=${result.summary.scriptStateId} startup=${result.summary.startupGatePhase} profile=${result.summary.activeInteractionProfile} pendingSeat=${result.summary.pendingChoiceSeat ?? '-'} branch=${result.summary.branchName ?? '-'}`,
-      `permalink=${result.permalink}`,
-      ''
-    ];
+describe('dd1WidgetScenarioPilot review scenarios (progression-only seam)', () => {
+  it('runs review scenarios and writes raw permalinks to a local artifact file', () => {
+    const lines: string[] = [];
+    for (const scenario of reviewScenarios) {
+      const result = runDd1WidgetScenario(scenario);
+      expect(result.summary.scriptedPrefixValid).toBe(true);
+      expect(result.summary.activeInteractionProfile).toBe('puzzle-solving');
+      expect(result.summary.startupGatePhase).toBe('started');
+      expect(result.permalink).toBeTruthy();
+      lines.push(
+        `${scenario.id} :: actions=${scenario.actions.join(' > ')} :: cursor=${result.summary.scriptCursor} state=${result.summary.scriptStateId} startup=${result.summary.startupGatePhase} profile=${result.summary.activeInteractionProfile} pendingSeat=${result.summary.pendingChoiceSeat ?? '-'} pendingOptions=${result.summary.pendingChoiceOptions.join(',') || '-'} branch=${result.summary.branchName ?? '-'}`
+      );
+      lines.push(`permalink=${result.permalink}`);
+      lines.push('');
+    }
     mkdirSync(dirname(reviewPermalinkArtifactPath), { recursive: true });
     writeFileSync(reviewPermalinkArtifactPath, lines.join('\n'), 'utf8');
     const content = lines.join('\n');

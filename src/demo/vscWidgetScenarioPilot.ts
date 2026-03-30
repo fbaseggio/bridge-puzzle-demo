@@ -12,6 +12,10 @@ import {
 } from './widgetStateSnapshot';
 import { buildWidgetStateSnapshotPermalink } from './widgetStateSnapshotUrl';
 
+// Pilot scope note:
+// This runner intentionally uses articleScriptWidgetActionCore only.
+// It is progression-only coverage (cursor/history/checkpoint progression) and
+// is not authoritative for prompt/follow transport semantics.
 export type VscWidgetScenarioAction = 'start' | 'next' | 'nextPause' | 'revealQuiet' | 'openFullControls';
 export type VscWidgetScenarioClassification = 'locked' | 'review' | 'open-question';
 

@@ -37,10 +37,15 @@ function findWidgetEmbedUrl(
   throw new Error(`No matching widget iframe found in ${articlePath}`);
 }
 
-// These scenarios intentionally mix invariant checks with script-exact checks.
-// When authored script content/pause boundaries change, update the script-exact
-// expectations in this file in the same change, while keeping invariant checks
-// (prefix validity, cursor/history coherence) stable across script revisions.
+// Seam note:
+// This pilot is progression-only and intentionally exercises
+// articleScriptWidgetActionCore, not prompt-aware transport behavior.
+//
+// Locked rationale:
+// - Code-grounded: the action core deterministically drives VSC cursor/history
+//   movement for start/next/nextPause.
+// - Intent-grounded: these cases lock authored-prefix integrity and startup
+//   opening behavior, which are stable product contracts for VSC.
 const lockedScenarios: VscWidgetScenarioDefinition[] = [
   {
     id: 'vsc-locked-start-single-step',
@@ -74,30 +79,23 @@ const lockedScenarios: VscWidgetScenarioDefinition[] = [
 
 const reviewScenarios: VscWidgetScenarioDefinition[] = [
   {
-    id: 'vsc-review-start-plus-nextPause-6',
-    classification: 'review',
-    description: 'User-reported path: Start then roughly six nextPause presses.',
-    startSnapshot: createVscPilotStartSnapshot(),
-    actions: ['start', ...repeated('nextPause', 6)]
-  },
-  {
     id: 'vsc-review-linear-next-12',
     classification: 'review',
-    description: 'Linear progression via next through early story beats.',
+    description: 'Progression-only linear next simulation through early story beats.',
     startSnapshot: createVscPilotStartSnapshot(),
     actions: ['start', ...repeated('next', 11)]
   },
   {
     id: 'vsc-review-full-controls-midstream',
     classification: 'review',
-    description: 'Open full controls mid-progress, then continue with nextPause + next.',
+    description: 'Progression-only simulation with reveal-stage change plus nextPause/next.',
     startSnapshot: createVscPilotStartSnapshot(),
     actions: ['start', 'next', 'openFullControls', 'nextPause', 'next']
   },
   {
     id: 'vsc-review-nextPause-noop-tail',
     classification: 'review',
-    description: 'Extra nextPause actions near checkpoint end should stabilize.',
+    description: 'Progression-only nextPause saturation near checkpoint tail for manual review.',
     startSnapshot: createVscPilotStartSnapshot(),
     actions: ['start', ...repeated('nextPause', 26)]
   }
@@ -139,7 +137,7 @@ describe('vscWidgetScenarioPilot baseline parity', () => {
   });
 });
 
-describe('vscWidgetScenarioPilot locked scenarios', () => {
+describe('vscWidgetScenarioPilot locked scenarios (progression-only seam)', () => {
   for (const scenario of lockedScenarios) {
     it(scenario.id, () => {
       const result = runVscWidgetScenario(scenario);
@@ -167,7 +165,7 @@ describe('vscWidgetScenarioPilot locked scenarios', () => {
   }
 });
 
-describe('vscWidgetScenarioPilot review scenarios', () => {
+describe('vscWidgetScenarioPilot review scenarios (progression-only seam)', () => {
   it('runs review scenarios and writes raw permalinks to a local artifact file', () => {
     const lines: string[] = [];
     for (const scenario of reviewScenarios) {
