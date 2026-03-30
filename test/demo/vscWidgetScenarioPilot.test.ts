@@ -3,7 +3,11 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { resolveArticleScript } from '../../src/demo/articleScripts';
 import { demoProblems } from '../../src/demo/problems';
-import { resolveWidgetJourneyState, resolveWidgetStartupGatePending } from '../../src/demo/widgetJourneyState';
+import {
+  resolveWidgetJourneyRicherStartupPayload,
+  resolveWidgetJourneyState,
+  resolveWidgetStartupGatePending
+} from '../../src/demo/widgetJourneyState';
 import type { VscWidgetScenarioDefinition } from '../../src/demo/vscWidgetScenarioPilot';
 import {
   createVscPilotStartSnapshot,
@@ -138,7 +142,13 @@ describe('vscWidgetScenarioPilot baseline parity', () => {
     });
     const pending = resolveWidgetStartupGatePending({
       startupGateEnabledFromUrl: snapshot.initialConfig.startupGateEnabledFromUrl,
-      journey
+      journey,
+      hasRicherStartupPayload: resolveWidgetJourneyRicherStartupPayload({
+        articleScriptModeEnabled: Boolean(scriptSpec),
+        articleScriptCheckpointId: snapshot.articleScript?.checkpointId ?? null,
+        startupGateEnabledFromUrl: snapshot.initialConfig.startupGateEnabledFromUrl,
+        startupOpeningLength: snapshot.runtime.scriptedOpening.length
+      })
     });
     expect(snapshot.journey.startupGatePhase).toBe(pending ? 'pending' : 'started');
   });

@@ -9,19 +9,21 @@ import {
 } from '../../src/demo/widgetJourneyRuntimeState';
 
 describe('widgetJourneyRuntimeState', () => {
-  it('initializes story-widget journey runtime from resolver output and startup inputs', () => {
+  it('initializes reading-start widget journey runtime from resolver output and startup inputs', () => {
     const runtime = createWidgetJourneyRuntimeState({
       displayMode: 'widget',
-      widgetReadingProfileEnabledFromUrl: false,
+      widgetReadingProfileEnabledFromUrl: true,
       articleScriptModeEnabled: true,
+      articleScriptCheckpointId: '1',
       articleScriptInteractionProfile: 'story-viewing',
-      startupGateEnabledFromUrl: false
+      startupGateEnabledFromUrl: false,
+      startupOpeningLength: 24
     });
 
     expect(runtime).toEqual({
-      activeInteractionProfile: 'story-viewing',
+      activeInteractionProfile: 'reading-profile',
       startupGatePhase: 'pending',
-      startupBias: 'article-story-profile'
+      startupBias: 'url-reading-profile'
     });
   });
 
@@ -30,8 +32,10 @@ describe('widgetJourneyRuntimeState', () => {
       displayMode: 'widget',
       widgetReadingProfileEnabledFromUrl: false,
       articleScriptModeEnabled: true,
+      articleScriptCheckpointId: '1',
       articleScriptInteractionProfile: 'puzzle-solving',
-      startupGateEnabledFromUrl: false
+      startupGateEnabledFromUrl: false,
+      startupOpeningLength: 24
     });
 
     expect(runtime.startupGatePhase).toBe('started');
@@ -51,8 +55,10 @@ describe('widgetJourneyRuntimeState', () => {
       displayMode: 'widget',
       widgetReadingProfileEnabledFromUrl: false,
       articleScriptModeEnabled: true,
+      articleScriptCheckpointId: '1',
       articleScriptInteractionProfile: 'story-viewing',
-      startupGateEnabledFromUrl: false
+      startupGateEnabledFromUrl: false,
+      startupOpeningLength: 24
     });
 
     const storyView = resolveWidgetJourneyStateFromRuntime({
@@ -84,6 +90,7 @@ describe('widgetJourneyRuntimeState', () => {
       resolveWidgetJourneyStartupGatePhase({
         startupGateEnabledFromUrl: true,
         journey: puzzleView,
+        hasRicherStartupPayload: true,
         skipStartupGate: true
       })
     ).toBe('started');
@@ -94,8 +101,10 @@ describe('widgetJourneyRuntimeState', () => {
       displayMode: 'widget',
       widgetReadingProfileEnabledFromUrl: true,
       articleScriptModeEnabled: false,
+      articleScriptCheckpointId: null,
       articleScriptInteractionProfile: null,
-      startupGateEnabledFromUrl: false
+      startupGateEnabledFromUrl: false,
+      startupOpeningLength: 0
     });
 
     expect(runtime.activeInteractionProfile).toBe('reading-profile');

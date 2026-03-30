@@ -551,6 +551,16 @@ html.mode-widget {
   box-shadow: 0 1px 5px rgba(15, 23, 42, 0.08);
 }
 
+.mode-widget .narration-bubble .narration-card-token {
+  font-size: 1em;
+  gap: 0.04em;
+  vertical-align: baseline;
+}
+
+.mode-widget .narration-bubble .narration-card-token .card-rank {
+  font-weight: 500;
+}
+
 .mode-widget .narration-bubble.seat-N {
   left: calc(100% - 10px);
   top: 7px;

@@ -1,6 +1,7 @@
 import type { InteractionProfile } from './interactionProfiles';
 import {
   isWidgetJourneyReadingRevealProfile,
+  resolveWidgetJourneyRicherStartupPayload,
   resolveWidgetJourneyState,
   resolveWidgetStartupGatePending,
   type WidgetJourneyProfile,
@@ -20,8 +21,10 @@ export type CreateWidgetJourneyRuntimeStateInput = {
   displayMode: 'analysis' | 'widget' | 'practice';
   widgetReadingProfileEnabledFromUrl: boolean;
   articleScriptModeEnabled: boolean;
+  articleScriptCheckpointId: string | null;
   articleScriptInteractionProfile: InteractionProfile | null;
   startupGateEnabledFromUrl: boolean;
+  startupOpeningLength: number;
   skipStartupGate?: boolean;
 };
 
@@ -35,11 +38,13 @@ export type ResolveWidgetJourneyStateFromRuntimeInput = {
 export function resolveWidgetJourneyStartupGatePhase(input: {
   startupGateEnabledFromUrl: boolean;
   journey: WidgetJourneyState;
+  hasRicherStartupPayload: boolean;
   skipStartupGate?: boolean;
 }): WidgetJourneyStartupGatePhase {
   return resolveWidgetStartupGatePending({
     startupGateEnabledFromUrl: input.startupGateEnabledFromUrl,
     journey: input.journey,
+    hasRicherStartupPayload: input.hasRicherStartupPayload,
     skipStartupGate: input.skipStartupGate
   })
     ? 'pending'
@@ -60,6 +65,12 @@ export function createWidgetJourneyRuntimeState(
     startupGatePhase: resolveWidgetJourneyStartupGatePhase({
       startupGateEnabledFromUrl: input.startupGateEnabledFromUrl,
       journey,
+      hasRicherStartupPayload: resolveWidgetJourneyRicherStartupPayload({
+        articleScriptModeEnabled: input.articleScriptModeEnabled,
+        articleScriptCheckpointId: input.articleScriptCheckpointId,
+        startupGateEnabledFromUrl: input.startupGateEnabledFromUrl,
+        startupOpeningLength: input.startupOpeningLength
+      }),
       skipStartupGate: input.skipStartupGate
     }),
     startupBias: journey.startupBias

@@ -515,7 +515,7 @@ function renderReadingQuietTransportRow(args: {
   );
   snapshotDebugBtn.title = 'Snapshot export';
   snapshotDebugBtn.setAttribute('aria-label', 'Open snapshot export');
-  snapshotDebugBtn.appendChild(renderLucideIcon('sliders-horizontal', 'reading-lucide-icon reading-lucide-sliders-horizontal'));
+  snapshotDebugBtn.appendChild(renderLucideIcon('file-terminal', 'reading-lucide-icon reading-lucide-file-terminal'));
   snapshotDebugBtn.onclick = () => {
     openWidgetSnapshotExportPanel();
   };

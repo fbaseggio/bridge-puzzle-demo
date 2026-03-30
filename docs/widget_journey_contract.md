@@ -201,6 +201,62 @@ This note does not require that all of these be equally implemented today.
 It does require that future work treat them as reusable journey families rather
 than article-specific hacks.
 
+## Current Article Startup Patterns
+
+The remaining widgets under `Articles` do not all start from the same literal
+inputs, even if they should eventually converge on a smaller number of journey
+patterns.
+
+It is useful to distinguish two different kinds of startup information:
+
+- startup posture inputs, such as `reading=1`, which nudge Journey toward an
+  initial `reading-profile`
+- richer startup payload, such as article script/checkpoint or `start` plus an
+  `opening` sequence, which says more about what `Start` should consume
+
+Current `Articles` examples:
+
+- `Introduction to the Veering Squeeze Card`:
+  all 3 widgets carry richer startup payload through `articleScript` plus
+  `checkpoint`, along with `reading=1`
+- `Gorillas`:
+  most widgets carry startup posture input only through `reading=1`; the
+  `sd-puzzle` full-deal widget also carries richer startup payload through
+  `start=1` plus `opening=...`
+- `Ruff or Sluff`:
+  widgets generally carry startup posture input through `reading=1`, and 3
+  widgets also carry richer startup payload through `start=1` (with one of
+  those also carrying `opening=...`)
+- `Squeeze Self`:
+  the current widget has no explicit startup input beyond the base problem
+
+This supports the broader direction of the contract:
+
+- Journey should mediate startup from widget initial config plus relevant
+  problem/script defaults
+- not all article widgets need richer startup payload
+- startup payload should stay separate from the abstract journey family it
+  serves
+
+For the current article widgets, the intended direction is:
+
+- article widgets generally start in `reading-profile`
+- only widgets with richer startup payload should expose a startup affordance
+- pressing that startup affordance is a `Journey + Problem` action:
+  - it releases the initial startup payload
+  - it reveals quiet controls
+  - it transitions the widget into the next journey profile
+- for many article widgets, that next profile will be `story-viewing`
+- some article widgets may instead transition from `reading-profile` into
+  `puzzle-solving`; the `sd-puzzle` full-deal widget in `Gorillas` is the
+  clearest current example
+- once the startup affordance has been consumed, the exact transport behavior
+  depends on the resulting active profile and underlying problem mode/content
+  source
+
+This keeps the higher-level article journey consistent without requiring every
+article widget to carry the same startup payload.
+
 ## Action Taxonomy
 
 User actions should be understood as belonging to one of three categories.
@@ -234,8 +290,12 @@ These change the active posture and the underlying problem state together.
 
 Typical examples:
 
-- `Start` from `reading-profile`, when it both enters `story-viewing` and plays
-  the first card
+- startup release from `reading-profile`, when it transitions into the next
+  journey profile and consumes initial startup payload
+- for many article widgets, this means entering `story-viewing` and playing the
+  first card
+- for some widgets, such as the `Gorillas` `sd-puzzle` full deal, this may mean
+  entering `puzzle-solving` while also consuming an opening sequence
 - any future solution-entry action that both changes profile and immediately
   advances guided play
 
@@ -372,11 +432,11 @@ Current reality:
 
 - `widgetJourneyState.ts` provides a thin resolved journey view
 - snapshot carries a small explicit `journey` block
-- `reading-profile` behavior is still only partially represented as a first-
-  class profile in code
+- `reading-profile` is now first-class in the Journey resolver/runtime/snapshot
+  path, but not yet in the broader global script/practice profile model
 - transport semantics are increasingly profile-driven
-- journey-changing actions and startup behavior are still partly smeared across
-  session and `main.ts`
+- startup mediation and journey-changing actions are still only partially
+  extracted, with significant wiring still in `main.ts`
 
 So the contract is ahead of the implementation, but not disconnected from it.
 

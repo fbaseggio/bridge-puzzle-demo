@@ -137,6 +137,12 @@ import {
   setWidgetJourneyRuntimeStartupGatePhase
 } from './widgetJourneyRuntimeState';
 import {
+  resolveWidgetJourneyStartupAffordanceLabel,
+  resolveWidgetJourneyStartupReleaseRevealStage,
+  resolveWidgetJourneyRicherStartupPayload,
+  resolveWidgetJourneyStartupReleaseProfile
+} from './widgetJourneyState';
+import {
   buildWidgetStateSnapshotPermalink,
   readWidgetStateSnapshotFromHash
 } from './widgetStateSnapshotUrl';
@@ -502,6 +508,19 @@ function startupOpeningForProblem(problem: ProblemWithThreats): CardId[] {
   return scripted.flatMap((trick) => trick);
 }
 
+function currentWidgetStartupOpeningLength(): number {
+  return startupOpeningForProblem(currentProblem).length;
+}
+
+function widgetJourneyHasRicherStartupPayload(): boolean {
+  return resolveWidgetJourneyRicherStartupPayload({
+    articleScriptModeEnabled: articleScriptModeEnabled(),
+    articleScriptCheckpointId: articleScriptState?.checkpointId ?? null,
+    startupGateEnabledFromUrl,
+    startupOpeningLength: currentWidgetStartupOpeningLength()
+  });
+}
+
 function articleScriptModeEnabled(): boolean {
   return articleScriptCoordinator.articleScriptModeEnabled();
 }
@@ -602,6 +621,16 @@ function articleScriptIsStoryViewing(): boolean {
 
 function syncWidgetJourneyRuntimeActiveProfile(): void {
   const scripted = articleScriptModeEnabled();
+  const preserveReadingStartupPosture = (
+    scripted
+    && widgetJourneyRuntimeState.activeInteractionProfile === 'reading-profile'
+    && widgetJourneyStartPending()
+    && widgetJourneyHasRicherStartupPayload()
+  );
+  if (preserveReadingStartupPosture) {
+    setWidgetJourneyRuntimeActiveInteractionProfile(widgetJourneyRuntimeState, 'reading-profile');
+    return;
+  }
   if (scripted) {
     setWidgetJourneyRuntimeActiveInteractionProfile(
       widgetJourneyRuntimeState,
@@ -623,6 +652,15 @@ function currentWidgetJourneyState() {
     displayMode,
     widgetReadingProfileEnabledFromUrl,
     articleScriptModeEnabled: scripted
+  });
+}
+
+function currentWidgetStartupReleaseProfile(): InteractionProfile | null {
+  return resolveWidgetJourneyStartupReleaseProfile({
+    currentActiveProfile: widgetJourneyRuntimeState.activeInteractionProfile,
+    articleScriptModeEnabled: articleScriptModeEnabled(),
+    articleScriptInteractionProfile: articleScriptModeEnabled() ? currentArticleScriptInteractionProfileInputSource() : null,
+    startupProblemId: currentProblemId
   });
 }
 
@@ -651,6 +689,7 @@ function recomputeWidgetJourneyStartupGatePhase(options: { skipStartupGate?: boo
     resolveWidgetJourneyStartupGatePhase({
       startupGateEnabledFromUrl,
       journey: currentWidgetJourneyState(),
+      hasRicherStartupPayload: widgetJourneyHasRicherStartupPayload(),
       skipStartupGate: options.skipStartupGate
     })
   );
@@ -1076,8 +1115,10 @@ const widgetJourneyRuntimeState = createWidgetJourneyRuntimeState({
   displayMode,
   widgetReadingProfileEnabledFromUrl,
   articleScriptModeEnabled: articleScriptModeEnabled(),
+  articleScriptCheckpointId: articleScriptState?.checkpointId ?? null,
   articleScriptInteractionProfile: articleScriptModeEnabled() ? currentArticleScriptInteractionProfileInputSource() : null,
-  startupGateEnabledFromUrl
+  startupGateEnabledFromUrl,
+  startupOpeningLength: currentWidgetStartupOpeningLength()
 });
 
 let trickFrozen = false;
@@ -5336,6 +5377,59 @@ function createSuitGlyph(suit: Suit, extraClass = ''): HTMLSpanElement {
   return suitEl;
 }
 
+function narrationSuitFromGlyph(glyph: string): Suit | null {
+  if (glyph === '♠') return 'S';
+  if (glyph === '♥') return 'H';
+  if (glyph === '♦') return 'D';
+  if (glyph === '♣') return 'C';
+  return null;
+}
+
+function narrationRankFromText(rankText: string): Rank | null {
+  if (rankText === '10') return 'T';
+  if (rankOrder.includes(rankText as Rank)) return rankText as Rank;
+  return null;
+}
+
+function renderNarrationBubbleContent(text: string): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  const cardPattern = /(♠|♥|♦|♣)(10|[AKQJT2-9])/g;
+  const lines = text.split('\n');
+
+  for (const [lineIndex, line] of lines.entries()) {
+    if (lineIndex > 0) fragment.appendChild(document.createElement('br'));
+    let cursor = 0;
+    for (const match of line.matchAll(cardPattern)) {
+      const full = match[0];
+      const suitGlyphToken = match[1];
+      const rankToken = match[2];
+      if (!full || !suitGlyphToken || !rankToken) continue;
+      const start = match.index ?? 0;
+      if (start > cursor) fragment.appendChild(document.createTextNode(line.slice(cursor, start)));
+
+      const suit = narrationSuitFromGlyph(suitGlyphToken);
+      const rank = narrationRankFromText(rankToken);
+      if (!suit || !rank) {
+        fragment.appendChild(document.createTextNode(full));
+      } else {
+        const cardId = `${suit}${rank}` as CardId;
+        const token = renderCardToken(cardId, {
+          context: 'inline-card',
+          mode: 'base',
+          className: 'narration-card-token',
+          tenDisplay: rankToken === '10' ? '10' : undefined
+        });
+        fragment.appendChild(token);
+      }
+
+      cursor = start + full.length;
+    }
+    if (cursor < line.length) fragment.appendChild(document.createTextNode(line.slice(cursor)));
+  }
+
+  return fragment;
+}
+
 function renderSeatHand(view: State, seat: Seat): HTMLElement {
   const card = document.createElement('section');
   const active = view.turn === seat;
@@ -5361,7 +5455,7 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
     if (entry?.text) {
       const bubble = document.createElement('aside');
       bubble.className = `narration-bubble seat-${seat}${handDiagramSession.narrationLatest?.seq === entry.seq ? ' is-latest' : ' is-stale'}`;
-      bubble.textContent = entry.text;
+      bubble.appendChild(renderNarrationBubbleContent(entry.text));
       card.appendChild(bubble);
     }
   }
@@ -6056,13 +6150,14 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
     const startBtn = document.createElement('button');
     startBtn.type = 'button';
     const readingStartup = readingStoryJourneyEnabled();
+    const startupLabel = resolveWidgetJourneyStartupAffordanceLabel(currentWidgetStartupReleaseProfile());
     startBtn.className = `start-overlay-btn${readingStartup ? ' reading-start-overlay-btn' : ''}`;
     if (readingStartup) {
       startBtn.appendChild(renderLucideIcon('chevron-right', 'start-overlay-icon'));
-      startBtn.title = 'Start story';
-      startBtn.setAttribute('aria-label', 'Start story');
+      startBtn.title = startupLabel;
+      startBtn.setAttribute('aria-label', startupLabel);
     } else {
-      startBtn.textContent = 'Start';
+      startBtn.textContent = startupLabel;
     }
     startBtn.onclick = () => {
       dismissTransientWidgetOutcome(currentViewState());
@@ -7146,17 +7241,30 @@ function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void 
   if (!widgetJourneyStartPending()) return;
   const startupOpening = startupOpeningForProblem(currentProblem);
   const singleStep = mode === 'single-step';
+  const startupReleaseProfile = currentWidgetStartupReleaseProfile();
+  const startedFromReadingProfile = widgetJourneyRuntimeState.activeInteractionProfile === 'reading-profile';
+  const releaseStartupJourney = (): void => {
+    setWidgetJourneyStartPending(false);
+    setReadingControlsRevealStage(
+      handDiagramSession,
+      resolveWidgetJourneyStartupReleaseRevealStage({
+        startedFromReadingProfile,
+        currentRevealStage: handDiagramSession.readingControlsRevealStage
+      })
+    );
+    setWidgetJourneyRuntimeActiveInteractionProfile(widgetJourneyRuntimeState, startupReleaseProfile);
+  };
   if (articleScriptModeEnabled()) {
     const transportResult = createArticleScriptWidgetTransportDriver().start({
       startupMode: mode
     });
-    if (transportResult.outcome === 'noop') setWidgetJourneyStartPending(false);
+    releaseStartupJourney();
     applyArticleScriptWidgetTransportEffects(transportResult.effects);
     render();
     return;
   }
 
-  setWidgetJourneyStartPending(false);
+  releaseStartupJourney();
   if (startupOpening.length === 0) {
     if (singleStep) {
       const moved = advanceOneWidgetCard();

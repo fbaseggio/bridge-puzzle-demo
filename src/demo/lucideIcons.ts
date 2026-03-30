@@ -5,6 +5,7 @@ export type DemoLucideIconName =
   | 'chevrons-down'
   | 'chevrons-right'
   | 'sliders-horizontal'
+  | 'file-terminal'
   | 'lightbulb'
   | 'move-up-right'
   | 'ellipsis';
@@ -59,6 +60,12 @@ export function renderLucideIcon(iconName: DemoLucideIconName, className?: strin
       append('circle', { cx: '12', cy: '4', r: '2' });
       append('circle', { cx: '10', cy: '12', r: '2' });
       append('circle', { cx: '14', cy: '20', r: '2' });
+      break;
+    case 'file-terminal':
+      append('path', { d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' });
+      append('path', { d: 'M14 2v6h6' });
+      append('path', { d: 'm8 14 2 2-2 2' });
+      append('path', { d: 'M12 18h4' });
       break;
     case 'lightbulb':
       append('path', { d: 'M15.09 14.37a5 5 0 1 0-6.18 0A7 7 0 0 1 12 20a7 7 0 0 1 3.09-5.63' });

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  resolveWidgetJourneyStartupAffordanceLabel,
+  resolveWidgetJourneyStartupReleaseProfile,
+  resolveWidgetJourneyStartupReleaseRevealStage,
   resolveWidgetJourneyState,
   resolveWidgetStartupGatePending
 } from '../../src/demo/widgetJourneyState';
@@ -35,7 +38,7 @@ describe('widgetJourneyState', () => {
     });
   });
 
-  it('resolves non-story article widget posture without reading startup bias', () => {
+  it('prioritizes reading-profile posture over script profile when reading startup is enabled', () => {
     expect(
       resolveWidgetJourneyState({
         displayMode: 'widget',
@@ -44,9 +47,9 @@ describe('widgetJourneyState', () => {
         articleScriptInteractionProfile: 'puzzle-solving'
       })
     ).toEqual({
-      activeInteractionProfile: 'puzzle-solving',
-      readingRevealEnabled: false,
-      startupBias: 'none'
+      activeInteractionProfile: 'reading-profile',
+      readingRevealEnabled: true,
+      startupBias: 'url-reading-profile'
     });
   });
 
@@ -66,7 +69,13 @@ describe('widgetJourneyState', () => {
   });
 
   it('computes startup gate pending from startup config and resolved journey', () => {
-    const journey = resolveWidgetJourneyState({
+    const readingJourney = resolveWidgetJourneyState({
+      displayMode: 'widget',
+      widgetReadingProfileEnabledFromUrl: true,
+      articleScriptModeEnabled: true,
+      articleScriptInteractionProfile: 'story-viewing'
+    });
+    const storyJourney = resolveWidgetJourneyState({
       displayMode: 'widget',
       widgetReadingProfileEnabledFromUrl: false,
       articleScriptModeEnabled: true,
@@ -76,9 +85,18 @@ describe('widgetJourneyState', () => {
     expect(
       resolveWidgetStartupGatePending({
         startupGateEnabledFromUrl: false,
-        journey
+        journey: readingJourney,
+        hasRicherStartupPayload: true
       })
     ).toBe(true);
+
+    expect(
+      resolveWidgetStartupGatePending({
+        startupGateEnabledFromUrl: false,
+        journey: storyJourney,
+        hasRicherStartupPayload: true
+      })
+    ).toBe(false);
 
     expect(
       resolveWidgetStartupGatePending({
@@ -87,16 +105,81 @@ describe('widgetJourneyState', () => {
           activeInteractionProfile: null,
           readingRevealEnabled: false,
           startupBias: 'none'
-        }
+        },
+        hasRicherStartupPayload: true
       })
     ).toBe(true);
 
     expect(
       resolveWidgetStartupGatePending({
         startupGateEnabledFromUrl: true,
-        journey,
+        journey: readingJourney,
+        hasRicherStartupPayload: true,
         skipStartupGate: true
       })
     ).toBe(false);
+
+    expect(
+      resolveWidgetStartupGatePending({
+        startupGateEnabledFromUrl: false,
+        journey: readingJourney,
+        hasRicherStartupPayload: false
+      })
+    ).toBe(false);
+  });
+
+  it('maps startup release destination for story-script, ruff rich-start, and gorillas rich-start widgets', () => {
+    expect(
+      resolveWidgetJourneyStartupReleaseProfile({
+        currentActiveProfile: 'reading-profile',
+        articleScriptModeEnabled: true,
+        articleScriptInteractionProfile: 'story-viewing',
+        startupProblemId: 'experimental_draft_01'
+      })
+    ).toBe('story-viewing');
+
+    expect(
+      resolveWidgetJourneyStartupReleaseProfile({
+        currentActiveProfile: 'reading-profile',
+        articleScriptModeEnabled: false,
+        articleScriptInteractionProfile: null,
+        startupProblemId: 'ruff_or_sluff_02'
+      })
+    ).toBe('story-viewing');
+
+    expect(
+      resolveWidgetJourneyStartupReleaseProfile({
+        currentActiveProfile: 'reading-profile',
+        articleScriptModeEnabled: false,
+        articleScriptInteractionProfile: null,
+        startupProblemId: 'gorillas_full_deal'
+      })
+    ).toBe('puzzle-solving');
+  });
+
+  it('derives startup affordance labels from startup destination profile', () => {
+    expect(resolveWidgetJourneyStartupAffordanceLabel('story-viewing')).toBe('Start Story');
+    expect(resolveWidgetJourneyStartupAffordanceLabel('puzzle-solving')).toBe('Start Puzzle');
+  });
+
+  it('normalizes startup release from reading-profile to quiet controls', () => {
+    expect(
+      resolveWidgetJourneyStartupReleaseRevealStage({
+        startedFromReadingProfile: true,
+        currentRevealStage: 'full'
+      })
+    ).toBe('quiet');
+    expect(
+      resolveWidgetJourneyStartupReleaseRevealStage({
+        startedFromReadingProfile: true,
+        currentRevealStage: 'collapsed'
+      })
+    ).toBe('quiet');
+    expect(
+      resolveWidgetJourneyStartupReleaseRevealStage({
+        startedFromReadingProfile: false,
+        currentRevealStage: 'full'
+      })
+    ).toBe('full');
   });
 });
