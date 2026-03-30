@@ -17,6 +17,7 @@ import {
   createArticleScriptWidgetTransport,
   type ArticleScriptWidgetTransportSnapshot
 } from '../../src/demo/articleScriptWidgetTransport';
+import { shouldRenderForWidgetTransportOutcome } from '../../src/demo/widgetTransportRenderScheduling';
 import {
   applyArticleScriptWidgetActionCore,
   type ArticleScriptWidgetAction,
@@ -452,5 +453,33 @@ describe('articleScriptWidgetTransport (transport-authoritative)', () => {
     expect(pausedAtBoundary.steps.length).toBeGreaterThan(1);
     expect(harness.current().progression.cursor).toBe(4);
     expect(harness.current().progression.history.slice(0, 4)).toEqual(['S7', 'SA', 'S6', 'S5']);
+  });
+
+  it('schedules repaint when VSC next advances immediately after start', () => {
+    const harness = createTransportHarness({
+      spec: experimentalDraftIntroScript,
+      problem: experimentalDraft01,
+      seed: 1975,
+      startupOpeningLength: 24,
+      interactionProfile: 'story-viewing',
+      startupGatePhase: 'pending',
+      readingRevealEnabled: true,
+      readingControlsRevealStage: 'collapsed',
+      checkpointId: '1',
+      cursor: 0,
+      history: []
+    });
+
+    const started = harness.transport.start({ startupMode: 'single-step' });
+    expect(started.outcome).toBe('advanced');
+    expect(harness.current().progression.cursor).toBe(1);
+
+    let repaintCount = 0;
+    const next = harness.transport.next();
+    if (shouldRenderForWidgetTransportOutcome(next.outcome)) repaintCount += 1;
+
+    expect(next.outcome).toBe('advanced');
+    expect(harness.current().progression.cursor).toBe(2);
+    expect(repaintCount).toBe(1);
   });
 });

@@ -145,6 +145,7 @@ import {
   createArticleScriptWidgetTransport,
   type ArticleScriptWidgetTransportEffect
 } from './articleScriptWidgetTransport';
+import { shouldRenderForWidgetTransportOutcome } from './widgetTransportRenderScheduling';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -2340,7 +2341,7 @@ function performWidgetNextTransportAction(options: { renderOnPause?: boolean } =
     const transportResult = createArticleScriptWidgetTransportDriver().next();
     if (transportResult.outcome !== 'noop') {
       applyArticleScriptWidgetTransportEffects(transportResult.effects);
-      if (transportResult.outcome === 'paused' && renderOnPause) render();
+      if (shouldRenderForWidgetTransportOutcome(transportResult.outcome, { renderOnPause })) render();
       return transportResult.outcome;
     }
   }
