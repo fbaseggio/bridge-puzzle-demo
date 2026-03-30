@@ -129,9 +129,13 @@ import {
   type WidgetStateSnapshotV1
 } from './widgetStateSnapshot';
 import {
-  resolveWidgetJourneyState,
-  resolveWidgetStartupGatePending
-} from './widgetJourneyState';
+  createWidgetJourneyRuntimeState,
+  isWidgetJourneyRuntimeStartupGatePending,
+  resolveWidgetJourneyStartupGatePhase,
+  resolveWidgetJourneyStateFromRuntime,
+  setWidgetJourneyRuntimeActiveInteractionProfile,
+  setWidgetJourneyRuntimeStartupGatePhase
+} from './widgetJourneyRuntimeState';
 import {
   buildWidgetStateSnapshotPermalink,
   readWidgetStateSnapshotFromHash
@@ -590,18 +594,53 @@ function articleScriptIsStoryViewing(): boolean {
   return articleScriptCoordinator.articleScriptIsStoryViewing();
 }
 
+function syncWidgetJourneyRuntimeActiveProfile(): void {
+  const scripted = articleScriptModeEnabled();
+  setWidgetJourneyRuntimeActiveInteractionProfile(
+    widgetJourneyRuntimeState,
+    scripted ? currentArticleScriptInteractionProfile() : null
+  );
+}
+
 function currentWidgetJourneyState() {
   const scripted = articleScriptModeEnabled();
-  return resolveWidgetJourneyState({
+  syncWidgetJourneyRuntimeActiveProfile();
+  return resolveWidgetJourneyStateFromRuntime({
+    runtime: widgetJourneyRuntimeState,
     displayMode,
     widgetReadingProfileEnabledFromUrl,
-    articleScriptModeEnabled: scripted,
-    articleScriptInteractionProfile: scripted ? currentArticleScriptInteractionProfile() : null
+    articleScriptModeEnabled: scripted
   });
 }
 
 function readingStoryJourneyEnabled(): boolean {
   return currentWidgetJourneyState().readingRevealEnabled;
+}
+
+function currentWidgetJourneyStartupGatePhase(): 'pending' | 'started' {
+  return widgetJourneyRuntimeState.startupGatePhase;
+}
+
+function widgetJourneyStartPending(): boolean {
+  return isWidgetJourneyRuntimeStartupGatePending(widgetJourneyRuntimeState);
+}
+
+function setWidgetJourneyStartPending(pending: boolean): void {
+  setWidgetJourneyRuntimeStartupGatePhase(
+    widgetJourneyRuntimeState,
+    pending ? 'pending' : 'started'
+  );
+}
+
+function recomputeWidgetJourneyStartupGatePhase(options: { skipStartupGate?: boolean } = {}): void {
+  setWidgetJourneyRuntimeStartupGatePhase(
+    widgetJourneyRuntimeState,
+    resolveWidgetJourneyStartupGatePhase({
+      startupGateEnabledFromUrl,
+      journey: currentWidgetJourneyState(),
+      skipStartupGate: options.skipStartupGate
+    })
+  );
 }
 
 function currentPracticeInteractionProfile(): PracticeInteractionProfile {
@@ -635,6 +674,7 @@ function applyArticleScriptInteractionProfileDefaults(profile: InteractionProfil
 
 function setCurrentArticleScriptInteractionProfile(profile: InteractionProfile, options: { applyDefaults?: boolean } = {}): void {
   articleScriptCoordinator.setCurrentArticleScriptInteractionProfile(profile, options);
+  syncWidgetJourneyRuntimeActiveProfile();
 }
 
 function applyArticleScriptPlayStepFeedbackAtCursor(cursor: number, playedCardId: CardId): void {
@@ -743,7 +783,7 @@ function planArticleScriptWidgetAction(
   return applyArticleScriptWidgetActionCore({
     action,
     state: {
-      startupGatePhase: startPending ? 'pending' : 'started',
+      startupGatePhase: currentWidgetJourneyStartupGatePhase(),
       readingRevealEnabled: currentWidgetJourneyState().readingRevealEnabled,
       readingControlsRevealStage: handDiagramSession.readingControlsRevealStage,
       checkpointId: scriptState.checkpointId,
@@ -777,7 +817,7 @@ function applyPlannedArticleScriptCoreResult(planned: ReturnType<typeof planArti
     const scriptState = articleScriptCoordinator.getArticleScriptState();
     return scriptState?.cursor ?? 0;
   }
-  startPending = planned.nextState.startupGatePhase === 'pending';
+  setWidgetJourneyRuntimeStartupGatePhase(widgetJourneyRuntimeState, planned.nextState.startupGatePhase);
   if (handDiagramSession.readingControlsRevealStage !== planned.nextState.readingControlsRevealStage) {
     setReadingControlsRevealStage(handDiagramSession, planned.nextState.readingControlsRevealStage);
   }
@@ -1015,9 +1055,12 @@ let singletonAutoplayTimer: ReturnType<typeof setTimeout> | null = null;
 let singletonAutoplayKey: string | null = null;
 let widgetCompanionFutureTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 let renderingNow = false;
-let startPending = resolveWidgetStartupGatePending({
-  startupGateEnabledFromUrl,
-  journey: currentWidgetJourneyState()
+const widgetJourneyRuntimeState = createWidgetJourneyRuntimeState({
+  displayMode,
+  widgetReadingProfileEnabledFromUrl,
+  articleScriptModeEnabled: articleScriptModeEnabled(),
+  articleScriptInteractionProfile: articleScriptModeEnabled() ? currentArticleScriptInteractionProfile() : null,
+  startupGateEnabledFromUrl
 });
 
 let trickFrozen = false;
@@ -4543,11 +4586,7 @@ function resetGame(seed: number, reason: string, options: ResetGameOptions = {})
     resetWidgetReadingControlsReveal();
   }
   inversePrimaryBySuit = {};
-  startPending = resolveWidgetStartupGatePending({
-    startupGateEnabledFromUrl,
-    journey: currentWidgetJourneyState(),
-    skipStartupGate: options.skipStartupGate
-  });
+  recomputeWidgetJourneyStartupGatePhase({ skipStartupGate: options.skipStartupGate });
   if (practiceSession) beginPracticeRun(practiceSession.interactionProfile);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -4602,10 +4641,7 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   clearHint();
   clearTeachingEvents();
   inversePrimaryBySuit = {};
-  startPending = resolveWidgetStartupGatePending({
-    startupGateEnabledFromUrl,
-    journey: currentWidgetJourneyState()
-  });
+  recomputeWidgetJourneyStartupGatePhase();
   if (practiceSession) beginPracticeRun(practiceSession.interactionProfile);
   rebuildUserEqClassMapping(state);
   resetDefenderEqInitSnapshot();
@@ -5313,7 +5349,7 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
     }
   }
 
-  const startBlocked = startPending && !trickFrozen;
+  const startBlocked = widgetJourneyStartPending() && !trickFrozen;
   const legal = !trickFrozen && !startBlocked && active ? legalPlays(view) : [];
   const legalSet = new Set(legal.map((p) => `${p.suit}${p.rank}`));
   const canAct = !trickFrozen && !startBlocked && view.phase !== 'end' && view.userControls.includes(seat) && active;
@@ -5961,7 +5997,7 @@ function applyUnknownSlashLinePlacement(tableCanvas: HTMLElement): void {
 
 function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
   const table = document.createElement('section');
-  const hideTrickVisual = visuallyHidden && !startPending;
+  const hideTrickVisual = visuallyHidden && !widgetJourneyStartPending();
   table.className = `trick-table${trickFrozen ? ' frozen' : ''}${hideTrickVisual ? ' reading-hidden' : ''}`;
   if (trickFrozen) {
     if (!isWidgetShellMode) {
@@ -5999,7 +6035,7 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
     table.appendChild(slot);
   }
 
-  if (startPending && !trickFrozen && sourceTrick.length === 0 && view.phase !== 'end') {
+  if (widgetJourneyStartPending() && !trickFrozen && sourceTrick.length === 0 && view.phase !== 'end') {
     const startBtn = document.createElement('button');
     startBtn.type = 'button';
     const readingStartup = readingStoryJourneyEnabled();
@@ -6501,7 +6537,7 @@ function captureCurrentWidgetStateSnapshot() {
     scriptedOpening: startupOpeningForProblem(currentProblem),
     articleScriptState,
     activeInteractionProfile: journey.activeInteractionProfile,
-    startupGatePhase: startPending ? 'pending' : 'started',
+    startupGatePhase: currentWidgetJourneyStartupGatePhase(),
     assistLevelByPuzzleMode: assistLevelByMode,
     overrideToggles: {
       alwaysHint,
@@ -6893,7 +6929,7 @@ function render(): void {
     currentArticleScriptStatusMessage,
     withHintPrompt,
     seatName,
-    startPending,
+    startPending: widgetJourneyStartPending(),
     renderSettingsButton,
     articleScriptIsStoryViewing,
     resolvePreviousArticleScriptLandmarkCursor,
@@ -7077,6 +7113,7 @@ function applyInitialWidgetSnapshotRestore(snapshot: WidgetStateSnapshotV1): voi
         : scriptSnapshot.interactionProfileOverride;
     replayArticleScriptToCursor(clampedCursor);
   }
+  syncWidgetJourneyRuntimeActiveProfile();
 
   setReadingControlsRevealStage(handDiagramSession, snapshot.chrome.readingControlsRevealStage);
   handDiagramSession.readingQuietControlsEntered = snapshot.chrome.readingControlsRevealStage !== 'collapsed';
@@ -7085,24 +7122,24 @@ function applyInitialWidgetSnapshotRestore(snapshot: WidgetStateSnapshotV1): voi
       ? false
       : snapshot.chrome.readingInteractionStarted;
 
-  startPending = snapshot.journey.startupGatePhase === 'pending';
+  setWidgetJourneyRuntimeStartupGatePhase(widgetJourneyRuntimeState, snapshot.journey.startupGatePhase);
 }
 
 function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void {
-  if (!startPending) return;
+  if (!widgetJourneyStartPending()) return;
   const startupOpening = startupOpeningForProblem(currentProblem);
   const singleStep = mode === 'single-step';
   if (articleScriptModeEnabled()) {
     const transportResult = createArticleScriptWidgetTransportDriver().start({
       startupMode: mode
     });
-    if (transportResult.outcome === 'noop') startPending = false;
+    if (transportResult.outcome === 'noop') setWidgetJourneyStartPending(false);
     applyArticleScriptWidgetTransportEffects(transportResult.effects);
     render();
     return;
   }
 
-  startPending = false;
+  setWidgetJourneyStartPending(false);
   if (startupOpening.length === 0) {
     if (singleStep) {
       const moved = advanceOneWidgetCard();

@@ -134,6 +134,7 @@ semantics.
 
 Examples:
 
+- `reading-profile`
 - `story-viewing`
 - `puzzle-solving`
 - `solution-viewing`
@@ -156,6 +157,13 @@ Instead:
 
 This is the most important relationship in this contract.
 
+`reading-profile` should still be treated as a real profile, even though it is
+lighter-weight and more display-heavy than the others.
+
+It often serves as the initial posture in a journey, especially for article
+widgets, and it changes the interaction contract enough to deserve explicit
+status rather than being treated as only a collection of chrome flags.
+
 ## Intended Journeys
 
 The project should aim for a small number of reusable journeys, not one
@@ -165,16 +173,23 @@ Current likely journeys are:
 
 ### Reading to story
 
-- start in reading posture
+- start in `reading-profile`
 - reveal controls quietly
-- transition into story-following
+- transition into `story-viewing`
 - transport then behaves according to `story-viewing`
+
+This is likely the most common article-widget journey.
 
 ### Puzzle-solving to solution-viewing
 
-- start in puzzle-solving posture
-- user may explicitly enter solution-viewing
+- start in `puzzle-solving`
+- user may explicitly enter `solution-viewing`
 - transport then behaves according to `solution-viewing`
+
+Some experiences may also begin in `reading-profile` and then transition into
+`puzzle-solving`, but that should be treated as a reuse of a small number of
+journey patterns rather than a reason to invent article-specific startup
+behavior.
 
 ### Possible later exploration/open-play journey
 
@@ -196,8 +211,8 @@ These change the problem state while journey/profile remain stable.
 
 Typical examples:
 
-- most `>` clicks while already inside a stable profile
-- most `>>|` clicks while already inside a stable profile
+- most `>` clicks while already inside a stable active profile
+- most `>>|` clicks while already inside a stable active profile
 - choosing an explicit branch option without changing overall posture
 
 ### Journey-only actions
@@ -209,7 +224,9 @@ Typical examples:
 
 - opening quiet controls
 - opening fuller controls
-- entering a solution posture if that entry action does not itself advance play
+- transitioning from `reading-profile` to a fuller control posture without
+  advancing the underlying problem
+- entering `solution-viewing` if that entry action does not itself advance play
 
 ### Journey + problem actions
 
@@ -217,7 +234,7 @@ These change the active posture and the underlying problem state together.
 
 Typical examples:
 
-- `Start` from reading posture, when it both enters story-following and plays
+- `Start` from `reading-profile`, when it both enters `story-viewing` and plays
   the first card
 - any future solution-entry action that both changes profile and immediately
   advances guided play
@@ -236,6 +253,8 @@ Journey state likely includes:
 - active interaction profile
 - startup gate phase
 - startup bias/source
+- whether the widget is still in its initial `reading-profile` posture or has
+  already transitioned out of it
 - whether the user has departed the initial posture in a meaningful way
 
 ### Problem state
@@ -353,6 +372,8 @@ Current reality:
 
 - `widgetJourneyState.ts` provides a thin resolved journey view
 - snapshot carries a small explicit `journey` block
+- `reading-profile` behavior is still only partially represented as a first-
+  class profile in code
 - transport semantics are increasingly profile-driven
 - journey-changing actions and startup behavior are still partly smeared across
   session and `main.ts`
