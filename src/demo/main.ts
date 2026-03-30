@@ -586,6 +586,12 @@ function currentArticleScriptResolvedBranchName(): string {
   return articleScriptCoordinator.currentArticleScriptResolvedBranchName();
 }
 
+function currentArticleScriptInteractionProfileInputSource(): InteractionProfile {
+  const scriptState = articleScriptCoordinator.getArticleScriptState();
+  if (!scriptState) return 'puzzle-solving';
+  return scriptState.interactionProfileOverride ?? scriptState.spec.interactionProfile;
+}
+
 function currentArticleScriptInteractionProfile(): InteractionProfile {
   return articleScriptCoordinator.currentArticleScriptInteractionProfile();
 }
@@ -596,15 +602,22 @@ function articleScriptIsStoryViewing(): boolean {
 
 function syncWidgetJourneyRuntimeActiveProfile(): void {
   const scripted = articleScriptModeEnabled();
-  setWidgetJourneyRuntimeActiveInteractionProfile(
-    widgetJourneyRuntimeState,
-    scripted ? currentArticleScriptInteractionProfile() : null
-  );
+  if (scripted) {
+    setWidgetJourneyRuntimeActiveInteractionProfile(
+      widgetJourneyRuntimeState,
+      currentArticleScriptInteractionProfileInputSource()
+    );
+    return;
+  }
+  if (displayMode === 'widget' && widgetReadingProfileEnabledFromUrl) {
+    setWidgetJourneyRuntimeActiveInteractionProfile(widgetJourneyRuntimeState, 'reading-profile');
+    return;
+  }
+  setWidgetJourneyRuntimeActiveInteractionProfile(widgetJourneyRuntimeState, null);
 }
 
 function currentWidgetJourneyState() {
   const scripted = articleScriptModeEnabled();
-  syncWidgetJourneyRuntimeActiveProfile();
   return resolveWidgetJourneyStateFromRuntime({
     runtime: widgetJourneyRuntimeState,
     displayMode,
@@ -999,7 +1012,11 @@ const articleScriptCoordinator = createArticleScriptCoordinator({
   getWidgetCompanionPanelHidden: () => widgetCompanionPanelHidden,
   clearHint,
   chooseHintAdvanceCard,
-  applyArticleScriptInteractionProfileDefaults
+  applyArticleScriptInteractionProfileDefaults,
+  getActiveInteractionProfile: () => {
+    const activeProfile = widgetJourneyRuntimeState.activeInteractionProfile;
+    return activeProfile === 'reading-profile' ? null : activeProfile;
+  }
 });
 let alwaysHint = displayMode === 'widget';
 let cardColoringEnabled = true;
@@ -1059,7 +1076,7 @@ const widgetJourneyRuntimeState = createWidgetJourneyRuntimeState({
   displayMode,
   widgetReadingProfileEnabledFromUrl,
   articleScriptModeEnabled: articleScriptModeEnabled(),
-  articleScriptInteractionProfile: articleScriptModeEnabled() ? currentArticleScriptInteractionProfile() : null,
+  articleScriptInteractionProfile: articleScriptModeEnabled() ? currentArticleScriptInteractionProfileInputSource() : null,
   startupGateEnabledFromUrl
 });
 
@@ -7299,6 +7316,7 @@ function resetToCurrentArticleCheckpoint(): void {
   const scriptState = articleScriptCoordinator.getArticleScriptState();
   if (!scriptState) return;
   articleScriptCoordinator.resetToCurrentCheckpoint();
+  syncWidgetJourneyRuntimeActiveProfile();
   resetWidgetReadingControlsReveal();
   replayArticleScriptToCursor(scriptState.initialCursor);
 }
@@ -7307,6 +7325,7 @@ function resetCurrentArticleScriptToBeginning(): void {
   const scriptState = articleScriptCoordinator.getArticleScriptState();
   if (!scriptState) return;
   articleScriptCoordinator.resetToBeginning();
+  syncWidgetJourneyRuntimeActiveProfile();
   resetWidgetReadingControlsReveal();
   replayArticleScriptToCursor(scriptState.initialCursor);
 }

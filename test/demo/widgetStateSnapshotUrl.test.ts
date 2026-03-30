@@ -97,4 +97,20 @@ describe('widgetStateSnapshotUrl', () => {
     expect(url.hash).toContain('ws=');
     expect(readWidgetStateSnapshotFromHash(url.hash)).toEqual(snapshot);
   });
+
+  it('accepts reading-profile only on journey.activeInteractionProfile', () => {
+    const journeySnapshot = sampleSnapshot();
+    journeySnapshot.journey.activeInteractionProfile = 'reading-profile';
+    expect(decodeWidgetStateSnapshotPayload(encodeWidgetStateSnapshotPayload(journeySnapshot))).toEqual(journeySnapshot);
+
+    const invalidOverride = sampleSnapshot();
+    const payload = encodeWidgetStateSnapshotPayload({
+      ...invalidOverride,
+      articleScript: {
+        ...invalidOverride.articleScript!,
+        interactionProfileOverride: 'reading-profile' as any
+      }
+    });
+    expect(decodeWidgetStateSnapshotPayload(payload)).toBeNull();
+  });
 });

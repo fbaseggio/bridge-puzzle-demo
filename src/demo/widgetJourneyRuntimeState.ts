@@ -1,7 +1,9 @@
 import type { InteractionProfile } from './interactionProfiles';
 import {
+  isWidgetJourneyReadingRevealProfile,
   resolveWidgetJourneyState,
   resolveWidgetStartupGatePending,
+  type WidgetJourneyProfile,
   type WidgetJourneyStartupBias,
   type WidgetJourneyState
 } from './widgetJourneyState';
@@ -9,7 +11,7 @@ import {
 export type WidgetJourneyStartupGatePhase = 'pending' | 'started';
 
 export type WidgetJourneyRuntimeState = {
-  activeInteractionProfile: InteractionProfile | null;
+  activeInteractionProfile: WidgetJourneyProfile | null;
   startupGatePhase: WidgetJourneyStartupGatePhase;
   startupBias: WidgetJourneyStartupBias;
 };
@@ -75,25 +77,17 @@ export function resolveWidgetJourneyStateFromRuntime(
     };
   }
 
-  if (input.articleScriptModeEnabled) {
-    const activeProfile = input.runtime.activeInteractionProfile ?? 'puzzle-solving';
-    return {
-      activeInteractionProfile: activeProfile,
-      readingRevealEnabled: activeProfile === 'story-viewing',
-      startupBias: input.runtime.startupBias
-    };
-  }
-
+  const activeProfile = input.runtime.activeInteractionProfile;
   return {
-    activeInteractionProfile: null,
-    readingRevealEnabled: input.widgetReadingProfileEnabledFromUrl,
+    activeInteractionProfile: activeProfile,
+    readingRevealEnabled: isWidgetJourneyReadingRevealProfile(activeProfile),
     startupBias: input.runtime.startupBias
   };
 }
 
 export function setWidgetJourneyRuntimeActiveInteractionProfile(
   runtime: WidgetJourneyRuntimeState,
-  activeInteractionProfile: InteractionProfile | null
+  activeInteractionProfile: WidgetJourneyProfile | null
 ): void {
   runtime.activeInteractionProfile = activeInteractionProfile;
 }

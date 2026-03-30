@@ -88,4 +88,29 @@ describe('widgetJourneyRuntimeState', () => {
       })
     ).toBe('started');
   });
+
+  it('treats non-script reading as an explicit journey profile posture', () => {
+    const runtime = createWidgetJourneyRuntimeState({
+      displayMode: 'widget',
+      widgetReadingProfileEnabledFromUrl: true,
+      articleScriptModeEnabled: false,
+      articleScriptInteractionProfile: null,
+      startupGateEnabledFromUrl: false
+    });
+
+    expect(runtime.activeInteractionProfile).toBe('reading-profile');
+
+    const journey = resolveWidgetJourneyStateFromRuntime({
+      runtime,
+      displayMode: 'widget',
+      widgetReadingProfileEnabledFromUrl: true,
+      articleScriptModeEnabled: false
+    });
+
+    expect(journey).toEqual({
+      activeInteractionProfile: 'reading-profile',
+      readingRevealEnabled: true,
+      startupBias: 'url-reading-profile'
+    });
+  });
 });

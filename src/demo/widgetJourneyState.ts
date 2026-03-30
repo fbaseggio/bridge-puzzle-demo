@@ -1,9 +1,10 @@
 import type { InteractionProfile } from './interactionProfiles';
 
 export type WidgetJourneyStartupBias = 'none' | 'url-reading-profile' | 'article-story-profile';
+export type WidgetJourneyProfile = InteractionProfile | 'reading-profile';
 
 export type WidgetJourneyState = {
-  activeInteractionProfile: InteractionProfile | null;
+  activeInteractionProfile: WidgetJourneyProfile | null;
   readingRevealEnabled: boolean;
   startupBias: WidgetJourneyStartupBias;
 };
@@ -21,6 +22,12 @@ export type ResolveWidgetStartupGatePendingInput = {
   skipStartupGate?: boolean;
 };
 
+export function isWidgetJourneyReadingRevealProfile(
+  profile: WidgetJourneyProfile | null
+): boolean {
+  return profile === 'story-viewing' || profile === 'reading-profile';
+}
+
 export function resolveWidgetJourneyState(input: ResolveWidgetJourneyStateInput): WidgetJourneyState {
   if (input.displayMode !== 'widget') {
     return {
@@ -32,17 +39,19 @@ export function resolveWidgetJourneyState(input: ResolveWidgetJourneyStateInput)
 
   if (input.articleScriptModeEnabled) {
     const activeProfile = input.articleScriptInteractionProfile ?? 'puzzle-solving';
-    const storyProfile = activeProfile === 'story-viewing';
     return {
       activeInteractionProfile: activeProfile,
-      readingRevealEnabled: storyProfile,
-      startupBias: storyProfile ? 'article-story-profile' : 'none'
+      readingRevealEnabled: isWidgetJourneyReadingRevealProfile(activeProfile),
+      startupBias: activeProfile === 'story-viewing' ? 'article-story-profile' : 'none'
     };
   }
 
+  const activeProfile: WidgetJourneyProfile | null = input.widgetReadingProfileEnabledFromUrl
+    ? 'reading-profile'
+    : null;
   return {
-    activeInteractionProfile: null,
-    readingRevealEnabled: input.widgetReadingProfileEnabledFromUrl,
+    activeInteractionProfile: activeProfile,
+    readingRevealEnabled: isWidgetJourneyReadingRevealProfile(activeProfile),
     startupBias: input.widgetReadingProfileEnabledFromUrl ? 'url-reading-profile' : 'none'
   };
 }

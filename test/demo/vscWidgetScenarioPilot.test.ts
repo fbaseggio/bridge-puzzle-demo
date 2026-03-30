@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { resolveArticleScript } from '../../src/demo/articleScripts';
+import { demoProblems } from '../../src/demo/problems';
 import { resolveWidgetJourneyState, resolveWidgetStartupGatePending } from '../../src/demo/widgetJourneyState';
 import type { VscWidgetScenarioDefinition } from '../../src/demo/vscWidgetScenarioPilot';
 import {
@@ -35,6 +36,12 @@ function findWidgetEmbedUrl(
     if (predicate(url)) return url;
   }
   throw new Error(`No matching widget iframe found in ${articlePath}`);
+}
+
+function resolveProblemPagePath(problemId: string): string {
+  const entry = demoProblems.find((problem) => problem.id === problemId);
+  if (!entry?.articlePath) throw new Error(`No articlePath configured for demo problem '${problemId}'`);
+  return resolve(process.cwd(), entry.articlePath, 'index.html');
 }
 
 // Seam note:
@@ -102,7 +109,7 @@ const reviewScenarios: VscWidgetScenarioDefinition[] = [
 ];
 
 const reviewPermalinkArtifactPath = resolve(process.cwd(), 'tmp', 'vsc-widget-review-permalinks.txt');
-const vscArticlePath = resolve(process.cwd(), 'articles', 'experimental-draft', 'index.html');
+const vscArticlePath = resolveProblemPagePath('experimental_draft_01');
 
 describe('vscWidgetScenarioPilot baseline parity', () => {
   it('matches article embed baseline inputs and resolver-derived startup posture', () => {

@@ -156,6 +156,7 @@ function createCoordinatorHarness(args: {
   runStatus?: 'running' | 'success' | 'failure';
   widgetCompanionPanelEnabledFromUrl?: boolean;
   widgetCompanionPanelHidden?: boolean;
+  activeInteractionProfileOverride?: InteractionProfile | null;
 }) {
   const currentProblem: Problem & { threatCardIds?: CardId[] } = doubleDummy01;
   let currentState: State = init({ ...currentProblem, rngSeed: currentProblem.rngSeed >>> 0 });
@@ -164,6 +165,7 @@ function createCoordinatorHarness(args: {
   let currentAutoplayEw = true;
   let currentScriptState: ArticleScriptCoordinatorState | null = args.scriptState;
   let widgetCompanionPanelHidden = args.widgetCompanionPanelHidden ?? false;
+  let activeInteractionProfileOverride = args.activeInteractionProfileOverride ?? null;
   const appliedDefaults: InteractionProfile[] = [];
   let clearHintCalls = 0;
   const handDiagramSession = createHandDiagramSession();
@@ -190,7 +192,8 @@ function createCoordinatorHarness(args: {
     chooseHintAdvanceCard: (options) => options[0] ?? null,
     applyArticleScriptInteractionProfileDefaults: (profile) => {
       appliedDefaults.push(profile);
-    }
+    },
+    getActiveInteractionProfile: () => activeInteractionProfileOverride
   });
 
   return {
@@ -212,6 +215,9 @@ function createCoordinatorHarness(args: {
     },
     setWidgetCompanionPanelHidden: (next: boolean) => {
       widgetCompanionPanelHidden = next;
+    },
+    setActiveInteractionProfileOverride: (next: InteractionProfile | null) => {
+      activeInteractionProfileOverride = next;
     }
   };
 }
@@ -240,6 +246,27 @@ describe('article script coordinator', () => {
     expect(scriptState.interactionProfileOverride).toBeNull();
     expect(harness.handDiagramSession.followPromptCursor).toBeNull();
     expect(harness.appliedDefaults).toEqual(['puzzle-solving']);
+  });
+
+  it('prefers injected active profile for coordinator runtime reads', () => {
+    const scriptState = createScriptState({
+      spec: AUTHORED_EXPLICIT_SPEC,
+      history: ['SK'],
+      cursor: 1
+    });
+    const harness = createCoordinatorHarness({
+      scriptState,
+      activeInteractionProfileOverride: 'solution-viewing'
+    });
+
+    expect(harness.coordinator.currentArticleScriptInteractionProfile()).toBe('solution-viewing');
+
+    harness.coordinator.setCurrentArticleScriptInteractionProfile('puzzle-solving');
+    expect(scriptState.interactionProfileOverride).toBeNull();
+    expect(harness.coordinator.currentArticleScriptInteractionProfile()).toBe('solution-viewing');
+
+    harness.setActiveInteractionProfileOverride('puzzle-solving');
+    expect(harness.coordinator.currentArticleScriptInteractionProfile()).toBe('puzzle-solving');
   });
 
   it('applies valid explicit authored choices to history, cursor, selections, tried options, and message', () => {
@@ -372,6 +399,26 @@ describe('article script coordinator', () => {
     expect(harness.handDiagramSession.companionNarrativeActiveSegmentIds.has('win-sa')).toBe(true);
     expect(afterWin.content?.text).toContain('you win in dummy,');
     expect(afterWin.futureTransitioning).toBe(true);
+  });
+
+  it('gates companion narrative segments by injected active profile', () => {
+    const scriptState = createScriptState({
+      spec: STORY_NARRATIVE_SPEC,
+      history: ['S7', 'SA'],
+      cursor: 2
+    });
+    const harness = createCoordinatorHarness({
+      scriptState,
+      activeInteractionProfileOverride: 'puzzle-solving'
+    });
+
+    harness.coordinator.syncCompanionNarrativeForCursor(2);
+    expect(harness.handDiagramSession.companionNarrativeActiveSegmentIds.size).toBe(0);
+
+    harness.setActiveInteractionProfileOverride('story-viewing');
+    harness.coordinator.syncCompanionNarrativeForCursor(2);
+    expect(harness.handDiagramSession.companionNarrativeActiveSegmentIds.has('lead-s7')).toBe(true);
+    expect(harness.handDiagramSession.companionNarrativeActiveSegmentIds.has('win-sa')).toBe(true);
   });
 
   it('suppresses scripted feedback when applying plays from an off-script state', () => {

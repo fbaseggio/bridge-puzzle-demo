@@ -59,7 +59,7 @@ describe('widgetJourneyState', () => {
         articleScriptInteractionProfile: null
       })
     ).toEqual({
-      activeInteractionProfile: null,
+      activeInteractionProfile: 'reading-profile',
       readingRevealEnabled: true,
       startupBias: 'url-reading-profile'
     });

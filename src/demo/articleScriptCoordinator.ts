@@ -115,6 +115,7 @@ export type CreateArticleScriptCoordinatorDeps = {
   clearHint: () => void;
   chooseHintAdvanceCard: (options: CardId[]) => CardId | null;
   applyArticleScriptInteractionProfileDefaults: (profile: InteractionProfile) => void;
+  getActiveInteractionProfile?: () => InteractionProfile | null;
 };
 
 function rankStrengthForAdvance(rank: string): number {
@@ -553,6 +554,8 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
   }
 
   function currentArticleScriptInteractionProfile(): InteractionProfile {
+    const runtimeProfile = deps.getActiveInteractionProfile?.();
+    if (runtimeProfile) return runtimeProfile;
     const scriptState = stateRef();
     if (!scriptState) return 'puzzle-solving';
     return scriptState.interactionProfileOverride ?? scriptState.spec.interactionProfile;

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { resolveArticleScript } from '../../src/demo/articleScripts';
+import { demoProblems } from '../../src/demo/problems';
 import { resolveWidgetJourneyState, resolveWidgetStartupGatePending } from '../../src/demo/widgetJourneyState';
 import type { Dd1WidgetScenarioDefinition } from '../../src/demo/dd1WidgetScenarioPilot';
 import {
@@ -33,7 +34,13 @@ function findWidgetEmbedUrl(
   throw new Error(`No matching widget iframe found in ${articlePath}`);
 }
 
-const dd1ArticlePath = resolve(process.cwd(), 'articles', 'double-dummy-1', 'index.html');
+function resolveProblemPagePath(problemId: string): string {
+  const entry = demoProblems.find((problem) => problem.id === problemId);
+  if (!entry?.articlePath) throw new Error(`No articlePath configured for demo problem '${problemId}'`);
+  return resolve(process.cwd(), entry.articlePath, 'index.html');
+}
+
+const dd1ArticlePath = resolveProblemPagePath('double_dummy_01');
 const reviewPermalinkArtifactPath = resolve(process.cwd(), 'tmp', 'dd1-widget-review-permalinks.txt');
 
 // Seam note:

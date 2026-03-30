@@ -2,6 +2,7 @@ import type { CardId } from '../ai/threatModel';
 import type { ArticleScriptCoordinatorState } from './articleScriptCoordinator';
 import type { ReadingControlsRevealStage } from './handDiagramSession';
 import type { InteractionProfile } from './interactionProfiles';
+import type { WidgetJourneyProfile } from './widgetJourneyState';
 
 export type WidgetSnapshotDisplayMode = 'analysis' | 'widget' | 'practice';
 export type WidgetSnapshotUiMode = 'default' | 'dd-puzzle' | 'sd-puzzle';
@@ -34,7 +35,7 @@ export type WidgetStateSnapshotV1 = {
     interactionProfileOverride: InteractionProfile | null;
   };
   journey: {
-    activeInteractionProfile: InteractionProfile | null;
+    activeInteractionProfile: WidgetJourneyProfile | null;
     startupGatePhase: 'pending' | 'started';
     assistLevelByPuzzleMode: Record<string, string>;
     overrideToggles: {
@@ -64,7 +65,7 @@ export type CaptureWidgetStateSnapshotV1Input = {
   userHistory: CardId[];
   scriptedOpening: CardId[];
   articleScriptState: ArticleScriptCoordinatorState | null;
-  activeInteractionProfile: InteractionProfile | null;
+  activeInteractionProfile: WidgetJourneyProfile | null;
   startupGatePhase: 'pending' | 'started';
   assistLevelByPuzzleMode: Record<string, string>;
   overrideToggles: {

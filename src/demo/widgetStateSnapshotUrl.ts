@@ -1,4 +1,6 @@
 import { normalizeWidgetStateSnapshotV1, type WidgetStateSnapshotV1 } from './widgetStateSnapshot';
+import type { InteractionProfile } from './interactionProfiles';
+import type { WidgetJourneyProfile } from './widgetJourneyState';
 
 const SNAPSHOT_VERSION = 1;
 const CARD_ID_PATTERN = /^[SHDC](?:[2-9TJQKA])$/;
@@ -7,8 +9,15 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isInteractionProfile(value: unknown): value is 'story-viewing' | 'puzzle-solving' | 'solution-viewing' {
+function isScriptInteractionProfile(value: unknown): value is InteractionProfile {
   return value === 'story-viewing' || value === 'puzzle-solving' || value === 'solution-viewing';
+}
+
+function isWidgetJourneyProfile(value: unknown): value is WidgetJourneyProfile {
+  return value === 'story-viewing'
+    || value === 'puzzle-solving'
+    || value === 'solution-viewing'
+    || value === 'reading-profile';
 }
 
 function isCardId(value: unknown): value is string {
@@ -124,7 +133,12 @@ export function decodeWidgetStateSnapshotPayload(payload: string): WidgetStateSn
     if (!isCardIdArray(parsed.articleScript.history)) return null;
     const choiceSelections = normalizeChoiceSelectionRecord(parsed.articleScript.choiceSelections);
     if (!choiceSelections) return null;
-    if (!(parsed.articleScript.interactionProfileOverride === null || isInteractionProfile(parsed.articleScript.interactionProfileOverride))) {
+    if (
+      !(
+        parsed.articleScript.interactionProfileOverride === null
+        || isScriptInteractionProfile(parsed.articleScript.interactionProfileOverride)
+      )
+    ) {
       return null;
     }
     articleScript = {
@@ -139,7 +153,9 @@ export function decodeWidgetStateSnapshotPayload(payload: string): WidgetStateSn
   }
 
   if (!isPlainObject(parsed.journey)) return null;
-  if (!(parsed.journey.activeInteractionProfile === null || isInteractionProfile(parsed.journey.activeInteractionProfile))) return null;
+  if (!(parsed.journey.activeInteractionProfile === null || isWidgetJourneyProfile(parsed.journey.activeInteractionProfile))) {
+    return null;
+  }
   if (parsed.journey.startupGatePhase !== 'pending' && parsed.journey.startupGatePhase !== 'started') return null;
   const assistLevelByPuzzleMode = normalizeStringRecord(parsed.journey.assistLevelByPuzzleMode);
   if (!assistLevelByPuzzleMode) return null;
