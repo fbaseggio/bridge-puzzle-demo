@@ -118,7 +118,7 @@ export const demoProblems: DemoProblem[] = [
     label: 'double_dummy_01',
     problem: doubleDummy01,
     practiceEligible: false,
-    articlePath: 'articles/double-dummy-1/'
+    articlePath: 'puzzles/double-dummy-1/'
   },
   {
     id: 'squeeze_self_01',
@@ -126,9 +126,25 @@ export const demoProblems: DemoProblem[] = [
     problem: squeezeSelf01,
     articlePath: 'articles/squeeze-self/'
   },
-  { id: 'experimental_draft_01', label: 'experimental_draft_01', problem: experimentalDraft01, practiceEligible: false, articlePath: 'articles/experimental-draft/' },
-  { id: 'experimental_draft_01a', label: 'experimental_draft_01a', problem: experimentalDraft01a, practiceEligible: false },
-  { id: 'experimental_draft_01b', label: 'experimental_draft_01b', problem: experimentalDraft01b, practiceEligible: false },
+  {
+    id: 'experimental_draft_01',
+    label: 'Introduction to the Veering Squeeze Card',
+    problem: experimentalDraft01,
+    practiceEligible: false,
+    articlePath: 'articles/experimental-draft/'
+  },
+  {
+    id: 'experimental_draft_01a',
+    label: 'Introduction to the Veering Squeeze Card (1a)',
+    problem: experimentalDraft01a,
+    practiceEligible: false
+  },
+  {
+    id: 'experimental_draft_01b',
+    label: 'Introduction to the Veering Squeeze Card (1b)',
+    problem: experimentalDraft01b,
+    practiceEligible: false
+  },
   {
     id: 'sure_tricks_demo',
     label: 'Sure-tricks Demo',
@@ -138,7 +154,7 @@ export const demoProblems: DemoProblem[] = [
       { id: 'b', label: 'Version B', loadProblem: () => buildSureTricksDemoVariant('b') }
     ],
     defaultVariantId: 'a',
-    articlePath: 'articles/sure-tricks-demo/'
+    articlePath: 'puzzles/sure-tricks-demo/'
   },
   {
     id: 'sure_tricks_ruff_or_sluff_ending',

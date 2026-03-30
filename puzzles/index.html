@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DeepSqueeze</title>
+    <title>Puzzles</title>
     <style>
       :root {
         color-scheme: light;
@@ -15,9 +15,9 @@
 
       body {
         margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         background: #f8fafc;
         color: #0f172a;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       }
 
       .site-header {
@@ -87,7 +87,7 @@
       }
 
       .page {
-        min-height: 100vh;
+        min-height: calc(100vh - 49px);
         display: grid;
         place-items: center;
         padding: 32px 20px;
@@ -96,37 +96,27 @@
       main {
         width: 100%;
         max-width: 700px;
-        text-align: center;
       }
 
       h1 {
-        margin: 0;
-        font-size: clamp(2.3rem, 5vw, 3.2rem);
+        margin: 0 0 12px;
+        font-size: clamp(2rem, 4.8vw, 2.8rem);
         line-height: 1.1;
       }
 
-      h2 {
-        margin: 12px 0 0;
-        font-size: clamp(1.1rem, 2.6vw, 1.45rem);
-        font-weight: 600;
-        color: #334155;
-      }
-
       p {
-        margin: 18px auto 28px;
-        max-width: 56ch;
+        margin: 0 0 22px;
         color: #334155;
-        font-size: 1.03rem;
+        font-size: 1rem;
       }
 
-      .hero-links {
+      .puzzle-links {
         display: grid;
         gap: 12px;
       }
 
-      .hero-links a {
+      .puzzle-links a {
         display: block;
-        text-align: left;
         text-decoration: none;
         color: #0f172a;
         background: #ffffff;
@@ -136,8 +126,8 @@
         font-weight: 600;
       }
 
-      .hero-links a:hover,
-      .hero-links a:focus-visible {
+      .puzzle-links a:hover,
+      .puzzle-links a:focus-visible {
         border-color: #94a3b8;
         background: #f1f5f9;
       }
@@ -150,21 +140,19 @@
         <nav class="site-nav" aria-label="Site">
           <a href="/workbench/">Workbench</a>
           <a href="/practice/">Practice</a>
-          <a href="/puzzles/">Puzzles</a>
+          <a class="active" href="/puzzles/">Puzzles</a>
           <a href="/articles/">Articles</a>
         </nav>
       </div>
     </header>
     <div class="page">
       <main>
-        <h1>DeepSqueeze</h1>
-        <h2>Bridge Endgame Explorer</h2>
-        <p>Interactive diagrams, puzzles, and analysis of late-game bridge positions.</p>
-        <nav class="hero-links" aria-label="Primary">
-          <a href="/workbench/">Workbench</a>
-          <a href="/practice/">Practice</a>
-          <a href="/puzzles/">Puzzles</a>
-          <a href="/articles/">Articles</a>
+        <h1>Puzzles</h1>
+        <p>Interactive puzzle-focused pages and demos.</p>
+        <nav class="puzzle-links" aria-label="Puzzle list">
+          <a href="/puzzles/double-dummy-1/">DD1 (Double Dummy 1)</a>
+          <a href="/puzzles/coffin-examples/">Coffin Examples</a>
+          <a href="/puzzles/sure-tricks-demo/">Sure-tricks Demo</a>
         </nav>
       </main>
     </div>
