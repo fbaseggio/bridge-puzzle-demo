@@ -302,6 +302,36 @@ Typical examples:
 This category is important because it is easy to accidentally model such
 actions as only journey or only problem transitions.
 
+## Shared Consequences
+
+Different semantic actions may lead to the same downstream consequence.
+
+Examples:
+
+- `Start Story` and a later quiet-to-full expansion may both require a larger
+  reserved embed height
+- `Start Puzzle` and a later control-reveal action may both require the same
+  compact or expanded widget chrome
+
+The contract implication is:
+
+- semantic actions may differ
+- but shared consequences should flow through one common state/consequence path
+
+In practice, this means:
+
+- semantic transitions should update the state they actually own
+  - journey/profile state
+  - problem/startup consumption state
+  - chrome/reveal state
+- external effects should then derive from the resulting state
+  - render scheduling
+  - iframe/embed height publishing
+  - other surface-facing consequences
+
+Future work should avoid wiring an external effect to one specific button path
+when multiple semantic paths can produce the same resulting widget state.
+
 ## State Taxonomy
 
 Current and future state should be classified deliberately.
@@ -411,6 +441,7 @@ These assert visible framing behavior such as:
 - reveal/open state
 - repaint scheduling
 - panel visibility
+- embed-height publishing / reserved-space updates when chrome density changes
 
 This contract supports the existing testing guidance:
 

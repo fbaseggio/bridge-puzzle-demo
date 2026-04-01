@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { resolveSharedWidgetEmbedSrc } from '../../articles/_shared/widgetEmbedConfigs.js';
 import { resolveArticleScript } from '../../src/demo/articleScripts';
 import { demoProblems, resolveDemoProblem } from '../../src/demo/problems';
 import {
@@ -40,10 +41,13 @@ function parseFlag(rawValue: string | null): boolean {
 
 function extractWidgetEmbedUrls(articlePath: string): URL[] {
   const html = readFileSync(articlePath, 'utf8');
-  return [...html.matchAll(/<iframe[^>]*\ssrc="([^"]+)"/g)]
+  const staticSrcs = [...html.matchAll(/<iframe[^>]*\ssrc="([^"]+)"/g)]
     .map((match) => (match[1] ?? '').replace(/&amp;/g, '&'))
-    .filter((src) => src.startsWith('/workbench/'))
-    .map((src) => new URL(src, 'http://localhost:5173'));
+    .filter((src) => src.startsWith('/workbench/'));
+  const sharedConfigSrcs = [...html.matchAll(/<iframe[^>]*\sdata-widget-config="([^"]+)"/g)]
+    .map((match) => resolveSharedWidgetEmbedSrc((match[1] ?? '').trim()))
+    .filter((src): src is string => typeof src === 'string' && src.startsWith('/workbench/'));
+  return [...staticSrcs, ...sharedConfigSrcs].map((src) => new URL(src, 'http://localhost:5173'));
 }
 
 function openingLengthFromUrl(url: URL): number {

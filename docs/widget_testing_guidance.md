@@ -176,6 +176,32 @@ Good assertions include:
 
 Use DOM/render assertions only when there is no better state seam.
 
+## Shared Consequence Rule
+
+If two different semantic actions can lead to the same downstream consequence,
+tests should not rely on one action path as if it were the only way that
+consequence can happen.
+
+Examples:
+
+- multiple actions can reveal the same controls density
+- multiple actions can require the same repaint
+- multiple actions can require the same iframe/embed height update
+
+The preferred shape is:
+
+1. semantic action updates shared state
+2. the consequence is derived from that resulting state through one shared path
+
+When reviewing a test seam, ask:
+
+- is this consequence tied to a specific button path?
+- or is it derived from the resulting shared state/chrome state?
+
+If the same consequence can arise from multiple semantic actions, at least one
+test should cover that the shared consequence path still works for more than
+one route.
+
 ## Missing State Rule
 
 If a test wants to assert behavior that depends on state not yet carried by the

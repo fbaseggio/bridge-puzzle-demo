@@ -888,7 +888,20 @@ html.mode-widget {
 
 .unknown-suit {
   display: block;
-  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+}
+
+.unknown-card-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.04em;
+}
+
+.unknown-suit-glyph {
+  font-size: 1em;
+}
+
+.unknown-ranks {
+  letter-spacing: 0;
 }
 
 .unknown-title {

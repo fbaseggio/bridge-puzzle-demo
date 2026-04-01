@@ -200,7 +200,13 @@ export const demoProblems: DemoProblem[] = [
   { id: 'gorillas_03', label: 'gorillas_03', problem: gorillas03, practiceEligible: false },
   { id: 'gorillas_04', label: 'gorillas_04', problem: gorillas04, practiceEligible: false },
   { id: 'gorillas_05', label: 'gorillas_05', problem: gorillas05, practiceEligible: false },
-  { id: 'gorillas_full_deal', label: 'gorillas_full_deal', problem: gorillasFullDeal, practiceEligible: false },
+  {
+    id: 'gorillas_full_deal',
+    label: 'gorillas_full_deal',
+    problem: gorillasFullDeal,
+    practiceEligible: false,
+    articlePath: 'puzzles/gorillas-full-deal/'
+  },
   { id: 'gorillas_06', label: 'gorillas_06', problem: gorillas06, practiceEligible: false },
   { id: 'gorillas_07', label: 'gorillas_07', problem: gorillas07, practiceEligible: false },
   { id: 'gorillas_08', label: 'gorillas_08', problem: gorillas08, practiceEligible: false },

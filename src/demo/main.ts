@@ -117,6 +117,9 @@ import {
   type HandDiagramStatus
 } from './handDiagramSession';
 import {
+  resolveWidgetReadingEmbedReservedHeight
+} from './widgetReadingEmbedHeight';
+import {
   closeSettingsPanel,
   createSettingsPanelSession,
   setSettingsNestedOptionsOpen,
@@ -489,8 +492,6 @@ const initialArticleCheckpointIdFromUrl: string | null = (() => {
   return raw?.trim() ? raw.trim() : null;
 })();
 const initialArticleScriptSpec = resolveArticleScript(initialArticleScriptIdFromUrl);
-const readingWidgetEmbedCompactHeight = 326;
-const readingWidgetEmbedFullHeight = 364;
 const readingWidgetEmbedHeightMessageType = 'ds-widget-reading-height';
 let lastReportedReadingWidgetEmbedHeight: number | null = null;
 const initialArticleCursor = (() => {
@@ -5539,9 +5540,13 @@ function renderUnknownSlashLine(view: State): HTMLElement | null {
 
   for (const suit of visibleSuits) {
     const chunk = document.createElement('span');
-    chunk.className = `unknown-suit suit-${suit}`;
+    chunk.className = `unknown-suit unknown-card-line suit-${suit}`;
     const ranks = unresolved[suit].map((cardId) => displayRank(cardId.slice(1) as Rank)).join('');
-    chunk.textContent = `${suitSymbol[suit]}${ranks || '-'}`;
+    chunk.appendChild(renderSuitGlyph(suit, { context: 'inline-card', className: 'unknown-suit-glyph', decorative: true }));
+    const rankText = document.createElement('span');
+    rankText.className = 'unknown-ranks card-rank';
+    rankText.textContent = ranks || '-';
+    chunk.appendChild(rankText);
     line.appendChild(chunk);
   }
 
@@ -6929,20 +6934,23 @@ function ensureWidgetSnapshotDebugShortcut(): void {
 }
 
 function publishReadingWidgetEmbedHeight(readingRevealEnabled: boolean): void {
-  if (!readingRevealEnabled) {
+  const height = resolveWidgetReadingEmbedReservedHeight({
+    readingProfileEnabledFromUrl: widgetReadingProfileEnabledFromUrl,
+    readingRevealEnabled,
+    readingControlsRevealStage: handDiagramSession.readingControlsRevealStage
+  });
+  if (height === null) {
     lastReportedReadingWidgetEmbedHeight = null;
     return;
   }
   if (!isWidgetShellMode || displayMode !== 'widget' || typeof window === 'undefined' || window.parent === window) return;
-  const height = handDiagramSession.readingControlsRevealStage === 'full'
-    ? readingWidgetEmbedFullHeight
-    : readingWidgetEmbedCompactHeight;
   if (lastReportedReadingWidgetEmbedHeight === height) return;
   lastReportedReadingWidgetEmbedHeight = height;
   window.parent.postMessage(
     {
       type: readingWidgetEmbedHeightMessageType,
-      height
+      height,
+      widgetUrl: window.location.href
     },
     window.location.origin
   );
