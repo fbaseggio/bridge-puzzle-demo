@@ -243,6 +243,43 @@ These suit colors are identity colors, not semantic colors.
 
 Semantic color classes must layer on top of this system without redefining suit identity arbitrarily.
 
+## Editorial Bridge Text
+
+This section covers user-facing prose, labels, and short explanatory text.
+
+Rule:
+
+- when user-facing text contains bridge notation, render suit symbols in the
+  shared visual style rather than leaving raw `C/D/H/S` letters in place
+- logs, debug output, and raw diagnostics are exempt
+
+Important constraint:
+
+- normalization must be token-aware
+- do **not** blindly replace every `C`, `D`, `H`, or `S` in ordinary prose
+
+Initial accepted input forms include:
+
+- contract notation such as `1C`, `3H`, `4S`, `6NT`
+- card notation such as `CA`, `D7`, `HT`, `SQ`
+- bridge-markdown suit notation such as `!C`, `!D`, `!H`, `!S`
+- mixed shorthand such as `3!H` or `!D7`
+
+Rendered output rule:
+
+- `!D` / `!H` / `!S` / `!C` are author-input shorthands only
+- rendered output should show the actual suit glyph with the shared suit color
+- user-facing bridge text should not show a black heart or black diamond when a
+  suit symbol is intended
+
+Practical implication:
+
+- if a worker touches user-facing bridge text, prefer a shared normalization
+  path rather than ad hoc regexes or literal glyph insertion in each feature
+- if DOM token markup is appropriate, use the shared card/suit helper path
+- if plain text must remain plain text, formatting should still come from one
+  shared bridge-text rule set rather than per-callsite substitutions
+
 ## One Source Of Truth
 
 The product should converge toward one presentation helper module:
