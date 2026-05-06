@@ -59,6 +59,21 @@ Important architectural point:
 
 - VSC / `experimentalDraftIntroScript` is `story-viewing`
 - DD1 / `doubleDummy01Script` is `puzzle-solving`
+- `reading-profile` is now first-class in the Journey/runtime/snapshot path for
+  widget startup posture
+
+### Journey / startup baseline
+
+- article widgets under `Articles` now normalize toward reading-first startup
+- richer startup payload is separate from startup posture input
+- article widgets with richer startup payload may expose a startup affordance
+  that:
+  - consumes startup payload
+  - changes journey/profile posture
+  - may change problem state
+- puzzle pages are now better understood as sharing a broad
+  `puzzle-solving -> solution-viewing` journey family, even when their startup
+  posture or assist defaults differ
 
 ### Reading-profile rollout
 
@@ -73,6 +88,41 @@ Current reading-profile behavior:
 - there is no auto-collapse currently
 
 This is intentional for now.
+
+### Current article widget direction
+
+For the 4 current `Articles` pages:
+
+- `/articles/squeeze-self/`
+- `/articles/experimental-draft/`
+- `/articles/ruff-or-sluff/`
+- `/articles/gorillas/`
+
+the intended standardization is:
+
+- start in `reading-profile`
+- only richer-start widgets expose startup release
+- story-bound starts and puzzle-bound starts are both allowed
+- avoid preserving subtle historical startup differences unless they appear
+  intentional
+
+### Current puzzle page landscape
+
+We now effectively have 4 puzzle-facing mode examples:
+
+- standard DD
+- single-dummy
+- multi-EW
+- scripted-puzzle
+
+The likely common journey family is:
+
+- `puzzle-solving -> solution-viewing`
+
+Open question for later:
+
+- which differences belong to journey policy
+- and which differences belong to puzzle mode
 
 ### Branch box
 
@@ -206,6 +256,16 @@ This is a good stopping checkpoint:
 - hand-diagram navigation is extracted and internally structured
 - practice/article/workbench geometry is behaving again
 
+Also true now:
+
+- Journey has a real runtime seam
+- `reading-profile` is first-class in Journey/runtime/snapshot, but not yet in
+  the broader global script/practice profile model
+- testing has a clearer split between:
+  - progression-only coverage
+  - transport-authoritative coverage
+  - shared-consequence coverage
+
 If new refactor work is needed later, it should be driven by a real product change rather than by continuing to split files for its own sake.
 
 The most plausible future seams are:
@@ -244,6 +304,8 @@ When deciding where something belongs:
 - no active known regressions
 - reading-profile auto-collapse was attempted and backed out
 - current reading-profile baseline is stable
+- shared embed height publishing now has an explicit shared-consequence rule in
+  docs
 - practice/article geometry is aligned again
 - workbench centering is restored
 - article-mode settings/assist expansion is behaving again
@@ -256,5 +318,11 @@ Start from product needs, not from refactor hunger.
 Reasonable next directions:
 
 - add new DD1 or VSC content/behavior
+- add a new puzzle article/page using the newer Journey/testing baseline
 - revisit reading-profile polish only if there is a concrete user-facing reason
 - only resume refactoring if a new feature exposes a real structural pain point
+
+One explicit operational follow-up is now tracked in [TODO.md](docs/TODO.md):
+
+- add documentation, and possibly a higher-level command, for validating new
+  puzzles/article widgets before UI breakage is the first signal
