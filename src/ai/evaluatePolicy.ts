@@ -89,6 +89,8 @@ export type EvaluatePolicyInput = {
   threat: ThreatContext | null;
   resource?: ResourceContext | null;
   threatLabels: DefenderLabels | null;
+  assetCardIds?: CardId[];
+  preferredLeads?: Partial<Record<'E' | 'W', CardId[]>>;
   ewVariantState: EwVariantState | null;
   rng: RngState;
 };
@@ -112,6 +114,12 @@ export type EvaluatePolicyOutput = {
   chosenCardId: CardId | null;
   chosenBucket?: string;
   bucketCards?: CardId[];
+  assetFilter?: {
+    applied: boolean;
+    baseCandidates: CardId[];
+    filteredCandidates: CardId[];
+    removedAssets: CardId[];
+  };
   policyClassByCard?: Record<string, string>;
   tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier3c' | 'tier4a' | 'tier4b' | 'tier4c', CardId[]>>;
   discardTiers?: DiscardTiers;
@@ -545,8 +553,31 @@ function preferredCardsForEvaluation(
   return members.length > 0 ? members : [output.chosenCardId];
 }
 
+function candidatesAfterAssetFilter(candidates: CardId[], assets: Set<CardId>): CardId[] {
+  if (candidates.length <= 1 || assets.size === 0) return [...candidates];
+  const nonAssets = candidates.filter((cardId) => !assets.has(cardId));
+  return nonAssets.length > 0 ? nonAssets : [...candidates];
+}
+
+function candidatesAfterPreferredLeadFilter(
+  candidates: CardId[],
+  seat: 'E' | 'W',
+  trick: Play[],
+  preferredLeads: Partial<Record<'E' | 'W', CardId[]>> | undefined
+): CardId[] {
+  if (trick.length !== 0 || candidates.length <= 1) return [...candidates];
+  const order = preferredLeads?.[seat] ?? [];
+  if (order.length === 0) return [...candidates];
+  const candidateSet = new Set(candidates);
+  for (const preferred of order) {
+    if (candidateSet.has(preferred)) return [preferred];
+  }
+  return [...candidates];
+}
+
 function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOutput {
   const { policy, seat, hands, trick, threat, resource, threatLabels } = input;
+  const assets = new Set(input.assetCardIds ?? []);
   const leadSuit = trick[0]?.suit ?? null;
   const rngBefore = { seed: input.rng.seed >>> 0, counter: input.rng.counter };
   let rngAfter = { ...rngBefore };
@@ -605,15 +636,26 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
     const legal = legalPlaysForSeat(hands, seat, leadSuit);
     const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
     const ddFiltered = applyDdFilter(legalCardIds, legalCardIds);
-    const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
+    const preferredLeadCandidates = candidatesAfterPreferredLeadFilter(ddFiltered.candidates, seat, trick, input.preferredLeads);
+    const randomCandidates = candidatesAfterAssetFilter(preferredLeadCandidates, assets);
+    const [idx, nextRng] = pickRandomIndex(randomCandidates.length, rngAfter);
     rngAfter = nextRng;
-    const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
+    const chosenCardId = randomCandidates[idx] ?? randomCandidates[0] ?? null;
     const chosenBucket = 'legal';
-    const bucketCards = [...ddFiltered.candidates];
+    const bucketCards = [...randomCandidates];
+    const removedAssets = ddFiltered.candidates.filter(
+      (cardId) => !randomCandidates.includes(cardId) && assets.has(cardId)
+    );
     return {
       chosenCardId,
       chosenBucket,
       bucketCards,
+      assetFilter: {
+        applied: removedAssets.length > 0,
+        baseCandidates: [...ddFiltered.candidates],
+        filteredCandidates: [...randomCandidates],
+        removedAssets
+      },
       policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, bucketCards),
       ddPolicy: ddFiltered.trace,
       ddTrace: buildDdDecisionTrace(legalCardIds, legalCardIds, ddFiltered, chosenCardId),
@@ -626,15 +668,26 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
     const legal = legalPlaysForSeat(hands, seat, null);
     const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
     const ddFiltered = applyDdFilter(legalCardIds, legalCardIds);
-    const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
+    const preferredLeadCandidates = candidatesAfterPreferredLeadFilter(ddFiltered.candidates, seat, trick, input.preferredLeads);
+    const randomCandidates = candidatesAfterAssetFilter(preferredLeadCandidates, assets);
+    const [idx, nextRng] = pickRandomIndex(randomCandidates.length, rngAfter);
     rngAfter = nextRng;
-    const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
+    const chosenCardId = randomCandidates[idx] ?? randomCandidates[0] ?? null;
     const chosenBucket = 'lead:none';
-    const bucketCards = [...ddFiltered.candidates];
+    const bucketCards = [...randomCandidates];
+    const removedAssets = ddFiltered.candidates.filter(
+      (cardId) => !randomCandidates.includes(cardId) && assets.has(cardId)
+    );
     return {
       chosenCardId,
       chosenBucket,
       bucketCards,
+      assetFilter: {
+        applied: removedAssets.length > 0,
+        baseCandidates: [...ddFiltered.candidates],
+        filteredCandidates: [...randomCandidates],
+        removedAssets
+      },
       policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, bucketCards),
       ddPolicy: ddFiltered.trace,
       ddTrace: buildDdDecisionTrace(legalCardIds, legalCardIds, ddFiltered, chosenCardId),
@@ -716,14 +769,15 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
       }
     }
 
-    // Rule 2: second hand busy follow; if partner cannot beat third-hand threat, cover it cheaply now.
-    if (threat && threatLabels && trick.length === 1) {
+    // Rule 2: second/third hand busy follow; if next opponent holds the active threat
+    // card in this suit, cover above it now.
+    if (threat && threatLabels && trick.length > 0 && trick.length < 3) {
       const leadSuitThreat = leadSuit ? threat.threatsBySuit[leadSuit] : undefined;
       const leadSuitIsResource = threatSymbolBase(leadSuitThreat?.symbol) === 'f';
       const busyCards = inSuitCardIds.filter((cardId) => threatLabels[seat].busy.has(cardId));
-      if (!leadSuitIsResource && busyCards.length > 0 && busyCards.length === inSuitCardIds.length) {
+      if (!leadSuitIsResource) {
         const ddOnBusy = applyDdFilter(busyCards, inSuitCardIds);
-        if (ddOnBusy.trace?.bound) {
+        if (busyCards.length > 0 && busyCards.length === inSuitCardIds.length && ddOnBusy.trace?.bound) {
           const chosenCardId = chooseLowestByRank(ddOnBusy.candidates);
           if (chosenCardId) {
             const chosenBucket = 'follow:busy-protect-threat';
@@ -739,14 +793,17 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
               };
           }
         }
-        const thirdSeat = nextSeat(seat);
-        const partnerSeat = nextSeat(thirdSeat);
+        const nextSeatToAct = nextSeat(seat);
         const suitThreat = threat.threatsBySuit[leadSuit];
-        if (suitThreat && suitThreat.active && suitThreat.establishedOwner === thirdSeat) {
+        const nextSeatIsOpponent = nextSeatToAct === 'N' || nextSeatToAct === 'S';
+        if (nextSeatIsOpponent && suitThreat && suitThreat.active && suitThreat.establishedOwner === nextSeatToAct) {
+          const highestLedSoFar = trick.reduce((max, play) => {
+            if (play.suit !== leadSuit) return max;
+            return Math.max(max, RANK_STRENGTH[play.rank]);
+          }, 0);
           const threatRankValue = RANK_STRENGTH[suitThreat.threatRank];
-          const partnerCanBeatThreat = (hands[partnerSeat][leadSuit] ?? []).some((rank) => RANK_STRENGTH[rank] > threatRankValue);
-          if (!partnerCanBeatThreat) {
-            const covering = busyCards.filter((cardId) => RANK_STRENGTH[rankOfCardId(cardId)] > threatRankValue);
+          if (threatRankValue > highestLedSoFar) {
+            const covering = inSuitCardIds.filter((cardId) => RANK_STRENGTH[rankOfCardId(cardId)] > threatRankValue);
             const ddFiltered = applyDdFilter(covering);
             const chosenCardId = chooseLowestByRank(ddFiltered.candidates);
             if (chosenCardId) {
@@ -775,17 +832,28 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
     if (!threatThreshold && !nsSoftThreshold) {
       const bucketCards = inSuit.map((p) => toCardId(p.suit, p.rank) as CardId);
       const ddFiltered = applyDdFilter(bucketCards, inSuitCardIds);
-      const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
+      const preferredLeadCandidates = candidatesAfterPreferredLeadFilter(ddFiltered.candidates, seat, trick, input.preferredLeads);
+      const randomCandidates = candidatesAfterAssetFilter(preferredLeadCandidates, assets);
+      const [idx, nextRng] = pickRandomIndex(randomCandidates.length, rngAfter);
       rngAfter = nextRng;
-      const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
+      const chosenCardId = randomCandidates[idx] ?? randomCandidates[0] ?? null;
       const chosenBucket = 'follow:baseline';
+      const removedAssets = ddFiltered.candidates.filter(
+        (cardId) => !randomCandidates.includes(cardId) && assets.has(cardId)
+      );
       return {
         chosenCardId,
         chosenBucket,
-        bucketCards: [...ddFiltered.candidates],
-        policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+        bucketCards: [...randomCandidates],
+        assetFilter: {
+          applied: removedAssets.length > 0,
+          baseCandidates: [...ddFiltered.candidates],
+          filteredCandidates: [...randomCandidates],
+          removedAssets
+        },
+        policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, randomCandidates),
         ddPolicy: ddFiltered.trace,
-        ddTrace: buildDdDecisionTrace(inSuitCardIds, bucketCards, ddFiltered, chosenCardId),
+        ddTrace: buildDdDecisionTrace(inSuitCardIds, randomCandidates, ddFiltered, chosenCardId),
         rngBefore,
         rngAfter
       };
@@ -812,18 +880,29 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
     const bucket = belowBoth.length > 0 ? belowBoth : belowEither.length > 0 ? belowEither : aboveBoth;
     const bucketCards = bucket.map((p) => toCardId(p.suit, p.rank) as CardId);
     const ddFiltered = applyDdFilter(bucketCards, inSuitCardIds);
-    const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
+    const preferredLeadCandidates = candidatesAfterPreferredLeadFilter(ddFiltered.candidates, seat, trick, input.preferredLeads);
+    const randomCandidates = candidatesAfterAssetFilter(preferredLeadCandidates, assets);
+    const [idx, nextRng] = pickRandomIndex(randomCandidates.length, rngAfter);
     rngAfter = nextRng;
-    const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
+    const chosenCardId = randomCandidates[idx] ?? randomCandidates[0] ?? null;
     const chosenBucket =
       belowBoth.length > 0 ? 'follow:below' : belowEither.length > 0 ? 'follow:below-partial' : 'follow:above';
+    const removedAssets = ddFiltered.candidates.filter(
+      (cardId) => !randomCandidates.includes(cardId) && assets.has(cardId)
+    );
     return {
       chosenCardId,
       chosenBucket,
-      bucketCards: [...ddFiltered.candidates],
-      policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+      bucketCards: [...randomCandidates],
+      assetFilter: {
+        applied: removedAssets.length > 0,
+        baseCandidates: [...ddFiltered.candidates],
+        filteredCandidates: [...randomCandidates],
+        removedAssets
+      },
+      policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, randomCandidates),
       ddPolicy: ddFiltered.trace,
-      ddTrace: buildDdDecisionTrace(inSuitCardIds, bucketCards, ddFiltered, chosenCardId),
+      ddTrace: buildDdDecisionTrace(inSuitCardIds, randomCandidates, ddFiltered, chosenCardId),
       rngBefore,
       rngAfter
     };
@@ -833,17 +912,28 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
     const legal = legalPlaysForSeat(hands, seat, leadSuit);
     const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
     const ddFiltered = applyDdFilter(legalCardIds, legalCardIds);
-    const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
+    const preferredLeadCandidates = candidatesAfterPreferredLeadFilter(ddFiltered.candidates, seat, trick, input.preferredLeads);
+    const randomCandidates = candidatesAfterAssetFilter(preferredLeadCandidates, assets);
+    const [idx, nextRng] = pickRandomIndex(randomCandidates.length, rngAfter);
     rngAfter = nextRng;
-    const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
+    const chosenCardId = randomCandidates[idx] ?? randomCandidates[0] ?? null;
     const chosenBucket = 'discard:baseline';
+    const removedAssets = ddFiltered.candidates.filter(
+      (cardId) => !randomCandidates.includes(cardId) && assets.has(cardId)
+    );
     return {
       chosenCardId,
       chosenBucket,
-      bucketCards: [...ddFiltered.candidates],
-      policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+      bucketCards: [...randomCandidates],
+      assetFilter: {
+        applied: removedAssets.length > 0,
+        baseCandidates: [...ddFiltered.candidates],
+        filteredCandidates: [...randomCandidates],
+        removedAssets
+      },
+      policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, randomCandidates),
       ddPolicy: ddFiltered.trace,
-      ddTrace: buildDdDecisionTrace(legalCardIds, legalCardIds, ddFiltered, chosenCardId),
+      ddTrace: buildDdDecisionTrace(legalCardIds, randomCandidates, ddFiltered, chosenCardId),
       rngBefore,
       rngAfter
     };
@@ -871,10 +961,15 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
   ];
   const chosen = ordered.find((o) => o.cards.length > 0) ?? { name: 'tier5', cards: tiers.tier5 };
   const ddFiltered = applyDdFilter(chosen.cards, tiers.legal);
-  const [idx, nextRng] = pickRandomIndex(ddFiltered.candidates.length, rngAfter);
+  const preferredLeadCandidates = candidatesAfterPreferredLeadFilter(ddFiltered.candidates, seat, trick, input.preferredLeads);
+  const randomCandidates = candidatesAfterAssetFilter(preferredLeadCandidates, assets);
+  const [idx, nextRng] = pickRandomIndex(randomCandidates.length, rngAfter);
   rngAfter = nextRng;
-  const chosenCardId = ddFiltered.candidates[idx] ?? ddFiltered.candidates[0] ?? null;
-  const policyClassByCard = buildPolicyClassByCard(hands, seat, chosen.name, ddFiltered.candidates) ?? {};
+  const chosenCardId = randomCandidates[idx] ?? randomCandidates[0] ?? null;
+  const removedAssets = ddFiltered.candidates.filter(
+    (cardId) => !randomCandidates.includes(cardId) && assets.has(cardId)
+  );
+  const policyClassByCard = buildPolicyClassByCard(hands, seat, chosen.name, randomCandidates) ?? {};
   for (const card of [...tiers.tier2a, ...tiers.tier2b]) {
     policyClassByCard[card] = `semiIdle:${card[0]}`;
   }
@@ -892,12 +987,18 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
   return {
     chosenCardId,
     chosenBucket: chosen.name,
-    bucketCards: [...ddFiltered.candidates],
+    bucketCards: [...randomCandidates],
+    assetFilter: {
+      applied: removedAssets.length > 0,
+      baseCandidates: [...ddFiltered.candidates],
+      filteredCandidates: [...randomCandidates],
+      removedAssets
+    },
     policyClassByCard,
     tierBuckets,
     discardTiers: tiers,
     ddPolicy: ddFiltered.trace,
-    ddTrace: buildDdDecisionTrace(tiers.legal, chosen.cards, ddFiltered, chosenCardId),
+    ddTrace: buildDdDecisionTrace(tiers.legal, randomCandidates, ddFiltered, chosenCardId),
     rngBefore,
     rngAfter
   };

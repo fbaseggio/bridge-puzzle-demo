@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { apply, classInfoForCard, init, legalPlays, type CardId, type Problem, type SuccessfulTranscript } from '../src/core';
+import { apply, autoplayUntilUserOrEnd, classInfoForCard, init, legalPlays, type CardId, type Problem, type SuccessfulTranscript } from '../src/core';
 import { chooseDiscard, computeDiscardTiers } from '../src/ai/defenderDiscard';
 import { computeDefenderLabels, initThreatContext, type DefenderLabels } from '../src/ai/threatModel';
 import { computeCoverageCandidates, divergenceCandidates, hasUntriedAlternatives, markDecisionCoverage, triedAltKey, type ReplayCoverage } from '../src/demo/playAgain';
@@ -8,6 +8,7 @@ import { p002 } from '../src/puzzles/p002';
 import { p004 } from '../src/puzzles/p004';
 import { p012 } from '../src/puzzles/p012';
 import { p013 } from '../src/puzzles/p013';
+import { ifYouSeeAGoodPlayFullDeal } from '../src/puzzles/if_you_see_a_good_play';
 
 describe('bridge engine v0.1', () => {
   test('autoplay backstop can refuse autoplay with an explicit illegal event', () => {
@@ -690,6 +691,193 @@ describe('bridge engine v0.1', () => {
     const step = apply(start, { seat: 'N', suit: 'S', rank: '9' });
     const eAuto = step.events.find((e) => e.type === 'autoplay' && e.play.seat === 'E');
     expect(eAuto && eAuto.type === 'autoplay' ? `${eAuto.play.suit}${eAuto.play.rank}` : null).toBe('S7');
+  });
+
+  test('busy-protect-threat covers in second hand when next opponent owns the threat card', () => {
+    const problem: Problem = {
+      id: 'follow-busy-cover-second-hand',
+      contract: { strain: 'NT' },
+      leader: 'N',
+      userControls: ['N'],
+      goal: { type: 'minTricks', side: 'NS', n: 0 },
+      hands: {
+        N: { S: [], H: [], D: ['A', '5'], C: [] },
+        E: { S: [], H: [], D: ['9', '3'], C: [] },
+        S: { S: [], H: [], D: ['8', '2'], C: [] },
+        W: { S: [], H: [], D: ['4'], C: [] }
+      },
+      policies: {
+        E: { kind: 'threatAware' },
+        S: { kind: 'randomLegal' },
+        W: { kind: 'randomLegal' }
+      },
+      threatCardIds: ['D8'],
+      rngSeed: 7
+    };
+
+    const start = init(problem);
+    const step = apply(start, { seat: 'N', suit: 'D', rank: '5' });
+    const eAuto = step.events.find((e) => e.type === 'autoplay' && e.play.seat === 'E');
+    expect(eAuto && eAuto.type === 'autoplay' ? `${eAuto.play.suit}${eAuto.play.rank}` : null).toBe('D9');
+    expect(eAuto && eAuto.type === 'autoplay' ? eAuto.chosenBucket : null).toBe('follow:busy-protect-threat');
+  });
+
+  test('busy-protect-threat covers in third hand when next opponent owns the threat card', () => {
+    const problem: Problem = {
+      id: 'follow-busy-cover-third-hand',
+      contract: { strain: 'NT' },
+      leader: 'W',
+      userControls: ['W', 'N'],
+      goal: { type: 'minTricks', side: 'NS', n: 0 },
+      hands: {
+        N: { S: [], H: [], D: ['A', '4'], C: [] },
+        E: { S: [], H: [], D: ['9', '3'], C: [] },
+        S: { S: [], H: [], D: ['8', '2'], C: [] },
+        W: { S: [], H: [], D: ['5'], C: [] }
+      },
+      policies: {
+        E: { kind: 'threatAware' },
+        S: { kind: 'randomLegal' }
+      },
+      threatCardIds: ['D8'],
+      rngSeed: 11
+    };
+
+    const start = init(problem);
+    const step1 = apply(start, { seat: 'W', suit: 'D', rank: '5' });
+    expect(step1.state.turn).toBe('N');
+    const step2 = apply(step1.state, { seat: 'N', suit: 'D', rank: '4' });
+    const eAuto = step2.events.find((e) => e.type === 'autoplay' && e.play.seat === 'E');
+    expect(eAuto && eAuto.type === 'autoplay' ? `${eAuto.play.suit}${eAuto.play.rank}` : null).toBe('D9');
+    expect(eAuto && eAuto.type === 'autoplay' ? eAuto.chosenBucket : null).toBe('follow:busy-protect-threat');
+  });
+
+  test('if_you_see_a_good_play_full_deal: after D5-D2, East covers above D8 threat', () => {
+    const start = init(ifYouSeeAGoodPlayFullDeal);
+    const step1 = apply(start, { seat: 'W', suit: 'D', rank: '5' });
+    const step2 = apply(step1.state, { seat: 'N', suit: 'D', rank: '2' });
+    const eAuto = step2.events.find((e) => e.type === 'autoplay' && e.play.seat === 'E');
+    expect(eAuto && eAuto.type === 'autoplay' ? `${eAuto.play.suit}${eAuto.play.rank}` : null).toBe('D9');
+    expect(eAuto && eAuto.type === 'autoplay' ? eAuto.chosenBucket : null).toBe('follow:busy-protect-threat');
+  });
+
+  test('if_you_see_a_good_play_full_deal: after SA, west does not force-cover S6 with S8', () => {
+    const start = init(ifYouSeeAGoodPlayFullDeal);
+    const step1 = apply(start, { seat: 'W', suit: 'D', rank: '5' });
+    const step2 = apply(step1.state, { seat: 'N', suit: 'D', rank: '2' });
+    const step3 = apply(step2.state, { seat: 'S', suit: 'D', rank: 'A' });
+    const step4 = apply(step3.state, { seat: 'S', suit: 'S', rank: 'A' });
+
+    const wAuto = step4.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
+    const card = wAuto && wAuto.type === 'autoplay' ? `${wAuto.play.suit}${wAuto.play.rank}` : null;
+    expect(card).toMatch(/^S[24]$/);
+    expect(card).not.toBe('S8');
+    expect(wAuto && wAuto.type === 'autoplay' ? wAuto.chosenBucket : null).not.toBe('follow:busy-protect-threat');
+  });
+
+  test('asset list removes asset cards before randomizing when non-assets remain', () => {
+    const problem: Problem = {
+      ...ifYouSeeAGoodPlayFullDeal,
+      id: 'if_you_see_assets_strip_before_rng',
+      assetCardIds: ['S8']
+    };
+    const start = init(problem);
+    const step1 = apply(start, { seat: 'W', suit: 'D', rank: '5' });
+    const step2 = apply(step1.state, { seat: 'N', suit: 'D', rank: '2' });
+    const step3 = apply(step2.state, { seat: 'S', suit: 'D', rank: 'A' });
+    const step4 = apply(step3.state, { seat: 'S', suit: 'S', rank: 'A' });
+    const wAuto = step4.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
+    expect(wAuto && wAuto.type === 'autoplay' ? wAuto.chosenBucket : null).toBe('follow:below');
+    expect(wAuto && wAuto.type === 'autoplay' ? wAuto.bucketCards?.includes('S8') : false).toBe(false);
+    expect(wAuto && wAuto.type === 'autoplay' ? `${wAuto.play.suit}${wAuto.play.rank}` : null).toMatch(/^S[24]$/);
+  });
+
+  test('asset list keeps candidates unchanged when all random candidates are assets', () => {
+    const problem: Problem = {
+      id: 'assets-all-candidates',
+      contract: { strain: 'NT' },
+      leader: 'N',
+      userControls: ['N'],
+      goal: { type: 'minTricks', side: 'NS', n: 0 },
+      hands: {
+        N: { S: ['A'], H: [], D: [], C: [] },
+        E: { S: ['K', 'Q'], H: [], D: [], C: [] },
+        S: { S: ['2'], H: [], D: [], C: [] },
+        W: { S: ['3'], H: [], D: [], C: [] }
+      },
+      policies: {
+        E: { kind: 'threatAware' },
+        S: { kind: 'randomLegal' },
+        W: { kind: 'randomLegal' }
+      },
+      threatCardIds: ['S2'],
+      assetCardIds: ['SK', 'SQ'],
+      rngSeed: 123
+    };
+    const step = apply(init(problem), { seat: 'N', suit: 'S', rank: 'A' });
+    const eAuto = step.events.find((e) => e.type === 'autoplay' && e.play.seat === 'E');
+    expect(eAuto && eAuto.type === 'autoplay' ? eAuto.chosenBucket : null).toBe('follow:above');
+    expect(eAuto && eAuto.type === 'autoplay' ? eAuto.bucketCards?.sort() : []).toEqual(['SK', 'SQ']);
+  });
+
+  test('preferred lead picks first configured East lead before asset filtering', () => {
+    const problem: Problem = {
+      id: 'preferred-lead-east',
+      contract: { strain: 'NT' },
+      leader: 'E',
+      userControls: ['N'],
+      goal: { type: 'minTricks', side: 'NS', n: 0 },
+      hands: {
+        N: { S: ['Q', 'J', 'T'], H: [], D: [], C: [] },
+        E: { S: [], H: [], D: ['Q'], C: ['T', '6'] },
+        S: { S: ['9', '8', '7'], H: [], D: [], C: [] },
+        W: { S: ['6', '5', '4'], H: [], D: [], C: [] }
+      },
+      policies: {
+        E: { kind: 'threatAware' },
+        S: { kind: 'randomLegal' },
+        W: { kind: 'randomLegal' }
+      },
+      threatCardIds: ['SQ'],
+      preferredLeads: { E: ['DQ', 'CT', 'C6'] },
+      assetCardIds: ['DQ'],
+      rngSeed: 33
+    };
+    const run = autoplayUntilUserOrEnd(init(problem));
+    const eAuto = run.events.find((event) => event.type === 'autoplay' && event.play.seat === 'E');
+    expect(eAuto && eAuto.type === 'autoplay' ? `${eAuto.play.suit}${eAuto.play.rank}` : null).toBe('DQ');
+    expect(eAuto && eAuto.type === 'autoplay' ? eAuto.chosenBucket : null).toBe('lead:none');
+    expect(eAuto && eAuto.type === 'autoplay' ? eAuto.bucketCards : []).toEqual(['DQ']);
+  });
+
+  test('preferred lead picks West S4 over S2 before asset filtering', () => {
+    const problem: Problem = {
+      id: 'preferred-lead-west',
+      contract: { strain: 'NT' },
+      leader: 'W',
+      userControls: ['N'],
+      goal: { type: 'minTricks', side: 'NS', n: 0 },
+      hands: {
+        N: { S: ['Q', 'J', 'T'], H: [], D: [], C: [] },
+        E: { S: ['9', '8', '7'], H: [], D: [], C: [] },
+        S: { S: ['6', '5', '3'], H: [], D: [], C: [] },
+        W: { S: ['8', '4', '2'], H: [], D: [], C: [] }
+      },
+      policies: {
+        W: { kind: 'threatAware' },
+        E: { kind: 'randomLegal' },
+        S: { kind: 'randomLegal' }
+      },
+      threatCardIds: ['SQ'],
+      preferredLeads: { W: ['S4', 'S2'] },
+      assetCardIds: ['S4'],
+      rngSeed: 37
+    };
+    const run = autoplayUntilUserOrEnd(init(problem));
+    const wAuto = run.events.find((event) => event.type === 'autoplay' && event.play.seat === 'W');
+    expect(wAuto && wAuto.type === 'autoplay' ? `${wAuto.play.suit}${wAuto.play.rank}` : null).toBe('S4');
+    expect(wAuto && wAuto.type === 'autoplay' ? wAuto.chosenBucket : null).toBe('lead:none');
+    expect(wAuto && wAuto.type === 'autoplay' ? wAuto.bucketCards : []).toEqual(['S4']);
   });
 
   test('resource follow-suit prefers low follow (does not use busy-protect-threat cover)', () => {

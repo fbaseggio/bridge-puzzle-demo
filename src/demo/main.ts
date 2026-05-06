@@ -53,7 +53,7 @@ import { buildUnknownMergedRankColorVisual, fixedRanksForSeatSuit, unresolvedEwC
 import { buildRegularPlayedCardDisplay, buildRegularSuitCardDisplays } from './regularDisplayView';
 import { buildTeachingDisplayEntries, buildWidgetNarrationEntries } from './teachingDisplay';
 import { mergeUnknownDdsSummaries, mergeUnknownTeachingEntries } from './unknownModeDisplay';
-import { renderCardToken, renderSuitGlyph } from './cardPresentation';
+import { formatCardText, renderCardToken, renderSuitGlyph } from './cardPresentation';
 import { renderLucideIcon } from './lucideIcons';
 import {
   buildUnknownModePlayedEvents,
@@ -140,10 +140,12 @@ import {
   setWidgetJourneyRuntimeStartupGatePhase
 } from './widgetJourneyRuntimeState';
 import {
+  defaultAlertMistakesEnabledForWidgetJourneyProfile,
   resolveWidgetJourneyStartupAffordanceLabel,
   resolveWidgetJourneyStartupReleaseRevealStage,
   resolveWidgetJourneyRicherStartupPayload,
-  resolveWidgetJourneyStartupReleaseProfile
+  resolveWidgetJourneyStartupReleaseProfile,
+  type WidgetJourneyProfile
 } from './widgetJourneyState';
 import {
   buildWidgetStateSnapshotPermalink,
@@ -645,6 +647,17 @@ function articleScriptIsStoryViewing(): boolean {
   return articleScriptCoordinator.articleScriptIsStoryViewing();
 }
 
+function applyWidgetJourneyAlertMistakesDefault(activeProfile: WidgetJourneyProfile | null): void {
+  if (alertMistakesTouchedByUser) return;
+  alertMistakes = defaultAlertMistakesEnabledForWidgetJourneyProfile(activeProfile);
+  if (!alertMistakes) clearDdErrorVisual();
+}
+
+function setWidgetJourneyRuntimeActiveProfile(activeProfile: WidgetJourneyProfile | null): void {
+  setWidgetJourneyRuntimeActiveInteractionProfile(widgetJourneyRuntimeState, activeProfile);
+  applyWidgetJourneyAlertMistakesDefault(activeProfile);
+}
+
 function syncWidgetJourneyRuntimeActiveProfile(): void {
   const scripted = articleScriptModeEnabled();
   const preserveReadingStartupPosture = (
@@ -654,21 +667,20 @@ function syncWidgetJourneyRuntimeActiveProfile(): void {
     && widgetJourneyHasRicherStartupPayload()
   );
   if (preserveReadingStartupPosture) {
-    setWidgetJourneyRuntimeActiveInteractionProfile(widgetJourneyRuntimeState, 'reading-profile');
+    setWidgetJourneyRuntimeActiveProfile('reading-profile');
     return;
   }
   if (scripted) {
-    setWidgetJourneyRuntimeActiveInteractionProfile(
-      widgetJourneyRuntimeState,
+    setWidgetJourneyRuntimeActiveProfile(
       currentArticleScriptInteractionProfileInputSource()
     );
     return;
   }
   if (displayMode === 'widget' && widgetReadingProfileEnabledFromUrl) {
-    setWidgetJourneyRuntimeActiveInteractionProfile(widgetJourneyRuntimeState, 'reading-profile');
+    setWidgetJourneyRuntimeActiveProfile('reading-profile');
     return;
   }
-  setWidgetJourneyRuntimeActiveInteractionProfile(widgetJourneyRuntimeState, null);
+  setWidgetJourneyRuntimeActiveProfile(null);
 }
 
 function currentWidgetJourneyState() {
@@ -1225,6 +1237,7 @@ let alwaysHint = displayMode === 'widget';
 let cardColoringEnabled = true;
 let narrate = displayMode === 'analysis';
 let alertMistakes = true;
+let alertMistakesTouchedByUser = false;
 let hintsEnabled = true;
 let hideEastWest = false;
 if (displayMode === 'widget' && (widgetUiMode === 'dd-puzzle' || widgetUiMode === 'sd-puzzle')) {
@@ -1288,6 +1301,7 @@ const widgetJourneyRuntimeState = createWidgetJourneyRuntimeState({
   startupGateEnabledFromUrl,
   startupOpeningLength: currentWidgetStartupOpeningLength()
 });
+applyWidgetJourneyAlertMistakesDefault(widgetJourneyRuntimeState.activeInteractionProfile);
 
 let trickFrozen = false;
 let lastCompletedTrick: Play[] | null = null;
@@ -1806,6 +1820,7 @@ function renderSettingsToggles(context: SettingsPanelContext): HTMLElement {
   );
   assistGroup.appendChild(
     renderSettingsToggle('Alert Mistakes', alertMistakes, (checked) => {
+      alertMistakesTouchedByUser = true;
       alertMistakes = checked;
       if (!checked) clearDdErrorVisual();
       render();
@@ -4027,6 +4042,22 @@ function isBelowThreshold(cardId: CardId, threshold: Rank): boolean {
   return rankOrder.indexOf(rank) > rankOrder.indexOf(threshold);
 }
 
+function assetCardsHeldBySeat(s: State, seat: 'E' | 'W'): CardId[] {
+  const assets = new Set<CardId>(s.assetCardIds ?? []);
+  const cards: CardId[] = [];
+  for (const suit of suitOrder) {
+    for (const rank of s.hands[seat][suit]) {
+      const cardId = toCardId(suit, rank) as CardId;
+      if (assets.has(cardId)) cards.push(cardId);
+    }
+  }
+  return sortCardIdsDesc(cards);
+}
+
+function formatCardListForLog(cardIds: readonly CardId[], separator: string): string {
+  return cardIds.map((cardId) => formatCardText(cardId, { context: 'inline-card' })).join(separator);
+}
+
 function formatDefenderInventoryEqBlock(s: State): string[] {
   const ctx = s.threat as ThreatContext | null;
   const labels = s.threatLabels as DefenderLabels | null;
@@ -4073,7 +4104,9 @@ function formatDefenderInventoryEqBlock(s: State): string[] {
       busyParts.push(`busy:${suit}(${tierParts.join(' ') || 'None'})`);
     }
 
-    seatRows.push(`seat=${seat} | ${idleSummary} | ${busyParts.join(' | ') || 'busy:(None)'}`);
+    const assetCards = assetCardsHeldBySeat(s, seat);
+    const assetSummary = assetCards.length > 0 ? `assets{${formatCardListForLog(assetCards, ' ')}}` : 'assets(None)';
+    seatRows.push(`seat=${seat} | ${idleSummary} | ${busyParts.join(' | ') || 'busy:(None)'} | ${assetSummary}`);
   }
 
   return [
@@ -4127,7 +4160,9 @@ function formatDefenderInventoryEqSeat(s: State, seat: 'E' | 'W'): string {
     busyParts.push(`busy:${suit}(${tierParts.join(' ') || 'None'})`);
   }
 
-  return `${idleSummary} | ${busyParts.join(' | ') || 'busy:(None)'}`;
+  const assetCards = assetCardsHeldBySeat(s, seat);
+  const assetSummary = assetCards.length > 0 ? `assets{${formatCardListForLog(assetCards, ' ')}}` : 'assets(None)';
+  return `${idleSummary} | ${busyParts.join(' | ') || 'busy:(None)'} | ${assetSummary}`;
 }
 
 function cardStatusSnapshot(
@@ -4359,6 +4394,10 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
         if (event.browserDdBackstop) {
           const bs = event.browserDdBackstop;
           playLine += ` | ddsBackstop=${bs.overridden ? 'override' : 'pass'} (policy=${bs.policyChoice}; final=${bs.finalChoice}; safe=${bs.safeCandidates.join(',') || '-'})`;
+        }
+        if (event.assetFilter) {
+          const af = event.assetFilter;
+          playLine += ` | assetFilter=${af.applied ? 'applied' : 'none'} (base=${formatCardListForLog(af.baseCandidates, ',') || '-'}; kept=${formatCardListForLog(af.filteredCandidates, ',') || '-'}; removed=${formatCardListForLog(af.removedAssets, ',') || '-'})`;
         }
         if (event.ddPolicy) {
           playLine += ` | ddPolicy=${event.ddPolicy.bound ? 'bound' : 'fallback'}:${event.ddPolicy.path}`;
@@ -7691,7 +7730,7 @@ function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void 
         currentRevealStage: handDiagramSession.readingControlsRevealStage
       })
     );
-    setWidgetJourneyRuntimeActiveInteractionProfile(widgetJourneyRuntimeState, startupReleaseProfile);
+    setWidgetJourneyRuntimeActiveProfile(startupReleaseProfile);
   };
   if (articleScriptModeEnabled()) {
     const transportResult = createArticleScriptWidgetTransportDriver().start({

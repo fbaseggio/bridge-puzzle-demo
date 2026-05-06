@@ -86,6 +86,8 @@ export type Problem = {
   policies: Partial<Record<Seat, Policy>>;
   threatCardIds?: CardId[];
   resourceCardIds?: CardId[];
+  assetCardIds?: CardId[];
+  preferredLeads?: Partial<Record<'E' | 'W', CardId | CardId[]>>;
   threatSymbolByCardId?: Partial<Record<CardId, string>>;
   preferredDiscards?: Partial<Record<Seat, CardId | CardId[]>>;
   ewVariants?: EwVariant[];
@@ -155,6 +157,8 @@ export type State = {
   policies: Partial<Record<Seat, Policy>>;
   preferredDiscards: Partial<Record<Seat, CardId[]>>;
   preferredDiscardUsed: Partial<Record<Seat, boolean>>;
+  assetCardIds: CardId[];
+  preferredLeads: Partial<Record<'E' | 'W', CardId[]>>;
   ewVariantState: EwVariantState | null;
   replay: ReplayState;
 };
@@ -172,6 +176,12 @@ export type EngineEvent =
       };
       chosenBucket?: string;
       bucketCards?: CardId[];
+      assetFilter?: {
+        applied: boolean;
+        baseCandidates: CardId[];
+        filteredCandidates: CardId[];
+        removedAssets: CardId[];
+      };
       policyClassByCard?: Record<string, string>;
       tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier3c' | 'tier4a' | 'tier4b' | 'tier4c', CardId[]>>;
       ddPolicy?: {

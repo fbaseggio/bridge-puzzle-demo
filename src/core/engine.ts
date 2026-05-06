@@ -164,6 +164,11 @@ function cloneState(state: State): State {
       W: state.preferredDiscards.W ? [...state.preferredDiscards.W] : undefined
     },
     preferredDiscardUsed: { ...state.preferredDiscardUsed },
+    assetCardIds: [...state.assetCardIds],
+    preferredLeads: {
+      E: state.preferredLeads.E ? [...state.preferredLeads.E] : undefined,
+      W: state.preferredLeads.W ? [...state.preferredLeads.W] : undefined
+    },
     ewVariantState: cloneEwVariantState(state.ewVariantState),
     replay: {
       enabled: state.replay.enabled,
@@ -328,6 +333,12 @@ type AutoChoice = {
   preferredDiscard?: PreferredDiscardDecision;
   chosenBucket?: string;
   bucketCards?: CardId[];
+  assetFilter?: {
+    applied: boolean;
+    baseCandidates: CardId[];
+    filteredCandidates: CardId[];
+    removedAssets: CardId[];
+  };
   policyClassByCard?: Record<string, string>;
   tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier3c' | 'tier4a' | 'tier4b' | 'tier4c', CardId[]>>;
   ddPolicy?: {
@@ -483,6 +494,7 @@ function advanceAutoplayLoop(next: State, events: EngineEvent[], collector: Sema
         auto.preferredDiscard,
         auto.chosenBucket,
         auto.bucketCards,
+        auto.assetFilter,
         auto.policyClassByCard,
         auto.tierBuckets,
         auto.ddPolicy,
@@ -525,6 +537,16 @@ function normalizePreferred(problem: Problem): Partial<Record<Seat, CardId[]>> {
   const out: Partial<Record<Seat, CardId[]>> = {};
   for (const seat of TURN_ORDER) {
     const raw = problem.preferredDiscards?.[seat];
+    if (!raw) continue;
+    out[seat] = Array.isArray(raw) ? [...raw] : [raw];
+  }
+  return out;
+}
+
+function normalizePreferredLeads(problem: Problem): Partial<Record<'E' | 'W', CardId[]>> {
+  const out: Partial<Record<'E' | 'W', CardId[]>> = {};
+  for (const seat of ['E', 'W'] as const) {
+    const raw = problem.preferredLeads?.[seat];
     if (!raw) continue;
     out[seat] = Array.isArray(raw) ? [...raw] : [raw];
   }
@@ -717,6 +739,8 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
       threat: state.threat as any,
       resource: state.resource as any,
       threatLabels: state.threatLabels as any,
+      assetCardIds: state.assetCardIds,
+      preferredLeads: state.preferredLeads,
       ewVariantState: state.ewVariantState,
       rng: state.rng
     });
@@ -733,6 +757,7 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
       preferredDiscard: pref ?? undefined,
       chosenBucket: evaluated.chosenBucket ?? 'legal',
       bucketCards: evaluated.bucketCards ?? legal.map((p) => toCardId(p.suit, p.rank)),
+      assetFilter: evaluated.assetFilter,
       policyClassByCard: evaluated.policyClassByCard,
       ddPolicy: evaluated.ddPolicy,
       ewVariantTrace: evaluated.ewVariantTrace,
@@ -754,6 +779,8 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
     threat: state.threat as any,
     resource: state.resource as any,
     threatLabels: state.threatLabels as any,
+    assetCardIds: state.assetCardIds,
+    preferredLeads: state.preferredLeads,
     ewVariantState: state.ewVariantState,
     rng: state.rng
   });
@@ -771,6 +798,7 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
     preferredDiscard: pref ?? undefined,
     chosenBucket: evaluated.chosenBucket,
     bucketCards: evaluated.bucketCards,
+    assetFilter: evaluated.assetFilter,
     policyClassByCard: evaluated.policyClassByCard,
     tierBuckets: evaluated.tierBuckets,
     ddPolicy: evaluated.ddPolicy,
@@ -790,6 +818,7 @@ function applyOnePlay(
   preferredDiscard?: PreferredDiscardDecision,
   chosenBucket?: string,
   bucketCards?: CardId[],
+  assetFilter?: AutoChoice['assetFilter'],
   policyClassByCard?: Record<string, string>,
   tierBuckets?: Partial<Record<'tier3a' | 'tier3b' | 'tier3c' | 'tier4a' | 'tier4b' | 'tier4c', CardId[]>>,
   ddPolicy?: {
@@ -853,6 +882,7 @@ function applyOnePlay(
       preferredDiscard,
       chosenBucket,
       bucketCards,
+      assetFilter,
       policyClassByCard,
       tierBuckets,
       ddPolicy,
@@ -1075,6 +1105,8 @@ export function init(problem: Problem): State {
     policies: { ...problem.policies },
     preferredDiscards: normalizePreferred(problem),
     preferredDiscardUsed: {},
+    assetCardIds: problem.assetCardIds ? [...problem.assetCardIds] : [],
+    preferredLeads: normalizePreferredLeads(problem),
     ewVariantState:
       problem.ewVariants && problem.ewVariants.length > 0
         ? {
