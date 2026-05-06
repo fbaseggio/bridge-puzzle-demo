@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem } from '../../src/demo/problems';
+import {
+  demoProblems,
+  normalizeDemoProblemVariantId,
+  resolveDemoProblem,
+  resolveDemoProblemDdsRequirement
+} from '../../src/demo/problems';
 
 describe('demo problem variants', () => {
   it('loads sure_tricks_demo as a single multi-variant puzzle by default', () => {
@@ -65,5 +70,10 @@ describe('demo problem variants', () => {
     expect(threats).toEqual(['HT', 'ST']);
     expect(resolveDemoProblem(entry, 'a').threatCardIds?.slice().sort()).toEqual(threats);
     expect(resolveDemoProblem(entry, 'b').threatCardIds?.slice().sort()).toEqual(threats);
+  });
+
+  it('marks if_you_see_a_good_play_full_deal as DDS-required', () => {
+    expect(resolveDemoProblemDdsRequirement('if_you_see_a_good_play_full_deal')).toBe('required');
+    expect(resolveDemoProblemDdsRequirement('double_dummy_01')).toBe('optional');
   });
 });

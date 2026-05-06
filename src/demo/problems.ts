@@ -55,12 +55,14 @@ import {
   gorillas12b,
   gorillasFullDeal
 } from '../puzzles/gorillas';
+import { ifYouSeeAGoodPlayFullDeal } from '../puzzles/if_you_see_a_good_play';
 import { listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } from '../encapsulation/workbenchProblems';
 
 export type DemoProblem = {
   id: string;
   label: string;
   puzzleModeId?: 'standard' | 'single-dummy' | 'multi-ew' | 'scripted' | 'draft';
+  ddsRequirement?: 'optional' | 'required';
   problem?: Problem;
   loadProblem?: () => Problem;
   variants?: DemoProblemVariant[];
@@ -103,6 +105,11 @@ export function resolveDemoProblem(entry: DemoProblem, variantId?: string | null
   if (!loaded) throw new Error(`Demo problem '${entry.id}' has no problem payload`);
   cachedById.set(cacheKey, loaded);
   return loaded;
+}
+
+export function resolveDemoProblemDdsRequirement(problemId: string): 'optional' | 'required' {
+  const entry = demoProblems.find((problem) => problem.id === problemId);
+  return entry?.ddsRequirement ?? 'optional';
 }
 
 const encapsulationDemoProblems: DemoProblem[] = listEncapsulationWorkbenchEntries().map((entry) => ({
@@ -206,6 +213,14 @@ export const demoProblems: DemoProblem[] = [
     problem: gorillasFullDeal,
     practiceEligible: false,
     articlePath: 'puzzles/gorillas-full-deal/'
+  },
+  {
+    id: 'if_you_see_a_good_play_full_deal',
+    label: 'if_you_see_a_good_play_full_deal',
+    ddsRequirement: 'required',
+    problem: ifYouSeeAGoodPlayFullDeal,
+    practiceEligible: false,
+    articlePath: 'puzzles/if-you-see-a-good-play/'
   },
   { id: 'gorillas_06', label: 'gorillas_06', problem: gorillas06, practiceEligible: false },
   { id: 'gorillas_07', label: 'gorillas_07', problem: gorillas07, practiceEligible: false },

@@ -55,6 +55,8 @@ type HandDiagramNavigationDeps = {
   isWidgetShellMode: boolean;
   hintLoading: boolean;
   ddsLoadingForHint: boolean;
+  ddsGatePhase: 'ready' | 'waiting' | 'retrying' | 'blocked';
+  ddsGateBlockedMessage: string | null;
   activeHint: { bestCards: CardId[]; textLine: string } | null;
   hintDiag: (message: string) => void;
   handDiagramSession: HandDiagramSession;
@@ -140,6 +142,8 @@ function renderOutcomeModule(args: {
     canonicalRunStatusText,
     isWidgetShellMode,
     ddsLoadingForHint,
+    ddsGatePhase,
+    ddsGateBlockedMessage,
     activeHint,
     hintDiag,
     handDiagramSession,
@@ -200,6 +204,41 @@ function renderOutcomeModule(args: {
     fill.className = 'dds-loading-fill';
     meter.appendChild(fill);
     outcome.append(label, meter);
+    return outcome;
+  }
+
+  if (ddsGatePhase === 'waiting') {
+    outcome.classList.add('dds-loading');
+    const label = document.createElement('span');
+    label.className = 'dds-loading-label';
+    label.textContent = 'Loading DDS analysis';
+    const meter = document.createElement('span');
+    meter.className = 'dds-loading-meter';
+    const fill = document.createElement('span');
+    fill.className = 'dds-loading-fill';
+    meter.appendChild(fill);
+    outcome.append(label, meter);
+    return outcome;
+  }
+
+  if (ddsGatePhase === 'retrying') {
+    outcome.classList.add('dds-loading');
+    const label = document.createElement('span');
+    label.className = 'dds-loading-label';
+    label.textContent = 'Retrying DDS connection';
+    const meter = document.createElement('span');
+    meter.className = 'dds-loading-meter';
+    const fill = document.createElement('span');
+    fill.className = 'dds-loading-fill';
+    meter.appendChild(fill);
+    outcome.append(label, meter);
+    return outcome;
+  }
+
+  if (ddsGateBlockedMessage) {
+    outcome.classList.remove('neutral');
+    outcome.classList.add('warn');
+    outcome.textContent = ddsGateBlockedMessage;
     return outcome;
   }
 

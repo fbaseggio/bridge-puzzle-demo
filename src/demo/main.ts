@@ -40,7 +40,7 @@ import {
 } from '../ai/threatModel';
 import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock, formatInitBlock } from '../ai/threatModelVerbose';
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
-import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem } from './problems';
+import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem, resolveDemoProblemDdsRequirement } from './problems';
 import { buildPracticeQueue, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
 import {
   buildCardStatusSnapshot,
@@ -160,6 +160,7 @@ import {
 } from './articleScriptWidgetTransport';
 import { shouldRenderForWidgetTransportOutcome } from './widgetTransportRenderScheduling';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
+import { waitForRequiredDdsReady, type DdsAvailabilityPhase } from './ddsAvailabilityGate';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -304,6 +305,27 @@ type HintState = {
   badCards: CardId[];
   textLine: string;
 };
+type RequiredDdsActionTrigger = 'hint' | 'play' | 'autoplay' | 'startup' | 'history-replay';
+type RequiredDdsActionFailureReason =
+  | 'runtime-missing'
+  | 'runtime-error'
+  | 'no-safe-match'
+  | 'query-exception'
+  | 'runtime-load-failed';
+type DdsFailureDiagnostics = {
+  action: RequiredDdsActionTrigger;
+  reason: RequiredDdsActionFailureReason;
+  runtimeStatus: ReturnType<typeof getDdsRuntimeStatus>;
+  detail?: string;
+  legalCardIds?: CardId[];
+  policyChoice?: CardId;
+  safeCandidates?: CardId[];
+  ddsCards?: string[];
+  ddsScores?: string[];
+  playedCardIds?: string[];
+  pbn?: string;
+  trump?: string;
+};
 type DdErrorVisualState = {
   seat: Seat;
   goodCards: CardId[];
@@ -426,6 +448,9 @@ let busyBranching: 'strict' | 'sameLevel' | 'allBusy' = 'sameLevel';
 const threatDetail = false;
 const verboseCoverageDetail = false;
 const browserDdsBackstopEnabled = true;
+const REQUIRED_DDS_MAX_ATTEMPTS = 4;
+const REQUIRED_DDS_MAX_WAIT_MS = 2500;
+const REQUIRED_DDS_RETRY_DELAY_MS = 250;
 const initialProblemIdFromUrl: string = (() => {
   if (initialWidgetSnapshotForRestore) {
     const snapshotProblemId = initialWidgetSnapshotForRestore.problem.problemId;
@@ -976,6 +1001,144 @@ function versionUnknownModeEnabled(): boolean {
   return !currentProblemVariantId && Boolean(currentProblem.ewVariants && currentProblem.ewVariants.length > 0);
 }
 
+function currentProblemDdsRequirement(): 'optional' | 'required' {
+  return resolveDemoProblemDdsRequirement(currentProblemId);
+}
+
+function currentProblemRequiresDds(): boolean {
+  return currentProblemDdsRequirement() === 'required';
+}
+
+function syncRequiredDdsAvailabilityFromRuntime(): void {
+  if (!currentProblemRequiresDds()) {
+    requiredDdsAvailabilityPhase = 'ready';
+    requiredDdsBlockedMessage = null;
+    requiredDdsLastHintFailureReason = null;
+    requiredDdsAvailabilityPromise = null;
+    return;
+  }
+  if (getDdsRuntimeStatus() === 'ready') {
+    requiredDdsAvailabilityPhase = 'ready';
+    requiredDdsBlockedMessage = null;
+    requiredDdsLastHintFailureReason = null;
+    requiredDdsAvailabilityPromise = null;
+    return;
+  }
+  if (requiredDdsAvailabilityPhase === 'blocked') return;
+  requiredDdsAvailabilityPhase = 'waiting';
+}
+
+function requiredDdsStatusMessage(): string | null {
+  if (!currentProblemRequiresDds()) return null;
+  if (requiredDdsAvailabilityPhase === 'blocked') {
+    return requiredDdsBlockedMessage ?? 'DDS unavailable. This puzzle requires DDS-backed analysis.';
+  }
+  if (requiredDdsAvailabilityPhase === 'retrying') {
+    return 'Retrying DDS connection...';
+  }
+  if (requiredDdsAvailabilityPhase === 'waiting') {
+    return 'Loading DDS analysis... Please wait.';
+  }
+  return null;
+}
+
+function blockRequiredDds(
+  reason: RequiredDdsActionFailureReason,
+  message: string,
+  action: RequiredDdsActionTrigger,
+  diagnostics: Partial<DdsFailureDiagnostics> = {}
+): void {
+  if (!currentProblemRequiresDds()) return;
+  requiredDdsAvailabilityPhase = 'blocked';
+  requiredDdsBlockedMessage = message;
+  recordDdsFailure({
+    action,
+    reason,
+    runtimeStatus: getDdsRuntimeStatus(),
+    ...diagnostics
+  });
+  if (reason !== 'runtime-missing') {
+    console.warn(`[DDS-GATE] blocked action=${action} reason=${reason} message=${message}`);
+  }
+}
+
+function ensureRequiredDdsAvailability(trigger: RequiredDdsActionTrigger): Promise<boolean> {
+  if (!currentProblemRequiresDds()) {
+    requiredDdsAvailabilityPhase = 'ready';
+    requiredDdsBlockedMessage = null;
+    requiredDdsLastHintFailureReason = null;
+    requiredDdsAvailabilityPromise = null;
+    return Promise.resolve(true);
+  }
+  if (getDdsRuntimeStatus() === 'ready') {
+    requiredDdsAvailabilityPhase = 'ready';
+    requiredDdsBlockedMessage = null;
+    requiredDdsLastHintFailureReason = null;
+    requiredDdsAvailabilityPromise = null;
+    return Promise.resolve(true);
+  }
+  if (requiredDdsAvailabilityPromise) return requiredDdsAvailabilityPromise;
+
+  requiredDdsAvailabilityPhase = 'waiting';
+  requiredDdsBlockedMessage = null;
+  const startSeq = hintRequestSeq;
+  requiredDdsAvailabilityPromise = waitForRequiredDdsReady({
+    requirement: 'required',
+    getRuntimeStatus: getDdsRuntimeStatus,
+    ensureRuntime: ensureDdsRuntime,
+    maxAttempts: REQUIRED_DDS_MAX_ATTEMPTS,
+    maxWaitMs: REQUIRED_DDS_MAX_WAIT_MS,
+    retryDelayMs: REQUIRED_DDS_RETRY_DELAY_MS,
+    onProgress: (update) => {
+      requiredDdsAvailabilityPhase = update.phase;
+      if (requiredDdsBlockedMessage) requiredDdsBlockedMessage = null;
+      ddsDiag(
+        `gate-progress action=${trigger} phase=${update.phase} attempts=${update.attempts} elapsedMs=${update.elapsedMs} runtime=${update.runtimeStatus}`
+      );
+      render();
+    }
+  })
+    .then((result) => {
+      if (result.phase === 'ready') {
+        requiredDdsAvailabilityPhase = 'ready';
+        requiredDdsBlockedMessage = null;
+        requiredDdsLastHintFailureReason = null;
+        ddsDiag(
+          `gate-ready action=${trigger} attempts=${result.attempts} elapsedMs=${result.elapsedMs} runtime=${result.runtimeStatus}`
+        );
+        return true;
+      }
+      blockRequiredDds(
+        'runtime-load-failed',
+        'DDS runtime load/retry failed. This puzzle requires DDS-backed analysis.',
+        trigger,
+        {
+          detail: `attempts=${result.attempts} elapsedMs=${result.elapsedMs} status=${result.runtimeStatus}`
+        }
+      );
+      console.warn(
+        `[DDS-GATE] blocked trigger=${trigger} attempts=${result.attempts} elapsedMs=${result.elapsedMs} status=${result.runtimeStatus}`
+      );
+      if (startSeq === hintRequestSeq && handDiagramSession.status.type === 'hint') {
+        handDiagramSession.status = { type: 'default', text: '' };
+      }
+      return false;
+    })
+    .finally(() => {
+      requiredDdsAvailabilityPromise = null;
+      render();
+    });
+  return requiredDdsAvailabilityPromise;
+}
+
+function requireDdsReadyForAction(trigger: RequiredDdsActionTrigger): boolean {
+  if (!currentProblemRequiresDds()) return true;
+  syncRequiredDdsAvailabilityFromRuntime();
+  if (requiredDdsAvailabilityPhase === 'ready') return true;
+  void ensureRequiredDdsAvailability(trigger);
+  return false;
+}
+
 function configuredUserControls(base: Seat[] = currentProblem.userControls): Seat[] {
   if (articleScriptModeEnabled()) return ['N', 'E', 'S', 'W'];
   return autoplayEw ? [...base] : ['N', 'E', 'S', 'W'];
@@ -1087,6 +1250,10 @@ let activeHintKey: string | null = null;
 let hintLoading = false;
 let ddsLoadingForHint = false;
 let hintRequestSeq = 0;
+let requiredDdsAvailabilityPhase: DdsAvailabilityPhase = 'ready';
+let requiredDdsBlockedMessage: string | null = null;
+let requiredDdsAvailabilityPromise: Promise<boolean> | null = null;
+let requiredDdsLastHintFailureReason: RequiredDdsActionFailureReason | null = null;
 let ddErrorVisual: DdErrorVisualState | null = null;
 let inevitableFailureAlert = false;
 function applyWidgetProblemDefaults(): void {
@@ -1892,6 +2059,40 @@ function classifyDdErrorForReplay(
   }
 }
 
+function unavailableDdsHintFallback(
+  reason: RequiredDdsActionFailureReason,
+  diagnostics: Partial<DdsFailureDiagnostics> = {}
+): HintState | null {
+  if (currentProblemRequiresDds()) {
+    requiredDdsLastHintFailureReason = reason;
+    recordDdsFailure({
+      action: 'hint',
+      reason,
+      runtimeStatus: getDdsRuntimeStatus(),
+      ...diagnostics
+    });
+    if (reason === 'runtime-missing') {
+      void ensureRequiredDdsAvailability('hint');
+      if (requiredDdsAvailabilityPhase !== 'blocked') requiredDdsAvailabilityPhase = 'waiting';
+    } else if (reason === 'runtime-error' || reason === 'query-exception') {
+      requiredDdsAvailabilityPhase = 'retrying';
+      requiredDdsBlockedMessage = null;
+    } else if (reason === 'no-safe-match') {
+      blockRequiredDds(
+        reason,
+        'DDS returned no usable hint move for this position. Hint unavailable.',
+        'hint'
+      );
+    }
+    return null;
+  }
+  return {
+    bestCards: [],
+    badCards: [],
+    textLine: 'BEST: (DDS unavailable)'
+  };
+}
+
 function classifyHintForReplay(
   replayState: State,
   replayProblem: ProblemWithThreats,
@@ -1906,11 +2107,17 @@ function classifyHintForReplay(
     contract: replayState.contract,
     playedCardIds
   });
-  if (!dds.ok) return {
-    bestCards: [],
-    badCards: [],
-    textLine: 'BEST: (DDS unavailable)'
-  };
+  if (!dds.ok) {
+    return unavailableDdsHintFallback(dds.reason === 'runtime-error' ? 'runtime-error' : 'runtime-missing', {
+      runtimeStatus: dds.runtimeStatus,
+      detail: dds.detail,
+      legalCardIds,
+      playedCardIds: [...playedCardIds],
+      pbn: dds.pbn,
+      trump: dds.trump,
+      ddsCards: dds.plays
+    });
+  }
   const scoreByCard = buildDdsScoreByCard(dds.result.plays);
   let bestScore = Number.NEGATIVE_INFINITY;
   for (const cardId of legalCardIds) {
@@ -1918,11 +2125,12 @@ function classifyHintForReplay(
     if (typeof score === 'number' && score > bestScore) bestScore = score;
   }
   if (!Number.isFinite(bestScore)) {
-    return {
-      bestCards: [],
-      badCards: [],
-      textLine: 'BEST: (DDS unavailable)'
-    };
+    return unavailableDdsHintFallback('no-safe-match', {
+      legalCardIds,
+      playedCardIds: [...playedCardIds],
+      ddsScores: summarizeDdsScores(dds.result.plays),
+      ddsCards: (dds.result.plays ?? []).map((play) => `${play.suit}${String(play.rank)}`)
+    });
   }
   const bestCards: CardId[] = [];
   const badCards: CardId[] = [];
@@ -2014,6 +2222,39 @@ function hintDiag(message: string): void {
   logs = [...logs, `[HINT] ${message}`].slice(-500);
 }
 
+function ddsDiag(message: string): void {
+  console.info(`[DDS-DIAG] ${message}`);
+  if (!enabledLogChannels.has('dds')) return;
+  logs = [...logs, `[DDS-DIAG] ${message}`].slice(-500);
+}
+
+function summarizeDdsScores(rawPlays: Array<{ suit: string; rank: string; score?: number }> | undefined): string[] {
+  if (!rawPlays || rawPlays.length === 0) return [];
+  return rawPlays.map((play) => {
+    const card = `${String(play.suit).toUpperCase()}${String(play.rank).toUpperCase()}`;
+    const score = typeof play.score === 'number' ? String(play.score) : '-';
+    return `${card}:${score}`;
+  });
+}
+
+function recordDdsFailure(diag: DdsFailureDiagnostics): void {
+  const parts = [
+    `action=${diag.action}`,
+    `reason=${diag.reason}`,
+    `runtime=${diag.runtimeStatus}`,
+    `legal={${diag.legalCardIds?.join(',') || '-'}}`,
+    `policy=${diag.policyChoice ?? '-'}`,
+    `safe={${diag.safeCandidates?.join(',') || '-'}}`,
+    `ddsCards={${diag.ddsCards?.join(',') || '-'}}`,
+    `ddsScores={${diag.ddsScores?.join(',') || '-'}}`,
+    `played={${diag.playedCardIds?.join(',') || '-'}}`,
+    `trump=${diag.trump ?? '-'}`,
+    `pbn=${diag.pbn ?? '-'}`,
+    `detail=${diag.detail ?? '-'}`
+  ];
+  ddsDiag(parts.join(' '));
+}
+
 function verboseDetailEnabled(): boolean {
   return enabledLogChannels.has('verboseInternals');
 }
@@ -2055,7 +2296,47 @@ function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameter
       playedCardIds
     });
 
+    const ddsRequired = currentProblemRequiresDds();
+
     if (!dds.ok) {
+      if (ddsRequired) {
+        recordDdsFailure({
+          action: 'autoplay',
+          reason: dds.reason === 'runtime-error' ? 'runtime-error' : 'runtime-missing',
+          runtimeStatus: dds.runtimeStatus,
+          detail: dds.detail,
+          legalCardIds: legalCandidates,
+          policyChoice,
+          playedCardIds: [...playedCardIds],
+          pbn: dds.pbn,
+          trump: dds.trump,
+          ddsCards: dds.plays
+        });
+        requiredDdsAvailabilityPhase = dds.reason === 'runtime-missing' ? 'waiting' : 'retrying';
+        requiredDdsBlockedMessage = null;
+        if (dds.reason === 'runtime-missing') {
+          void ensureRequiredDdsAvailability('autoplay');
+        } else {
+          blockRequiredDds(
+            'runtime-error',
+            'DDS query failed while choosing an E/W autoplay card. Action refused.',
+            'autoplay',
+            {
+              detail: dds.detail,
+              legalCardIds: legalCandidates,
+              policyChoice,
+              playedCardIds: [...playedCardIds],
+              pbn: dds.pbn,
+              trump: dds.trump,
+              ddsCards: dds.plays
+            }
+          );
+        }
+        return {
+          blocked: true,
+          reason: `DDS-required autoplay refused (${dds.reason}${dds.detail ? `: ${dds.detail}` : ''})`
+        };
+      }
       playedCardIds.push(policyChoice);
       return {
         play: autoChoice.play,
@@ -2075,6 +2356,24 @@ function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameter
 
     const scoredLegal = legalCandidates.filter((card) => scoreByCard.has(card));
     if (scoredLegal.length === 0) {
+      if (ddsRequired) {
+        blockRequiredDds(
+          'no-safe-match',
+          'DDS returned no usable E/W autoplay move for this position. Action refused.',
+          'autoplay',
+          {
+            legalCardIds: legalCandidates,
+            policyChoice,
+            playedCardIds: [...playedCardIds],
+            ddsCards: (dds.result.plays ?? []).map((play) => `${play.suit}${String(play.rank)}`),
+            ddsScores: summarizeDdsScores(dds.result.plays)
+          }
+        );
+        return {
+          blocked: true,
+          reason: 'DDS-required autoplay refused (no usable legal-card mapping)'
+        };
+      }
       playedCardIds.push(policyChoice);
       return {
         play: autoChoice.play,
@@ -2092,6 +2391,39 @@ function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameter
 
     const maxScore = Math.max(...scoredLegal.map((card) => scoreByCard.get(card) ?? Number.NEGATIVE_INFINITY));
     const safeCandidates = legalCandidates.filter((card) => (scoreByCard.get(card) ?? Number.NEGATIVE_INFINITY) === maxScore);
+    if (safeCandidates.length === 0) {
+      if (ddsRequired) {
+        blockRequiredDds(
+          'no-safe-match',
+          'DDS produced no safe autoplay candidates. Action refused.',
+          'autoplay',
+          {
+            legalCardIds: legalCandidates,
+            policyChoice,
+            playedCardIds: [...playedCardIds],
+            ddsCards: (dds.result.plays ?? []).map((play) => `${play.suit}${String(play.rank)}`),
+            ddsScores: summarizeDdsScores(dds.result.plays)
+          }
+        );
+        return {
+          blocked: true,
+          reason: 'DDS-required autoplay refused (zero safe candidates)'
+        };
+      }
+      playedCardIds.push(policyChoice);
+      return {
+        play: autoChoice.play,
+        trace: {
+          source: 'browser-dds',
+          legalCandidates,
+          policyChoice,
+          safeCandidates: [],
+          finalChoice: policyChoice,
+          overridden: false,
+          reason: 'no-safe-match'
+        }
+      };
+    }
     const finalChoice = safeCandidates.includes(policyChoice) ? policyChoice : safeCandidates[0];
     const finalPlay = legalPlays.find((p) => (toCardId(p.suit, p.rank) as CardId) === finalChoice) ?? autoChoice.play;
     playedCardIds.push(finalChoice);
@@ -2149,6 +2481,10 @@ function classifyHintForCurrentPosition(): HintState | null {
     `classify gate phase=${gate.phase} trickFrozen=${gate.trickFrozen} canLeadDismiss=${gate.canLeadDismiss} turn=${gate.turn} userTurn=${gate.userTurn} legal=${gate.legalCount} allowed=${gate.allowed}`
   );
   if (!gate.allowed) return null;
+  if (currentProblemRequiresDds() && getDdsRuntimeStatus() !== 'ready') {
+    hintDiag(`classify blocked requiredDDS status=${getDdsRuntimeStatus()}`);
+    return null;
+  }
   const legal = legalPlays(state).filter((p) => p.seat === state.turn);
   const legalCardIds = legal.map((p) => toCardId(p.suit, p.rank) as CardId);
   hintDiag(`dds query start legal=${legalCardIds.join(' ') || '-'}`);
@@ -2163,11 +2499,10 @@ function classifyHintForCurrentPosition(): HintState | null {
         const hint = classifyHintForReplay(replayState, replayProblem, ddsPlayHistory);
         if (!hint || hint.textLine === 'BEST: (DDS unavailable)') {
           hintDiag(`dds query result variant=${variantId} ok=no reason=runtime-unavailable`);
-          return {
-            bestCards: [],
-            badCards: [],
-            textLine: 'BEST: (DDS unavailable)'
-          };
+          return unavailableDdsHintFallback(requiredDdsLastHintFailureReason ?? 'runtime-missing', {
+            legalCardIds,
+            playedCardIds: [...ddsPlayHistory]
+          });
         }
         hintDiag(`dds query result variant=${variantId} ok=yes best=${hint.bestCards.join(' ') || '-'}`);
         hintSets.push(hint.bestCards);
@@ -2199,11 +2534,15 @@ function classifyHintForCurrentPosition(): HintState | null {
     });
     if (!dds.ok) {
       hintDiag(`dds query result ok=no reason=${dds.reason}${dds.detail ? ` detail=${dds.detail}` : ''}`);
-      return {
-        bestCards: [],
-        badCards: [],
-        textLine: 'BEST: (DDS unavailable)'
-      };
+      return unavailableDdsHintFallback(dds.reason === 'runtime-error' ? 'runtime-error' : 'runtime-missing', {
+        runtimeStatus: dds.runtimeStatus,
+        detail: dds.detail,
+        legalCardIds,
+        playedCardIds: [...ddsPlayHistory],
+        pbn: dds.pbn,
+        trump: dds.trump,
+        ddsCards: dds.plays
+      });
     }
     hintDiag(`dds query result ok=yes plays=${dds.result.plays?.length ?? 0}`);
     const compactBrowserDds = (dds.result.plays ?? [])
@@ -2225,11 +2564,12 @@ function classifyHintForCurrentPosition(): HintState | null {
 
     if (!Number.isFinite(bestScore)) {
       hintDiag(`dds mapping empty legal=${legalCardIds.join(' ') || '-'} dds=${rawDdsCards.join(' ') || '-'}`);
-      return {
-        bestCards: [],
-        badCards: [],
-        textLine: 'BEST: (DDS unavailable)'
-      };
+      return unavailableDdsHintFallback('no-safe-match', {
+        legalCardIds,
+        playedCardIds: [...ddsPlayHistory],
+        ddsCards: rawDdsCards,
+        ddsScores: summarizeDdsScores(dds.result.plays)
+      });
     }
 
     const bestCards: CardId[] = [];
@@ -2245,11 +2585,11 @@ function classifyHintForCurrentPosition(): HintState | null {
     return { bestCards, badCards, textLine };
   } catch (error) {
     hintDiag(`classify exception ${error instanceof Error ? error.message : String(error)}`);
-    return {
-      bestCards: [],
-      badCards: [],
-      textLine: 'BEST: (DDS unavailable)'
-    };
+    return unavailableDdsHintFallback('query-exception', {
+      detail: error instanceof Error ? error.message : String(error),
+      legalCardIds,
+      playedCardIds: [...ddsPlayHistory]
+    });
   }
 }
 
@@ -2483,7 +2823,21 @@ function requestHint(): void {
   if (!hintsEnabled) return;
   hintDiag('requestHint start');
   const reqSeq = ++hintRequestSeq;
-  const continueWithHint = (): void => {
+  if (!requireDdsReadyForAction('hint')) {
+    ddsLoadingForHint = currentProblemRequiresDds()
+      && (requiredDdsAvailabilityPhase === 'waiting' || requiredDdsAvailabilityPhase === 'retrying');
+    hintLoading = false;
+    activeHint = null;
+    activeHintKey = null;
+    if (currentProblemRequiresDds() && requiredDdsAvailabilityPhase === 'blocked' && handDiagramSession.status.type === 'hint') {
+      handDiagramSession.status = { type: 'default', text: '' };
+    }
+    render();
+    return;
+  }
+
+  const continueWithHint = (retryCount: number = 0): void => {
+    ddsLoadingForHint = false;
     hintLoading = true;
     render();
     setTimeout(() => {
@@ -2493,6 +2847,57 @@ function requestHint(): void {
       hintLoading = false;
       if (!hint) {
         hintDiag('classify null');
+        if (currentProblemRequiresDds()) {
+          const reason = requiredDdsLastHintFailureReason;
+          if (
+            (reason === 'runtime-error' || reason === 'query-exception')
+            && retryCount < 2
+          ) {
+            requiredDdsAvailabilityPhase = 'retrying';
+            ddsLoadingForHint = true;
+            hintLoading = false;
+            render();
+            setTimeout(() => {
+              if (reqSeq !== hintRequestSeq) return;
+              continueWithHint(retryCount + 1);
+            }, REQUIRED_DDS_RETRY_DELAY_MS);
+            return;
+          }
+          if (reason === 'runtime-missing' && retryCount < 2) {
+            requiredDdsAvailabilityPhase = 'waiting';
+            ddsLoadingForHint = true;
+            hintLoading = false;
+            render();
+            void ensureRequiredDdsAvailability('hint').then((ready) => {
+              if (reqSeq !== hintRequestSeq) return;
+              if (ready) {
+                continueWithHint(retryCount + 1);
+                return;
+              }
+              render();
+            });
+            return;
+          }
+          if (reason === 'runtime-error' || reason === 'query-exception') {
+            blockRequiredDds(
+              reason,
+              'DDS query failed while calculating a hint. Hint unavailable.',
+              'hint'
+            );
+          } else if (reason === 'runtime-missing') {
+            blockRequiredDds(
+              'runtime-load-failed',
+              'DDS runtime is still unavailable. Hint unavailable for this DDS-required puzzle.',
+              'hint'
+            );
+          }
+          ddsLoadingForHint = requiredDdsAvailabilityPhase === 'waiting' || requiredDdsAvailabilityPhase === 'retrying';
+          hintLoading = false;
+          activeHint = null;
+          activeHintKey = null;
+          render();
+          return;
+        }
         activeHint = {
           bestCards: [],
           badCards: [],
@@ -2511,6 +2916,11 @@ function requestHint(): void {
       render();
     }, 0);
   };
+
+  if (currentProblemRequiresDds()) {
+    continueWithHint();
+    return;
+  }
 
   if (getDdsRuntimeStatus() !== 'ready') {
     ddsLoadingForHint = true;
@@ -2539,6 +2949,7 @@ function requestHint(): void {
 
 function syncAlwaysHint(): void {
   if (!alwaysHint) return;
+  if (!requireDdsReadyForAction('hint')) return;
   const noPlayYet = ddsPlayHistory.length === 0 && state.trick.length === 0 && !trickFrozen;
   if (noPlayYet) return;
   const key = hintPositionKey();
@@ -4566,6 +4977,10 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
 }
 
 function advanceAutoplayFromCurrentState(): void {
+  if (!requireDdsReadyForAction('autoplay')) {
+    render();
+    return;
+  }
   const before = state;
   const ddsHistoryForTurn = [...ddsPlayHistory];
   const result = autoplayUntilUserOrEnd(state, {
@@ -4658,6 +5073,8 @@ function resetGame(seed: number, reason: string, options: ResetGameOptions = {})
     autoplayEw = false;
     resetToCurrentArticleCheckpoint();
   }
+  syncRequiredDdsAvailabilityFromRuntime();
+  if (currentProblemRequiresDds()) void ensureRequiredDdsAvailability('startup');
   render();
 }
 
@@ -4717,6 +5134,8 @@ function selectProblem(problemId: string, variantId?: string | null): void {
     autoplayEw = false;
     resetToCurrentArticleCheckpoint();
   }
+  syncRequiredDdsAvailabilityFromRuntime();
+  if (currentProblemRequiresDds()) void ensureRequiredDdsAvailability('startup');
   render();
 }
 
@@ -4737,6 +5156,10 @@ function backupLastUserPlay(): void {
 function runTurn(play: Play): void {
   if (articleScriptModeEnabled() && articleScriptWaitingOnDds()) {
     ensureArticleScriptDdsLoading();
+    render();
+    return;
+  }
+  if (!requireDdsReadyForAction('play')) {
     render();
     return;
   }
@@ -7042,6 +7465,10 @@ function render(): void {
     isWidgetShellMode,
     hintLoading,
     ddsLoadingForHint,
+    ddsGatePhase: currentProblemRequiresDds() ? requiredDdsAvailabilityPhase : 'ready',
+    ddsGateBlockedMessage: requiredDdsStatusMessage() && requiredDdsAvailabilityPhase === 'blocked'
+      ? requiredDdsStatusMessage()
+      : null,
     activeHint,
     hintDiag,
     handDiagramSession,
@@ -7166,6 +7593,10 @@ function render(): void {
 
 function replayInitialUserHistoryIfPresent(): void {
   if (displayMode !== 'analysis' || initialUserHistoryFromUrl.length === 0) return;
+  if (!requireDdsReadyForAction('history-replay')) {
+    render();
+    return;
+  }
   const applied: CardId[] = [];
   for (const cardId of initialUserHistoryFromUrl) {
     if (state.phase === 'end') break;
@@ -7274,6 +7705,10 @@ function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void 
 
   releaseStartupJourney();
   if (startupOpening.length === 0) {
+    if (!requireDdsReadyForAction('startup')) {
+      render();
+      return;
+    }
     if (singleStep) {
       const moved = advanceOneWidgetCard();
       if (!moved) render();
@@ -7326,6 +7761,7 @@ function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void 
     const result = apply(steppedState, play, { eventCollector: semanticCollector });
     state = result.state;
     state.userControls = [...originalUserControls];
+    ddsPlayHistory.push(`${play.suit}${play.rank}`);
     collectTeachingRecolorEventsForTurn(before, result.events);
     const trickCompleteIndex = result.events.findIndex((event) => event.type === 'trickComplete');
     if (trickCompleteIndex >= 0) {
@@ -7460,4 +7896,6 @@ ensureReadingInteractionTracking();
 ensureWidgetSnapshotDebugShortcut();
 replayInitialUserHistoryIfPresent();
 warmDdsRuntime();
+syncRequiredDdsAvailabilityFromRuntime();
+if (currentProblemRequiresDds()) void ensureRequiredDdsAvailability('startup');
 render();

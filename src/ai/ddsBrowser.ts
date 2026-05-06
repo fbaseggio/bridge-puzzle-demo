@@ -183,11 +183,19 @@ export type DdsQueryInput = {
 
 export type DdsQueryResult =
   | { ok: true; result: DdsResult; pbn: string; trump: string; plays: string[] }
-  | { ok: false; reason: 'runtime-missing' | 'runtime-error'; detail?: string };
+  | {
+      ok: false;
+      reason: 'runtime-missing' | 'runtime-error';
+      detail?: string;
+      runtimeStatus: 'idle' | 'loading' | 'ready' | 'failed';
+      pbn?: string;
+      trump?: string;
+      plays?: string[];
+    };
 
 export function queryDdsNextPlays(input: DdsQueryInput): DdsQueryResult {
   if (typeof window === 'undefined' || typeof window.nextPlays !== 'function') {
-    return { ok: false, reason: 'runtime-missing' };
+    return { ok: false, reason: 'runtime-missing', runtimeStatus: ddsRuntimeStatus };
   }
 
   const rotated = rotateSeatsFromLeader(input.openingLeader);
@@ -200,6 +208,6 @@ export function queryDdsNextPlays(input: DdsQueryInput): DdsQueryResult {
     return { ok: true, result, pbn, trump, plays };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    return { ok: false, reason: 'runtime-error', detail };
+    return { ok: false, reason: 'runtime-error', detail, runtimeStatus: ddsRuntimeStatus, pbn, trump, plays };
   }
 }

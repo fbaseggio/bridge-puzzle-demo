@@ -15,6 +15,7 @@ export default defineConfig({
         puzzlesSureTricksDemo: resolve(__dirname, 'puzzles/sure-tricks-demo/index.html'),
         puzzlesCoffinExamples: resolve(__dirname, 'puzzles/coffin-examples/index.html'),
         puzzlesGorillasFullDeal: resolve(__dirname, 'puzzles/gorillas-full-deal/index.html'),
+        puzzlesIfYouSeeAGoodPlay: resolve(__dirname, 'puzzles/if-you-see-a-good-play/index.html'),
         doubleDummy1: resolve(__dirname, 'articles/double-dummy-1/index.html'),
         experimentalDraft: resolve(__dirname, 'articles/experimental-draft/index.html'),
         squeezeSelf: resolve(__dirname, 'articles/squeeze-self/index.html'),

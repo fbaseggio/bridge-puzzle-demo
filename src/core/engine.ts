@@ -395,7 +395,10 @@ type ApplyOptions = {
     policy: Policy;
     legalPlays: Play[];
     autoChoice: AutoChoice;
-  }) => { play: Play; trace?: AutoChoice['browserDdBackstop'] } | null;
+  }) =>
+    | { play: Play; trace?: AutoChoice['browserDdBackstop'] }
+    | { blocked: true; reason: string; trace?: AutoChoice['browserDdBackstop'] }
+    | null;
 };
 
 type AutoAdvanceOptions = Omit<ApplyOptions, 'userDdError'>;
@@ -432,6 +435,10 @@ function advanceAutoplayLoop(next: State, events: EngineEvent[], collector: Sema
         legalPlays: legalNow,
         autoChoice: auto
       });
+      if (adjusted && 'blocked' in adjusted && adjusted.blocked) {
+        events.push({ type: 'illegal', reason: adjusted.reason });
+        break;
+      }
       if (adjusted?.play) {
         auto = {
           ...auto,

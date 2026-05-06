@@ -10,6 +10,39 @@ import { p012 } from '../src/puzzles/p012';
 import { p013 } from '../src/puzzles/p013';
 
 describe('bridge engine v0.1', () => {
+  test('autoplay backstop can refuse autoplay with an explicit illegal event', () => {
+    const problem: Problem = {
+      id: 'autoplay-backstop-blocked',
+      contract: { strain: 'NT' },
+      leader: 'N',
+      userControls: ['N'],
+      goal: { type: 'minTricks', side: 'NS', n: 0 },
+      hands: {
+        N: { S: ['A'], H: [], D: [], C: [] },
+        E: { S: ['K'], H: [], D: [], C: [] },
+        S: { S: ['Q'], H: [], D: [], C: [] },
+        W: { S: ['J'], H: [], D: [], C: [] }
+      },
+      policies: {
+        E: { kind: 'randomLegal' },
+        S: { kind: 'randomLegal' },
+        W: { kind: 'randomLegal' }
+      },
+      rngSeed: 42
+    };
+
+    const state = init(problem);
+    const result = apply(state, { seat: 'N', suit: 'S', rank: 'A' }, {
+      autoplayBackstop: () => ({
+        blocked: true,
+        reason: 'DDS-required autoplay refused (runtime unavailable)'
+      })
+    });
+
+    expect(result.events.some((event) => event.type === 'illegal')).toBe(true);
+    expect(result.events.some((event) => event.type === 'autoplay')).toBe(false);
+  });
+
   test('follow suit enforcement', () => {
     const problem: Problem = {
       id: 'follow-suit',
