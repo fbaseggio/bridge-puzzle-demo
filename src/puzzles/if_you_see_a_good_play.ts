@@ -20,6 +20,11 @@ export const ifYouSeeAGoodPlayFullDeal: Problem = {
     E: { kind: 'threatAware' },
     W: { kind: 'threatAware' }
   },
-  threatCardIds: ['HT', 'D8'],
+  threatCardIds: ['D8'],
+  assetCardIds: ['S8', 'HK', 'HJ', 'H9', 'CT', 'C6', 'DK', 'DQ'],
+  preferredLeads: {
+    E: ['DQ', 'CT', 'C6'],
+    W: ['S4', 'S2']
+  },
   rngSeed: 805
 };

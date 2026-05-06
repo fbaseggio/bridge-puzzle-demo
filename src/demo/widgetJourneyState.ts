@@ -89,6 +89,12 @@ export function resolveWidgetJourneyStartupReleaseRevealStage(input: {
   return input.currentRevealStage === 'collapsed' ? 'quiet' : input.currentRevealStage;
 }
 
+export function defaultAlertMistakesEnabledForWidgetJourneyProfile(
+  profile: WidgetJourneyProfile | null
+): boolean {
+  return profile !== 'puzzle-solving';
+}
+
 export function resolveWidgetJourneyState(input: ResolveWidgetJourneyStateInput): WidgetJourneyState {
   if (input.displayMode !== 'widget') {
     return {

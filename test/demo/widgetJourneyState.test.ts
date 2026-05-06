@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  defaultAlertMistakesEnabledForWidgetJourneyProfile,
   resolveWidgetJourneyStartupAffordanceLabel,
   resolveWidgetJourneyStartupReleaseProfile,
   resolveWidgetJourneyStartupReleaseRevealStage,
@@ -181,5 +182,13 @@ describe('widgetJourneyState', () => {
         currentRevealStage: 'full'
       })
     ).toBe('full');
+  });
+
+  it('defaults alert mistakes off for puzzle-solving journey profile', () => {
+    expect(defaultAlertMistakesEnabledForWidgetJourneyProfile('puzzle-solving')).toBe(false);
+    expect(defaultAlertMistakesEnabledForWidgetJourneyProfile('story-viewing')).toBe(true);
+    expect(defaultAlertMistakesEnabledForWidgetJourneyProfile('solution-viewing')).toBe(true);
+    expect(defaultAlertMistakesEnabledForWidgetJourneyProfile('reading-profile')).toBe(true);
+    expect(defaultAlertMistakesEnabledForWidgetJourneyProfile(null)).toBe(true);
   });
 });
