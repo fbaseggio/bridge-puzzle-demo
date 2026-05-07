@@ -74,6 +74,7 @@ describe('demo problem variants', () => {
 
   it('marks if_you_see_a_good_play_full_deal as DDS-required', () => {
     expect(resolveDemoProblemDdsRequirement('if_you_see_a_good_play_full_deal')).toBe('required');
+    expect(resolveDemoProblemDdsRequirement('for_barry_full_deal')).toBe('required');
     expect(resolveDemoProblemDdsRequirement('double_dummy_01')).toBe('optional');
   });
 });

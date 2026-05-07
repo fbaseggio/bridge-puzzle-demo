@@ -110,6 +110,7 @@ import {
   dismissOutcome,
   markReadingInteractionStarted,
   resetReadingReveal,
+  setCompanionContent,
   setReadingControlsRevealStage,
   setMessage,
   type HandDiagramCompanionContent,
@@ -597,7 +598,80 @@ function currentArticleScriptTerminalLabel(): 'Complete' | 'End' | null {
   return articleScriptCoordinator.currentArticleScriptTerminalLabel();
 }
 
+function currentArticleScriptAllAuthoredBranchesComplete(): boolean {
+  return articleScriptCoordinator.currentArticleScriptAllAuthoredBranchesComplete();
+}
+
+function currentArticleScriptProblemCompleteEligibilityKey(): string | null {
+  const scriptState = articleScriptCoordinator.getArticleScriptState();
+  if (!scriptState) return null;
+  if (currentArticleScriptTerminalLabel() !== 'Complete') return null;
+  if (!currentArticleScriptAllAuthoredBranchesComplete()) return null;
+  return `${currentProblemId}|${scriptState.spec.id}|${scriptState.checkpointId ?? ''}`;
+}
+
+function clearArticleScriptProblemCompleteTimer(): void {
+  if (!articleScriptProblemCompleteTimer) return;
+  clearTimeout(articleScriptProblemCompleteTimer);
+  articleScriptProblemCompleteTimer = null;
+}
+
+function clearArticleScriptProblemCompletePromotionState(): void {
+  clearArticleScriptProblemCompleteTimer();
+  articleScriptProblemCompletePendingKey = null;
+  articleScriptProblemCompletePromotedKey = null;
+  articleScriptProblemCompleteCompanionInjected = false;
+  articleScriptProblemCompleteCompanionText = null;
+}
+
+function currentArticleScriptPromotedProblemCompleteSummary(): string | null {
+  const eligibilityKey = currentArticleScriptProblemCompleteEligibilityKey();
+  if (!eligibilityKey) return null;
+  if (articleScriptProblemCompletePromotedKey !== eligibilityKey) return null;
+  return `Problem Complete! ${currentArticleScriptProgressSummary()}`;
+}
+
+function syncArticleScriptProblemCompletePromotion(): void {
+  const eligibilityKey = currentArticleScriptProblemCompleteEligibilityKey();
+  if (!eligibilityKey) {
+    clearArticleScriptProblemCompleteTimer();
+    articleScriptProblemCompletePendingKey = null;
+    return;
+  }
+  if (articleScriptProblemCompletePromotedKey === eligibilityKey) return;
+  if (articleScriptProblemCompletePendingKey === eligibilityKey && articleScriptProblemCompleteTimer) return;
+  clearArticleScriptProblemCompleteTimer();
+  articleScriptProblemCompletePendingKey = eligibilityKey;
+  articleScriptProblemCompleteTimer = setTimeout(() => {
+    articleScriptProblemCompleteTimer = null;
+    if (currentArticleScriptProblemCompleteEligibilityKey() !== eligibilityKey) return;
+    articleScriptProblemCompletePromotedKey = eligibilityKey;
+    render();
+  }, ARTICLE_SCRIPT_PROBLEM_COMPLETE_DELAY_MS);
+}
+
+function syncArticleScriptProblemCompleteCompanionContent(): void {
+  const summary = currentArticleScriptPromotedProblemCompleteSummary();
+  if (!summary) {
+    if (
+      articleScriptProblemCompleteCompanionInjected
+      && articleScriptProblemCompleteCompanionText
+      && handDiagramSession.companionContent?.text === articleScriptProblemCompleteCompanionText
+    ) {
+      setCompanionContent(handDiagramSession, null);
+    }
+    articleScriptProblemCompleteCompanionInjected = false;
+    articleScriptProblemCompleteCompanionText = null;
+    return;
+  }
+  setCompanionContent(handDiagramSession, { text: summary, html: false });
+  articleScriptProblemCompleteCompanionInjected = true;
+  articleScriptProblemCompleteCompanionText = summary;
+}
+
 function currentArticleScriptStateLabel(): string | null {
+  const promoted = currentArticleScriptPromotedProblemCompleteSummary();
+  if (promoted) return promoted;
   return articleScriptCoordinator.currentArticleScriptStateLabel();
 }
 
@@ -1380,6 +1454,12 @@ type TeachingEntryView = UnknownModeTeachingEntry;
 let pulseUntilByCardKey = new Map<string, number>();
 let pulseTimer: ReturnType<typeof setTimeout> | null = null;
 const PULSE_MS = 360;
+const ARTICLE_SCRIPT_PROBLEM_COMPLETE_DELAY_MS = 2600;
+let articleScriptProblemCompleteTimer: ReturnType<typeof setTimeout> | null = null;
+let articleScriptProblemCompletePendingKey: string | null = null;
+let articleScriptProblemCompletePromotedKey: string | null = null;
+let articleScriptProblemCompleteCompanionInjected = false;
+let articleScriptProblemCompleteCompanionText: string | null = null;
 const userEqClassByCardId = new Map<CardId, string>();
 const userEqRepByClassId = new Map<string, CardId>();
 let invEqVersion = 0;
@@ -5059,6 +5139,7 @@ type ResetGameOptions = {
 
 function resetGame(seed: number, reason: string, options: ResetGameOptions = {}): void {
   clearSingletonAutoplayTimer();
+  clearArticleScriptProblemCompletePromotionState();
   clearPulseTimer();
   pulseUntilByCardKey.clear();
   westInitialContentWidth = null;
@@ -5119,6 +5200,7 @@ function resetGame(seed: number, reason: string, options: ResetGameOptions = {})
 
 function selectProblem(problemId: string, variantId?: string | null): void {
   clearSingletonAutoplayTimer();
+  clearArticleScriptProblemCompletePromotionState();
   clearPulseTimer();
   pulseUntilByCardKey.clear();
   westInitialContentWidth = null;
@@ -7432,6 +7514,8 @@ function render(): void {
   const view = currentViewState();
   clearDismissedWidgetOutcomeIfChanged(view);
   const isWidgetReadingMode = widgetReadingMode();
+  syncArticleScriptProblemCompletePromotion();
+  syncArticleScriptProblemCompleteCompanionContent();
   revealKnownArticleScriptBranchesFromCurrentPath();
   const widgetCompanionPanel = currentWidgetCompanionPanelState();
   syncWidgetCompanionFutureTransitionTimer(widgetCompanionPanel);

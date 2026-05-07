@@ -504,6 +504,22 @@ describe('article script coordinator', () => {
     expect(harness.handDiagramSession.attributedLeafHints).toBe(2);
   });
 
+  it('reports authored-branch completion only when all explicit authored branches are complete', () => {
+    const scriptState = createScriptState({
+      spec: AUTHORED_EXPLICIT_SPEC,
+      history: ['SK', 'DJ', 'D4'],
+      cursor: 3,
+      choiceSelections: { 1: 'DJ' }
+    });
+    const harness = createCoordinatorHarness({ scriptState });
+
+    harness.handDiagramSession.completedBranches.add('SKDJ');
+    expect(harness.coordinator.currentArticleScriptAllAuthoredBranchesComplete()).toBe(false);
+
+    harness.handDiagramSession.completedBranches.add('SKST');
+    expect(harness.coordinator.currentArticleScriptAllAuthoredBranchesComplete()).toBe(true);
+  });
+
   it('resolves companion panel model for scripted puzzle profile and url-enabled content mode', () => {
     const puzzleProfileState = createScriptState({
       spec: AUTHORED_EXPLICIT_SPEC,

@@ -203,6 +203,8 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
       return step.rule === 'dd-max' ? lastOption : (sortedOptions[0] ?? null);
     }
     if (step.rule === 'cover') {
+      // NOTE: This is intentionally narrow and DD1-specific behavior, not
+      // a general "cover honor" bridge rule. It only handles the HT->HJ case.
       const coverHeartTen = view.trick.some((played) => toCardId(played.suit, played.rank) === 'HT');
       if (coverHeartTen) {
         const jackCover = legal.find((candidate) => candidate.suit === 'H' && candidate.rank === 'J');
@@ -455,6 +457,14 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
     };
     const completedCount = rootBranch ? countCompleted(rootBranch, false) : handDiagramSession.completedBranches.size;
     return `Branches ${completedCount} · Mistakes ${handDiagramSession.mistakeCount} · Hints ${handDiagramSession.hintCount}`;
+  }
+
+  function currentArticleScriptAllAuthoredBranchesComplete(): boolean {
+    const scriptState = stateRef();
+    if (!scriptState) return false;
+    const rootBranch = rootAuthoredBranchKey(scriptState.spec);
+    if (!rootBranch) return false;
+    return isArticleScriptBranchComplete(rootBranch);
   }
 
   function currentArticleScriptStateLabel(): string | null {
@@ -972,6 +982,7 @@ export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordina
     revealKnownArticleScriptBranchesFromCurrentPath,
     syncArticleScriptCompletionProgress,
     currentArticleScriptProgressSummary,
+    currentArticleScriptAllAuthoredBranchesComplete,
     resolveArticleScriptReplayCardAtCursor,
     applyTurnPlay,
     resetToCurrentCheckpoint(): void {

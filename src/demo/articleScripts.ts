@@ -527,9 +527,190 @@ export const doubleDummy01Script: ArticleScriptSpec = {
   ]
 };
 
+export const forBarryScript: ArticleScriptSpec = {
+  id: 'for-barry',
+  parentProblemId: 'for_barry_full_deal',
+  navigationMode: ARTICLE_SCRIPT_NAVIGATION_MODE,
+  interactionProfile: 'puzzle-solving',
+  checkpoints: [{ id: '1', cursor: 1 }],
+  steps: [
+    { kind: 'play', cardId: 'HK' },
+    { kind: 'play', cardId: 'HA' },
+    { kind: 'play', cardId: 'H4' },
+    {
+      kind: 'choice',
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      prompt: "Pick South's play",
+      assertedWinner: 'N'
+    },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      assertedSuits: ['H'],
+      prompt: "Pick North's play"
+    },
+    { kind: 'play', cardId: 'H9' },
+    { kind: 'play', cardId: 'HQ' },
+    { kind: 'play', cardId: 'D8', assertedWinner: 'S' },
+    {
+      kind: 'choice',
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      assertedSuits: ['H'],
+      prompt: "Pick South's play"
+    },
+    { kind: 'play', cardId: 'D9' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      prompt: "Pick North's play"
+    },
+    { kind: 'play', cardId: 'H5', assertedWinner: 'N' },
+    { kind: 'play', cardId: 'SQ' },
+    { kind: 'play', cardId: 'SK' },
+    { kind: 'play', cardId: 'SA' },
+    { kind: 'play', cardId: 'S4', assertedWinner: 'S' },
+    {
+      kind: 'choice',
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      assertedSuits: ['S'],
+      prompt: "Pick South's play"
+    },
+    { kind: 'play', cardId: 'S6' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      assertedSuits: ['S'],
+      prompt: "Pick North's play"
+    },
+    { kind: 'play', cardId: 'S5', assertedWinner: 'S' },
+    {
+      kind: 'choice',
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      assertedSuits: ['S'],
+      prompt: "Pick South's play"
+    },
+    { kind: 'play', cardId: 'C4' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      assertedSuits: ['S'],
+      prompt: "Pick North's play"
+    },
+    { kind: 'play', cardId: 'S7', assertedWinner: 'S' },
+    { kind: 'play', cardId: 'DQ' },
+    { kind: 'play', cardId: 'DK' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      assertedSuits: ['D'],
+      prompt: "Pick North's play"
+    },
+    { kind: 'play', cardId: 'D7', assertedWinner: 'W' },
+    { kind: 'play', cardId: 'DJ' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      assertedSuits: ['D'],
+      prompt: "Pick North's play"
+    },
+    {
+      kind: 'choice',
+      seat: 'E',
+      options: ['C3', 'H6', 'S8'],
+      prompt: "Pick East's play"
+    },
+    { kind: 'play', cardId: 'D2', branchPrefix: 'HKH6', assertedWinner: 'E' },
+    { kind: 'play', cardId: 'C3', branchPrefix: 'HKH6' },
+    {
+      kind: 'choice',
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      branchPrefix: 'HKH6',
+      prompt: "Pick South's play"
+    },
+    { kind: 'play', cardId: 'C5', branchPrefix: 'HKH6' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      branchPrefix: 'HKH6',
+      prompt: "Pick North's play",
+      terminalState: 'complete'
+    },
+    { kind: 'play', cardId: 'DA', branchPrefix: 'HKC3', assertedWinner: 'S' },
+    { kind: 'play', cardId: 'HT', branchPrefix: 'HKC3' },
+    { kind: 'play', cardId: 'C5', branchPrefix: 'HKC3' },
+    { kind: 'play', cardId: 'HJ', branchPrefix: 'HKC3' },
+    { kind: 'play', cardId: 'H6', branchPrefix: 'HKC3' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      assertedSuits: ['C'],
+      branchPrefix: 'HKC3',
+      prompt: "Pick North's play"
+    },
+    { kind: 'derived-play', seat: 'E', rule: 'cover', branchPrefix: 'HKC3' },
+    {
+      kind: 'choice',
+      seat: 'S',
+      optionMode: 'dd-accurate',
+      branchPrefix: 'HKC3',
+      prompt: "Pick South's play"
+    },
+    { kind: 'play', cardId: 'C5', branchPrefix: 'HKC3', terminalState: 'complete' },
+    { kind: 'play', cardId: 'DA', branchPrefix: 'HKS8', assertedWinner: 'S' },
+    { kind: 'play', cardId: 'D2', branchPrefix: 'HKS8' },
+    { kind: 'play', cardId: 'D6', branchPrefix: 'HKS8' },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      assertedSuits: ['D'],
+      branchPrefix: 'HKS8',
+      prompt: "Pick North's play"
+    },
+    { kind: 'play', cardId: 'S9', branchPrefix: 'HKS8', assertedWinner: 'W' },
+    {
+      kind: 'choice',
+      seat: 'W',
+      options: ['DT', 'C5'],
+      branchPrefix: 'HKS8',
+      prompt: "Pick West's play"
+    },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      branchPrefix: 'HKS8DT',
+      prompt: "Pick North's play",
+      terminalState: 'complete'
+    },
+    {
+      kind: 'choice',
+      seat: 'N',
+      optionMode: 'dd-accurate',
+      branchPrefix: 'HKS8C5',
+      prompt: "Pick North's play",
+      terminalState: 'complete'
+    }
+  ]
+};
+
 const ARTICLE_SCRIPTS: Record<string, ArticleScriptSpec> = {
   [experimentalDraftIntroScript.id]: experimentalDraftIntroScript,
-  [doubleDummy01Script.id]: doubleDummy01Script
+  [doubleDummy01Script.id]: doubleDummy01Script,
+  [forBarryScript.id]: forBarryScript
 };
 
 export function resolveArticleScript(id?: string | null): ArticleScriptSpec | null {

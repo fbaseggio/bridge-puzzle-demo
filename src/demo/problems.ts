@@ -56,6 +56,7 @@ import {
   gorillasFullDeal
 } from '../puzzles/gorillas';
 import { ifYouSeeAGoodPlayFullDeal } from '../puzzles/if_you_see_a_good_play';
+import { forBarryFullDeal } from '../puzzles/for_barry_full_deal';
 import { listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } from '../encapsulation/workbenchProblems';
 
 export type DemoProblem = {
@@ -221,6 +222,14 @@ export const demoProblems: DemoProblem[] = [
     problem: ifYouSeeAGoodPlayFullDeal,
     practiceEligible: false,
     articlePath: 'puzzles/if-you-see-a-good-play/'
+  },
+  {
+    id: 'for_barry_full_deal',
+    label: 'for_barry_full_deal',
+    ddsRequirement: 'required',
+    problem: forBarryFullDeal,
+    practiceEligible: false,
+    articlePath: 'puzzles/for-barry/'
   },
   { id: 'gorillas_06', label: 'gorillas_06', problem: gorillas06, practiceEligible: false },
   { id: 'gorillas_07', label: 'gorillas_07', problem: gorillas07, practiceEligible: false },
