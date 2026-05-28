@@ -321,16 +321,17 @@ function simulatePattern(pattern: string, primary: 'N' | 'S', residualOpposite =
       if (lower === 'f' || lower === 'g') {
         const ret = returnStopper(owner);
         const out = outgoingStopper(owner);
-        for (let i = 0; i < stopperSize; i += 1) add(ret, nextHigh());
-        if (lower === 'g') {
-          if (gPrime) {
-            const outNeed = Math.max(0, stopperSize - 1);
-            if (outNeed > 0) add(out, nextHigh());
-            for (let i = 0; i < Math.max(0, outNeed - 1); i += 1) add(out, nextLow());
-          } else {
-            for (let i = 0; i < stopperSize; i += 1) add(out, nextHigh());
-          }
-        }
+        let outNeed = 0;
+        if (lower === 'g') outNeed = gPrime ? Math.max(0, stopperSize - 1) : stopperSize;
+
+        // Keep simulation sequencing aligned with binder:
+        // ret stop1, out stop1 (for g/g'), owner threat, then remaining low stop fillers.
+        add(ret, nextHigh());
+        if (outNeed > 0) add(out, nextHigh());
+        add(owner, nextHigh());
+        for (let i = 0; i < Math.max(0, stopperSize - 1); i += 1) add(ret, nextLow());
+        for (let i = 0; i < Math.max(0, outNeed - 1); i += 1) add(out, nextLow());
+        continue;
       } else {
         const stoppers = stopperSeatsForToken(owner, primary, lower, isUpper);
         if (stoppers.length === 1) {
@@ -742,7 +743,7 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
             addStopperLabels(outSeat, stopperSize, `g${gCount}`);
             boundThreatShape = true;
           }
-        } else if (backingPass) {
+        } else if (backingPass && !outAlmostStops) {
           fCount += 1;
           bindCard(threatSeat, threatRank, `f${fCount}`);
           addStopperLabels(retSeat, stopperSize, `f${fCount}`);
@@ -751,7 +752,7 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
           gPrimeCount += 1;
           bindCard(threatSeat, threatRank, `g'${gPrimeCount}`);
           addStopperLabels(retSeat, stopperSize, `g'${gPrimeCount}`);
-          addGuardLabels(outSeat, Math.max(0, stopperSize - 1), `g'${gPrimeCount}`);
+          addStopperLabels(outSeat, Math.max(0, stopperSize - 1), `g'${gPrimeCount}`);
           boundThreatShape = true;
         }
       }
@@ -821,7 +822,7 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
             addStopperLabels(outSeat, stopperSize, label);
             boundThreatShape = true;
           }
-        } else if (backingPass) {
+        } else if (backingPass && !outAlmostStops) {
           FCount += 1;
           const label = `F${FCount}`;
           bindCard(threatSeat, threatRank, label);
@@ -838,7 +839,7 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
           if (!lowPrimary) return null;
           bindCard(primary, lowPrimary, `${label}-low`);
           addStopperLabels(retSeat, stopperSize, label);
-          addGuardLabels(outSeat, Math.max(0, stopperSize - 1), label);
+          addStopperLabels(outSeat, Math.max(0, stopperSize - 1), label);
           boundThreatShape = true;
         }
       }
@@ -983,6 +984,7 @@ function computeDetailed(input: SeatRanksInput, options: SuitInverseOptions = {}
   const observedCounts = seatCountsKey(ranks);
   const threatKnowledge = threatFlagForSuit(ranks, options);
   const matches: Candidate[] = [];
+  const fallbackCandidates: Candidate[] = [];
   let forcedPrimary: 'N' | 'S' | null =
     ranks.N.length > ranks.S.length ? 'N' : ranks.S.length > ranks.N.length ? 'S' : null;
   if (!forcedPrimary && ranks.N.length === ranks.S.length && ranks.N.length > 0) {
@@ -998,22 +1000,29 @@ function computeDetailed(input: SeatRanksInput, options: SuitInverseOptions = {}
   for (const primary of primaries) {
     const procedural = deriveProceduralCandidate(ranks, primary);
     if (!procedural) continue;
-    const boundRanks = simulatePattern(procedural.text, primary, procedural.residualOpposite);
-    if (seatCountsKey(boundRanks) !== observedCounts) continue;
     const semantics = analyzePrimarySemantics(ranks, primary);
     const score =
       candidateScore(procedural.text, semantics, threatKnowledge, procedural.residualOpposite) +
       procedural.linkCount * 1000;
-    matches.push({
+    const candidate: Candidate = {
       text: procedural.text,
       primary,
       score,
       residualOpposite: procedural.residualOpposite,
       assignmentSteps: procedural.assignmentSteps
-    });
+    };
+    fallbackCandidates.push(candidate);
+    let boundRanks: SeatRanks;
+    try {
+      boundRanks = simulatePattern(procedural.text, primary, procedural.residualOpposite);
+    } catch {
+      continue;
+    }
+    if (seatCountsKey(boundRanks) !== observedCounts) continue;
+    matches.push(candidate);
   }
 
-  const deduped = dedupeCandidates(matches);
+  const deduped = dedupeCandidates(matches.length > 0 ? matches : fallbackCandidates);
   if (deduped.length === 0) {
     return {
       result: { type: 'no-fit' },

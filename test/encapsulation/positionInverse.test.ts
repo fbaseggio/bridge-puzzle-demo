@@ -147,4 +147,15 @@ describe('position-level inverse encapsulation rendering', () => {
     });
     expect(out).toBe('[shdc] wau, WWu > WLc, Wc');
   });
+
+  it("preserves g' shape for WLg'moi instead of collapsing to f-shape", () => {
+    const bound = bindStandard("[c] = WLg'moi");
+    const out = inferPositionEncapsulation({
+      hands: bound.hands,
+      turn: 'S',
+      suitOrder: ['C'],
+      threatCardIds: bound.threatCards.map((threat) => threat.cardId)
+    });
+    expect(out).toBe("[c] > WLg'imo");
+  });
 });

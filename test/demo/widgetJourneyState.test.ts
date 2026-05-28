@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   defaultAlertMistakesEnabledForWidgetJourneyProfile,
+  resolveWidgetJourneyStartupAdvanceMode,
   resolveWidgetJourneyStartupAffordanceLabel,
   resolveWidgetJourneyStartupReleaseProfile,
   resolveWidgetJourneyStartupReleaseRevealStage,
@@ -156,6 +157,65 @@ describe('widgetJourneyState', () => {
         startupProblemId: 'gorillas_full_deal'
       })
     ).toBe('puzzle-solving');
+  });
+
+  it('resolves startup advance mode from journey startup policy inputs', () => {
+    expect(
+      resolveWidgetJourneyStartupAdvanceMode({
+        currentActiveProfile: 'reading-profile',
+        startupReleaseProfile: 'puzzle-solving',
+        articleScriptModeEnabled: false,
+        hasRicherStartupPayload: true,
+        startupOpeningLength: 9
+      })
+    ).toBe('default');
+    const whichSqueezeStartupReleaseProfile = resolveWidgetJourneyStartupReleaseProfile({
+      currentActiveProfile: 'reading-profile',
+      articleScriptModeEnabled: false,
+      articleScriptInteractionProfile: null,
+      startupProblemId: 'which_squeeze_1'
+    });
+    expect(whichSqueezeStartupReleaseProfile).toBe('puzzle-solving');
+    expect(
+      resolveWidgetJourneyStartupAdvanceMode({
+        currentActiveProfile: 'reading-profile',
+        startupReleaseProfile: whichSqueezeStartupReleaseProfile,
+        articleScriptModeEnabled: false,
+        hasRicherStartupPayload: true,
+        startupOpeningLength: 9,
+        startupProblemId: 'which_squeeze_1'
+      })
+    ).toBe('single-step');
+
+    expect(
+      resolveWidgetJourneyStartupAdvanceMode({
+        currentActiveProfile: 'reading-profile',
+        startupReleaseProfile: 'story-viewing',
+        articleScriptModeEnabled: false,
+        hasRicherStartupPayload: true,
+        startupOpeningLength: 8
+      })
+    ).toBe('single-step');
+
+    expect(
+      resolveWidgetJourneyStartupAdvanceMode({
+        currentActiveProfile: 'reading-profile',
+        startupReleaseProfile: 'story-viewing',
+        articleScriptModeEnabled: true,
+        hasRicherStartupPayload: true,
+        startupOpeningLength: 0
+      })
+    ).toBe('single-step');
+
+    expect(
+      resolveWidgetJourneyStartupAdvanceMode({
+        currentActiveProfile: 'puzzle-solving',
+        startupReleaseProfile: 'story-viewing',
+        articleScriptModeEnabled: true,
+        hasRicherStartupPayload: true,
+        startupOpeningLength: 24
+      })
+    ).toBe('default');
   });
 
   it('derives startup affordance labels from startup destination profile', () => {

@@ -1228,7 +1228,8 @@ html.mode-widget {
 }
 
 .rank-text.rank-hidden {
-  color: #94a3b8;
+  color: transparent;
+  text-shadow: none;
 }
 
 .void {

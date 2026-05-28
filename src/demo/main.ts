@@ -121,6 +121,11 @@ import {
   resolveWidgetReadingEmbedReservedHeight
 } from './widgetReadingEmbedHeight';
 import {
+  resolveWidgetNonScriptForwardMode,
+  resolveWidgetNonScriptForwardPauseMessage
+} from './widgetStartupOpeningReplay';
+import { applyWidgetScriptedOpeningStep } from './widgetScriptedOpeningStep';
+import {
   closeSettingsPanel,
   createSettingsPanelSession,
   setSettingsNestedOptionsOpen,
@@ -142,11 +147,13 @@ import {
 } from './widgetJourneyRuntimeState';
 import {
   defaultAlertMistakesEnabledForWidgetJourneyProfile,
+  resolveWidgetJourneyStartupAdvanceMode,
   resolveWidgetJourneyStartupAffordanceLabel,
   resolveWidgetJourneyStartupReleaseRevealStage,
   resolveWidgetJourneyRicherStartupPayload,
   resolveWidgetJourneyStartupReleaseProfile,
-  type WidgetJourneyProfile
+  type WidgetJourneyProfile,
+  type WidgetJourneyStartupAdvanceMode
 } from './widgetJourneyState';
 import {
   buildWidgetStateSnapshotPermalink,
@@ -772,6 +779,17 @@ function currentWidgetStartupReleaseProfile(): InteractionProfile | null {
     currentActiveProfile: widgetJourneyRuntimeState.activeInteractionProfile,
     articleScriptModeEnabled: articleScriptModeEnabled(),
     articleScriptInteractionProfile: articleScriptModeEnabled() ? currentArticleScriptInteractionProfileInputSource() : null,
+    startupProblemId: currentProblemId
+  });
+}
+
+function currentWidgetStartupAdvanceMode(): WidgetJourneyStartupAdvanceMode {
+  return resolveWidgetJourneyStartupAdvanceMode({
+    currentActiveProfile: widgetJourneyRuntimeState.activeInteractionProfile,
+    startupReleaseProfile: currentWidgetStartupReleaseProfile(),
+    articleScriptModeEnabled: articleScriptModeEnabled(),
+    hasRicherStartupPayload: widgetJourneyHasRicherStartupPayload(),
+    startupOpeningLength: currentWidgetStartupOpeningLength(),
     startupProblemId: currentProblemId
   });
 }
@@ -2772,18 +2790,6 @@ function chooseSingleDefenderAdvancePlay(): Play | null {
   return legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId) ?? legal[0] ?? null;
 }
 
-function currentScriptedOpeningReplayCard(): CardId | null {
-  if (articleScriptModeEnabled()) return null;
-  const opening = startupOpeningForProblem(currentProblem);
-  if (opening.length === 0) return null;
-  const played = ddsPlayHistory;
-  if (played.length >= opening.length) return null;
-  for (let i = 0; i < played.length; i += 1) {
-    if (opening[i] !== played[i]) return null;
-  }
-  return opening[played.length] ?? null;
-}
-
 function advanceOneWidgetCard(): boolean {
   if (trickFrozen) {
     unfreezeTrick(true);
@@ -2828,20 +2834,57 @@ function advanceOneWidgetCard(): boolean {
     }
   }
 
-  const scriptedOpeningCard = currentScriptedOpeningReplayCard();
-  if (scriptedOpeningCard) {
+  syncConfiguredUserControls();
+  const userTurn = state.userControls.includes(state.turn);
+  const nonScriptForwardMode = resolveWidgetNonScriptForwardMode({
+    scriptedOpening: startupOpeningForProblem(currentProblem),
+    playedCardIds: ddsPlayHistory,
+    userTurn,
+    activeInteractionProfile: widgetJourneyRuntimeState.activeInteractionProfile
+  });
+
+  if (nonScriptForwardMode.kind === 'scripted-opening') {
     const legal = legalPlays(state).filter((candidate) => candidate.seat === state.turn);
-    const play = legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === scriptedOpeningCard);
+    const play = legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === nonScriptForwardMode.cardId);
     if (!play) {
       render();
       return false;
     }
-    runTurn(play);
+    const before = state;
+    const result = applyWidgetScriptedOpeningStep({ state, play, eventCollector: semanticCollector });
+    state = result.state;
+    ddsPlayHistory.push(`${play.suit}${play.rank}`);
+    collectTeachingRecolorEventsForTurn(before, result.events);
+    const trickCompleteIndex = result.events.findIndex((event) => event.type === 'trickComplete');
+    if (trickCompleteIndex >= 0) {
+      const visibleEvents = result.events.slice(0, trickCompleteIndex + 1);
+      const visibleShadow = cloneStateForLog(before);
+      for (const event of visibleEvents) applyEventToShadow(visibleShadow, event);
+      trickFrozen = true;
+      frozenViewState = visibleShadow;
+      const trickEvent = visibleEvents[visibleEvents.length - 1];
+      if (trickEvent.type === 'trickComplete') {
+        lastCompletedTrick = trickEvent.trick.map((p) => ({ ...p }));
+      }
+      canLeadDismiss = state.phase !== 'end' && state.trick.length === 0 && state.userControls.includes(state.turn);
+    }
+    const complete = result.events.find((event) => event.type === 'handComplete');
+    if (complete?.type === 'handComplete') {
+      runStatus = complete.success ? 'success' : 'failure';
+    }
+    clearDdErrorVisual();
+    threatCtx = (state.threat as ThreatContext | null) ?? null;
+    threatLabels = (state.threatLabels as DefenderLabels | null) ?? null;
+    refreshThreatModel(currentProblemId, false);
+    render();
     return true;
   }
+  if (nonScriptForwardMode.kind === 'pause-user-turn') {
+    setMessage(handDiagramSession, resolveWidgetNonScriptForwardPauseMessage(seatName[state.turn]));
+    render();
+    return false;
+  }
 
-  syncConfiguredUserControls();
-  const userTurn = state.userControls.includes(state.turn);
   if (!userTurn) {
     const play = chooseSingleDefenderAdvancePlay();
     if (!play) {
@@ -2906,6 +2949,7 @@ function advanceWidgetToNextPauseBoundary(): void {
     const moved = advanceOneWidgetCard();
     advanced = advanced || moved;
     if (!moved || trickFrozen) break;
+    if (state.userControls.includes(state.turn)) break;
   }
   if (!advanced) render();
 }
@@ -6710,7 +6754,7 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
     }
     startBtn.onclick = () => {
       dismissTransientWidgetOutcome(currentViewState());
-      launchStartSequence(readingStartup ? 'single-step' : 'default');
+      launchStartSequence(currentWidgetStartupAdvanceMode());
     };
     table.appendChild(startBtn);
   }
@@ -7871,8 +7915,6 @@ function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void 
   }
 
   let appliedAny = false;
-  const originalUserControls = [...state.userControls];
-  const forcedManualUserControls: Seat[] = ['N', 'E', 'S', 'W'];
   const openingToApply = singleStep ? startupOpening.slice(0, 1) : startupOpening;
   for (const cardId of openingToApply) {
     if (state.phase === 'end') break;
@@ -7880,10 +7922,8 @@ function launchStartSequence(mode: 'default' | 'single-step' = 'default'): void 
     const play = legal.find((p) => (toCardId(p.suit, p.rank) as CardId) === cardId);
     if (!play) break;
     const before = state;
-    const steppedState: State = { ...state, userControls: forcedManualUserControls };
-    const result = apply(steppedState, play, { eventCollector: semanticCollector });
+    const result = applyWidgetScriptedOpeningStep({ state, play, eventCollector: semanticCollector });
     state = result.state;
-    state.userControls = [...originalUserControls];
     ddsPlayHistory.push(`${play.suit}${play.rank}`);
     collectTeachingRecolorEventsForTurn(before, result.events);
     const trickCompleteIndex = result.events.findIndex((event) => event.type === 'trickComplete');

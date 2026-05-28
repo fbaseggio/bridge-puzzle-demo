@@ -1,5 +1,6 @@
 export const GORILLAS_FULL_DEAL_SD_PUZZLE_CONFIG_ID = 'gorillas-full-deal-sd-puzzle';
 export const IF_YOU_SEE_A_GOOD_PLAY_SD_PUZZLE_CONFIG_ID = 'if-you-see-a-good-play-sd-puzzle';
+export const WHICH_SQUEEZE_1_SD_PUZZLE_CONFIG_ID = 'which-squeeze-1-sd-puzzle';
 
 const SHARED_WIDGET_QUERY_BY_CONFIG_ID = Object.freeze({
   [GORILLAS_FULL_DEAL_SD_PUZZLE_CONFIG_ID]: Object.freeze({
@@ -16,6 +17,14 @@ const SHARED_WIDGET_QUERY_BY_CONFIG_ID = Object.freeze({
     start: '1',
     opening: 'D5',
     problem: 'if_you_see_a_good_play_full_deal',
+    reading: '1'
+  }),
+  [WHICH_SQUEEZE_1_SD_PUZZLE_CONFIG_ID]: Object.freeze({
+    mode: 'widget',
+    uiMode: 'sd-puzzle',
+    start: '1',
+    opening: 'D3.D5.DT.DQ.S5.SA.S4.S9.D6',
+    problem: 'which_squeeze_1',
     reading: '1'
   })
 });

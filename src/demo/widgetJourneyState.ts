@@ -3,6 +3,7 @@ import type { ReadingControlsRevealStage } from './handDiagramSession';
 
 export type WidgetJourneyStartupBias = 'none' | 'url-reading-profile' | 'article-story-profile';
 export type WidgetJourneyProfile = InteractionProfile | 'reading-profile';
+export type WidgetJourneyStartupAdvanceMode = 'default' | 'single-step';
 
 export type WidgetJourneyState = {
   activeInteractionProfile: WidgetJourneyProfile | null;
@@ -35,6 +36,9 @@ const RUFF_OR_SLUFF_STORY_STARTUP_PROBLEM_IDS = new Set<string>([
   'ruff_or_sluff_01',
   'ruff_or_sluff_02',
   'ruff_or_sluff_05'
+]);
+const SINGLE_STEP_PUZZLE_STARTUP_PROBLEM_IDS = new Set<string>([
+  'which_squeeze_1'
 ]);
 
 export function isWidgetJourneyReadingRevealProfile(
@@ -71,6 +75,29 @@ export function resolveWidgetJourneyStartupReleaseProfile(input: {
     return 'story-viewing';
   }
   return 'puzzle-solving';
+}
+
+export function resolveWidgetJourneyStartupAdvanceMode(input: {
+  currentActiveProfile: WidgetJourneyProfile | null;
+  startupReleaseProfile: InteractionProfile | null;
+  articleScriptModeEnabled: boolean;
+  hasRicherStartupPayload: boolean;
+  startupOpeningLength: number;
+  startupProblemId?: string | null;
+}): WidgetJourneyStartupAdvanceMode {
+  if (input.currentActiveProfile !== 'reading-profile') return 'default';
+  if (!input.hasRicherStartupPayload) return 'default';
+  if (input.articleScriptModeEnabled) return 'single-step';
+  if (Math.max(0, input.startupOpeningLength) <= 0) return 'default';
+  if (input.startupReleaseProfile === 'story-viewing') return 'single-step';
+  if (
+    input.startupReleaseProfile === 'puzzle-solving'
+    && typeof input.startupProblemId === 'string'
+    && SINGLE_STEP_PUZZLE_STARTUP_PROBLEM_IDS.has(input.startupProblemId)
+  ) {
+    return 'single-step';
+  }
+  return 'default';
 }
 
 export function resolveWidgetJourneyStartupAffordanceLabel(

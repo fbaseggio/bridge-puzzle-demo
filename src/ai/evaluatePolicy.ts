@@ -315,6 +315,80 @@ function legalPlaysForSeat(hands: Record<Seat, Hand>, seat: Seat, leadSuit: Suit
   return plays;
 }
 
+function currentWinningPlay(trick: Play[], trumpSuit: Suit | null): Play | null {
+  if (trick.length === 0) return null;
+  const leadSuit = trick[0]?.suit ?? null;
+  if (!leadSuit) return null;
+  const contenders =
+    trumpSuit && trumpSuit !== leadSuit
+      ? trick.filter((play) => play.suit === trumpSuit)
+      : [];
+  const pool = contenders.length > 0 ? contenders : trick.filter((play) => play.suit === leadSuit);
+  if (pool.length === 0) return null;
+  let winner = pool[0]!;
+  for (const play of pool.slice(1)) {
+    if (RANK_STRENGTH[play.rank] > RANK_STRENGTH[winner.rank]) winner = play;
+  }
+  return winner;
+}
+
+function canCardBeatCurrentWinner(
+  card: Play,
+  currentWinner: Play,
+  leadSuit: Suit,
+  trumpSuit: Suit | null
+): boolean {
+  if (trumpSuit && trumpSuit !== leadSuit) {
+    if (card.suit === trumpSuit && currentWinner.suit !== trumpSuit) return true;
+    if (card.suit === trumpSuit && currentWinner.suit === trumpSuit) {
+      return RANK_STRENGTH[card.rank] > RANK_STRENGTH[currentWinner.rank];
+    }
+    if (card.suit === leadSuit && currentWinner.suit === leadSuit) {
+      return RANK_STRENGTH[card.rank] > RANK_STRENGTH[currentWinner.rank];
+    }
+    return false;
+  }
+  if (card.suit !== leadSuit || currentWinner.suit !== leadSuit) return false;
+  return RANK_STRENGTH[card.rank] > RANK_STRENGTH[currentWinner.rank];
+}
+
+function isGuaranteedCurrentTrickWinner(params: {
+  hands: Record<Seat, Hand>;
+  trick: Play[];
+  seat: Seat;
+  cardId: CardId;
+  contractStrain: Suit | 'NT';
+}): boolean {
+  const { hands, trick, seat, cardId, contractStrain } = params;
+  const leadSuit = trick[0]?.suit ?? null;
+  if (!leadSuit) return false;
+  const { suit, rank } = parseCardId(cardId);
+  if (suit !== leadSuit) return false;
+  const trickAfter = [...trick, { seat, suit, rank }];
+  const trumpSuit = contractStrain === 'NT' ? null : contractStrain;
+  const winnerAfter = currentWinningPlay(trickAfter, trumpSuit);
+  if (!winnerAfter || winnerAfter.seat !== seat || winnerAfter.suit !== suit || winnerAfter.rank !== rank) return false;
+
+  let currentWinner = winnerAfter;
+  let next = nextSeat(seat);
+  while (trickAfter.length < 4) {
+    const legal = legalPlaysForSeat(hands, next, leadSuit);
+    if (legal.some((play) => canCardBeatCurrentWinner(play, currentWinner, leadSuit, trumpSuit))) {
+      return false;
+    }
+    const filler = legal[0];
+    if (filler) {
+      trickAfter.push(filler);
+      const maybeWinner = currentWinningPlay(trickAfter, trumpSuit);
+      if (maybeWinner) currentWinner = maybeWinner;
+    } else {
+      break;
+    }
+    next = nextSeat(next);
+  }
+  return currentWinner.seat === seat && currentWinner.suit === suit && currentWinner.rank === rank;
+}
+
 function chooseUniformLegalCardId(hands: Record<Seat, Hand>, seat: Seat, leadSuit: Suit | null, rng: RngState): [CardId | null, RngState] {
   const legal = legalPlaysForSeat(hands, seat, leadSuit);
   if (legal.length === 0) return [null, rng];
@@ -804,20 +878,35 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
           const threatRankValue = RANK_STRENGTH[suitThreat.threatRank];
           if (threatRankValue > highestLedSoFar) {
             const covering = inSuitCardIds.filter((cardId) => RANK_STRENGTH[rankOfCardId(cardId)] > threatRankValue);
-            const ddFiltered = applyDdFilter(covering);
-            const chosenCardId = chooseLowestByRank(ddFiltered.candidates);
-            if (chosenCardId) {
-              const chosenBucket = 'follow:busy-protect-threat';
-              return {
-                chosenCardId,
-                chosenBucket,
-                bucketCards: [...ddFiltered.candidates],
-                policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
-                ddPolicy: ddFiltered.trace,
-                ddTrace: buildDdDecisionTrace(inSuitCardIds, covering, ddFiltered, chosenCardId),
-                rngBefore,
-                rngAfter
-              };
+            const nonCovering = inSuitCardIds.filter((cardId) => RANK_STRENGTH[rankOfCardId(cardId)] <= threatRankValue);
+            const onlyCover = covering.length === 1 ? covering[0] : null;
+            const preserveLastCover =
+              !!onlyCover &&
+              nonCovering.length > 0 &&
+              !isGuaranteedCurrentTrickWinner({
+                hands,
+                trick,
+                seat,
+                cardId: onlyCover,
+                contractStrain
+              });
+
+            if (!preserveLastCover) {
+              const ddFiltered = applyDdFilter(covering);
+              const chosenCardId = chooseLowestByRank(ddFiltered.candidates);
+              if (chosenCardId) {
+                const chosenBucket = 'follow:busy-protect-threat';
+                return {
+                  chosenCardId,
+                  chosenBucket,
+                  bucketCards: [...ddFiltered.candidates],
+                  policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+                  ddPolicy: ddFiltered.trace,
+                  ddTrace: buildDdDecisionTrace(inSuitCardIds, covering, ddFiltered, chosenCardId),
+                  rngBefore,
+                  rngAfter
+                };
+              }
             }
           }
         }

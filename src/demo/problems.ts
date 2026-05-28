@@ -57,6 +57,7 @@ import {
 } from '../puzzles/gorillas';
 import { ifYouSeeAGoodPlayFullDeal } from '../puzzles/if_you_see_a_good_play';
 import { forBarryFullDeal } from '../puzzles/for_barry_full_deal';
+import { whichSqueeze1 } from '../puzzles/which_squeeze_1';
 import { listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } from '../encapsulation/workbenchProblems';
 
 export type DemoProblem = {
@@ -230,6 +231,15 @@ export const demoProblems: DemoProblem[] = [
     problem: forBarryFullDeal,
     practiceEligible: false,
     articlePath: 'puzzles/for-barry/'
+  },
+  {
+    id: 'which_squeeze_1',
+    label: 'which_squeeze_1',
+    ddsRequirement: 'required',
+    puzzleModeId: 'single-dummy',
+    problem: whichSqueeze1,
+    practiceEligible: false,
+    articlePath: 'puzzles/which-squeeze-1/'
   },
   { id: 'gorillas_06', label: 'gorillas_06', problem: gorillas06, practiceEligible: false },
   { id: 'gorillas_07', label: 'gorillas_07', problem: gorillas07, practiceEligible: false },
