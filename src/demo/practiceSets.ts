@@ -19,6 +19,12 @@ export const PRACTICE_SET_OPTIONS: Array<{ id: PracticeSetId; label: string }> =
   { id: 'set5', label: 'Set 5 — Clash Squeezes' }
 ];
 
+export function practiceSetFromSearch(search: string): PracticeSetId {
+  const requested = new URLSearchParams(search).get('set');
+  const id = requested?.startsWith('set') ? requested : `set${requested}`;
+  return PRACTICE_SET_OPTIONS.find((option) => option.id === id)?.id ?? 'set1';
+}
+
 function createSeededRng(seed: number): () => number {
   let a = seed >>> 0;
   return () => {

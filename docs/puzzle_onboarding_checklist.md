@@ -33,6 +33,8 @@ The automated smoke test reproduced the current candidate's results: stable stru
 
 ## Clash Squeezes candidates
 
+Direct practice link: [Clash Squeezes, Set 5](https://deepsqueeze.ai/practice/?set=5). It opens the first puzzle in the agreed order. Selecting another practice set updates the URL so that set can also be shared.
+
 The owner approved adding all five candidates to **Set 5 — Clash Squeezes**, in the order **3, 4, 5, 2, 1** below. They are now registered with their reviewed standard bindings, and the practice queue preserves that order across sessions. The table retains onboarding candidate order for reference. The generated reports remain historical records of the checks before approval.
 
 | Encapsulation | Title | Source | Status | Automated result |

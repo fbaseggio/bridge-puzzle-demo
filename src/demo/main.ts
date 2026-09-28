@@ -41,7 +41,7 @@ import {
 import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock, formatInitBlock } from '../ai/threatModelVerbose';
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
 import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem, resolveDemoProblemDdsRequirement } from './problems';
-import { buildPracticeQueue, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
+import { buildPracticeQueue, practiceSetFromSearch, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
 import {
   buildCardStatusSnapshot,
   buildRegularCardDisplayProjection,
@@ -480,7 +480,7 @@ const initialVariantIdFromUrl: string | null = (() => {
   const requested = new URLSearchParams(window.location.search).get('variant');
   return requested?.trim() ? requested.trim().toLowerCase() : null;
 })();
-let practiceSetId: PracticeSetId = 'set1';
+let practiceSetId: PracticeSetId = practiceSetFromSearch(typeof window === 'undefined' ? '' : window.location.search);
 const initialPracticeEntries = displayMode === 'practice' ? buildPracticeQueue(practiceSetId) : [];
 let practiceProblemOverrides = new Map<string, ProblemWithThreats>(
   initialPracticeEntries.map((entry) => [entry.id, entry.problem as ProblemWithThreats] as const)
@@ -6983,6 +6983,9 @@ function renderPracticeHeader(view: State): HTMLElement {
     const nextSet = setSelect.value as PracticeSetId;
     if (nextSet === practiceSession.setId) return;
     rebuildPracticeSession(nextSet);
+    const url = new URL(window.location.href);
+    url.searchParams.set('set', nextSet.slice(3));
+    window.history.replaceState(window.history.state, '', url);
   };
   setLabel.appendChild(setSelect);
   header.appendChild(setLabel);

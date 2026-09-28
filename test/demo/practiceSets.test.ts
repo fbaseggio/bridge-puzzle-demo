@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { listEncapsulationWorkbenchEntries } from '../../src/encapsulation/workbenchProblems';
-import { buildPracticeQueue, PRACTICE_SET_OPTIONS } from '../../src/demo/practiceSets';
+import { buildPracticeQueue, practiceSetFromSearch, PRACTICE_SET_OPTIONS } from '../../src/demo/practiceSets';
 
 describe('practice set queue builder', () => {
+  it('resolves shareable set links and defaults safely for missing or unknown sets', () => {
+    for (const { id } of PRACTICE_SET_OPTIONS) {
+      expect(practiceSetFromSearch(`?set=${id.slice(3)}`)).toBe(id);
+      expect(practiceSetFromSearch(`?set=${id}&other=value`)).toBe(id);
+    }
+    for (const search of ['', '?set=', '?set=6', '?set=unknown', '?other=5']) {
+      expect(practiceSetFromSearch(search)).toBe('set1');
+    }
+    const queue = buildPracticeQueue(practiceSetFromSearch('?set=5'));
+    expect(queue).toHaveLength(5);
+    expect(queue[0].id).toBe('encap_clash_wla_gt_wa_lc_ww__standard');
+  });
+
   it('offers Clash Squeezes in the reviewed 3, 4, 5, 2, 1 order across sessions', () => {
     expect(PRACTICE_SET_OPTIONS).toContainEqual({ id: 'set5', label: 'Set 5 — Clash Squeezes' });
     const expectedIds = [
