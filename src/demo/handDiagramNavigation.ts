@@ -28,7 +28,7 @@ type HandDiagramNavigationDeps = {
   showGuides: boolean;
   practiceSession: { interactionProfile: PracticeInteractionProfile; isTerminal?: boolean } | null;
   inevitableFailureAlert: boolean;
-  runStatus: 'idle' | 'success' | 'failure';
+  runStatus: 'running' | 'success' | 'failure';
   pendingArticleScriptChoice: () => any;
   currentArticleScriptChoicePresentation: () => any;
   articleScriptState: { cursor: number; initialCursor: number; spec: any; checkpointId?: string | null } | null;
@@ -51,7 +51,7 @@ type HandDiagramNavigationDeps = {
   canLeadDismiss: boolean;
   state: State;
   currentDismissibleWidgetOutcomeKey: (view: State) => string | null;
-  canonicalRunStatusText: (status: 'idle' | 'success' | 'failure') => string;
+  canonicalRunStatusText: (status: 'running' | 'success' | 'failure') => string;
   isWidgetShellMode: boolean;
   hintLoading: boolean;
   ddsLoadingForHint: boolean;
@@ -83,7 +83,7 @@ type HandDiagramNavigationDeps = {
   undoStack: unknown[];
   followCurrentArticleScriptUserTurn: () => boolean;
   legalPlays: typeof import('../core').legalPlays;
-  toCardId: (suit: string, rank: string) => CardId;
+  toCardId: typeof import('../ai/threatModel').toCardId;
   chooseCurrentArticleScriptBranchOption: () => CardId | null;
   clearArticleScriptFollowPrompt: () => void;
   runTurn: (play: any) => void;
@@ -98,8 +98,8 @@ type HandDiagramNavigationDeps = {
   requestHint: () => void;
   currentProblemId: string;
   currentProblemVariantId: string | null;
-  userPlayHistory: unknown[];
-  encodeUserHistoryForUrl: (history: unknown[]) => string;
+  userPlayHistory: CardId[];
+  encodeUserHistoryForUrl: (history: CardId[]) => string;
   beginPracticeRun: (profile: PracticeInteractionProfile) => void;
   goToNextPracticePuzzle: () => void;
   readingRevealEnabled: boolean;
@@ -1010,7 +1010,7 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
         hasRememberedTail: articleScriptHasRememberedTail,
         trickFrozen,
         canLeadDismiss,
-        phase: state.phase
+        phase: state.phase === 'end' ? 'end' : 'play'
       })
   );
   const dismissedOutcomeKey = currentDismissibleWidgetOutcomeKey(view);
@@ -1055,7 +1055,7 @@ export function renderHandDiagramNavigationArea(view: State, deps: HandDiagramNa
     warningStatusActive,
     suppressDismissedOutcome
   });
-  slot.appendChild(outcome);
+  if (outcome) slot.appendChild(outcome);
   slot.appendChild(renderTransportRow({
     view,
     deps,

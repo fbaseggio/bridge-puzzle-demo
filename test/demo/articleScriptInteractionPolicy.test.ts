@@ -1,3 +1,4 @@
+import type { ArticleScriptChoiceStep } from '../../src/demo/articleScripts';
 import { describe, expect, it } from 'vitest';
 import { doubleDummy01Script, experimentalDraftIntroScript } from '../../src/demo/articleScripts';
 import {
@@ -185,7 +186,7 @@ describe('article script interaction policy', () => {
   });
 
   it('pauses scripted defender autoplay at explicit choices unless the branch is remembered', () => {
-    const explicitChoice = { kind: 'choice', seat: 'E', options: ['DJ', 'ST'], prompt: "Pick East's play" } as const;
+    const explicitChoice: ArticleScriptChoiceStep = { kind: 'choice', seat: 'E', options: ['DJ', 'ST'], prompt: "Pick East's play" };
 
     expect(shouldPauseArticleScriptAutoplayAtChoice({ choice: explicitChoice, hasRememberedTail: false })).toBe(true);
     expect(shouldPauseArticleScriptAutoplayAtChoice({ choice: explicitChoice, hasRememberedTail: true })).toBe(false);
@@ -197,6 +198,8 @@ describe('article script interaction policy', () => {
         phase: 'play',
         trickFrozen: false,
         canLeadDismiss: false,
+        profile: 'solution-viewing',
+        atInitialCursor: false,
         choice: explicitChoice,
         hasRememberedTail: false
       })
@@ -209,6 +212,8 @@ describe('article script interaction policy', () => {
         phase: 'play',
         trickFrozen: false,
         canLeadDismiss: false,
+        profile: 'solution-viewing',
+        atInitialCursor: false,
         choice: explicitChoice,
         hasRememberedTail: true
       })

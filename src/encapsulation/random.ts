@@ -1,9 +1,9 @@
 import { bindStandard } from './binder';
 import { parseEncapsulation } from './parser';
-import type { BoundEncapsulation, FourHands, ParsedEncapsulation, Seat, Suit } from './types';
+import type { BoundEncapsulation, FourHands, ParsedEncapsulation, Side, Suit } from './types';
 
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
-const SEATS: Seat[] = ['N', 'E', 'S', 'W'];
+const SEATS: Side[] = ['N', 'E', 'S', 'W'];
 const RANKS_HIGH_TO_LOW = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
 
 export type BindRandomOptions = {
@@ -120,11 +120,12 @@ function relabelRanksOrdinally(bound: BoundEncapsulation, rng: () => number): Bo
       W: { S: [...bound.hands.W.S], H: [...bound.hands.W.H], D: [...bound.hands.W.D], C: [...bound.hands.W.C] }
     },
     threatCards: bound.threatCards.map((t) => ({ ...t })),
+    cardBindings: bound.cardBindings.map((binding) => ({ ...binding })),
     parsed: cloneParsed(bound.parsed)
   };
 
   for (const suit of SUITS) {
-    const cards: Array<{ seat: Seat; rank: string }> = [];
+    const cards: Array<{ seat: Side; rank: string }> = [];
     for (const seat of SEATS) {
       for (const rank of out.hands[seat][suit]) cards.push({ seat, rank });
     }
@@ -150,6 +151,9 @@ function relabelRanksOrdinally(bound: BoundEncapsulation, rng: () => number): Bo
       if (!nextRank) continue;
       threat.rank = nextRank;
       threat.cardId = `${suit}${nextRank}`;
+    }
+    for (const binding of out.cardBindings) {
+      if (binding.suit === suit) binding.rank = oldToNew.get(binding.rank) ?? binding.rank;
     }
   }
 

@@ -16,6 +16,7 @@ export interface TeachingFact {
   legalCount?: number;
   trickPosition?: number;
   followsSuit?: boolean;
+  inevitablyWinningThisTrick?: boolean;
   ddError?: boolean;
 }
 

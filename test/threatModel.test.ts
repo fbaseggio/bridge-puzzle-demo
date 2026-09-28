@@ -16,7 +16,7 @@ function makePosition(hands: Record<Seat, Hand>): Position {
 }
 
 describe('threat model + defender discard', () => {
-  test('validation errors: missing threat card and duplicate suit threats', () => {
+  test('validation errors: missing threat card and duplicate card declarations', () => {
     const position = makePosition({
       N: { S: ['A'], H: [], D: [], C: [] },
       E: { S: [], H: [], D: [], C: [] },
@@ -25,7 +25,7 @@ describe('threat model + defender discard', () => {
     });
 
     expect(() => initThreatContext(position, ['S8' as CardId])).toThrow(/exactly one hand/);
-    expect(() => initThreatContext(position, ['SA' as CardId, 'SK' as CardId])).toThrow(/Duplicate threat suit/);
+    expect(() => initThreatContext(position, ['SA', 'SA'])).toThrow(/Duplicate threat card/);
   });
 
   test('threatLength computation from designated threat card', () => {

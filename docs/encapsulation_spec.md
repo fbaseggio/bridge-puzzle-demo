@@ -210,6 +210,10 @@ For `A/B`, the other defender has full required length and can beat the primary 
 
 `A'` and `B'` shorten the **designated threat stopper** by one card; the other defender retains full length. The apostrophe does not change threat ownership or stopper direction. `C` is unchanged.
 
+For runtime threat classification, `A/B/C` designate two threats: the explicit opposite-hand card and the implied low companion in the primary hand. The companion is stopped by both defenders for plain `A/B/C`, only by the designated stopper's partner for `A'/B'`, and only by the designated stopper for `A*/B*`. Relative to the companion's own hand, its symbols are respectively `c`, `a/b`, and `b/a`. These are threat annotations on existing cards; no cards are added to the binding.
+
+`deriveBoundThreatCards` supplies both threats when selected. All-tricks goals include capital companions by default. Secondary squeezes (goals below all tricks) require an explicit onboarding decision to include or omit them; an unresolved decision cannot pass onboarding or be adapted into a new catalog puzzle. The binder's `threatCards` retains explicit token assignments for structural round trips. Legacy catalog entries can explicitly retain their earlier declarations with `includeCompanionThreats: false` pending review. Runtime classification tracks both threats independently and marks a defender's card busy if it guards either; a guard is considered shared only when each threat it guards is also stopped by the other defender.
+
 `A*` and `B*` retain the designated stopper's full length but say the **secondary defender does not stop** the relevant primary card. They bind no secondary-defender cards. Any such cards must come from explicit `o/u` or automatic idle completion. Non-stopping can result from inadequate length or inadequate rank: after a winner, a singleton 8, 9, or T cannot stop a remaining 7. Combining `*` and `'` on the same capital is not allowed yet.
 
 #### Worked examples

@@ -1,4 +1,4 @@
-import { explainPositionInverse } from '../src/encapsulation';
+import { deriveInverseThreatCards, explainPositionInverse } from '../src/encapsulation';
 import { init, legalPlays, autoplayUntilUserOrEnd, type CardId, type Problem, type Seat, type Suit } from '../src/core';
 import { demoProblems, resolveDemoProblem, type DemoProblem } from '../src/demo/problems';
 
@@ -46,23 +46,11 @@ function suggestedCardsByKind(problem: Problem): { threats: CardId[]; resources:
     suitOrder: SUITS,
     threatCardIds: problem.threatCardIds
   });
-  const threats: CardId[] = [];
-  const resources: CardId[] = [];
-  for (const suit of explained.suits) {
-    const steps = suit.selectedByScorer?.assignmentSteps ?? suit.bindingLabels ?? [];
-    for (const step of steps) {
-      const m = /^([NS])([AKQJT2-9])->(g'|G'|[abcfgABCFG])(\d+)$/.exec(step);
-      if (!m) continue;
-      const c = cardId(suit.suit, m[2]);
-      const symbol = m[3];
-      if (symbol.toLowerCase() === 'f') {
-        if (!resources.includes(c)) resources.push(c);
-      } else if (!threats.includes(c)) {
-        threats.push(c);
-      }
-    }
-  }
-  return { threats, resources };
+  const cards = deriveInverseThreatCards(explained);
+  return {
+    threats: cards.filter((card) => card.symbol.toLowerCase() !== 'f').map((card) => card.cardId as CardId),
+    resources: cards.filter((card) => card.symbol.toLowerCase() === 'f').map((card) => card.cardId as CardId)
+  };
 }
 
 function combinedEwCardIds(problem: Problem): CardId[] {

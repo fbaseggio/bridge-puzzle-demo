@@ -75,6 +75,7 @@ export type Problem = {
   scriptedOpening?: CardId[][];
   source?: {
     author?: string;
+    publication?: string;
     title?: string;
     url?: string;
   };
@@ -104,24 +105,7 @@ export type State = {
   id: string;
   contract: Contract;
   trumpSuit: Suit | null;
-  threat: {
-    threatCardIds: CardId[];
-    threatsBySuit: Partial<
-      Record<
-        Suit,
-        {
-          suit: Suit;
-          threatCardId: CardId;
-          threatRank: Rank;
-          establishedOwner: Seat;
-          active: boolean;
-          threatLength: number;
-          stopStatus?: 'none' | 'single' | 'double';
-          symbol?: string;
-        }
-      >
-    >;
-  } | null;
+  threat: import('../ai/threatModel').ThreatContext | null;
   resource: {
     resourceCardIds: CardId[];
     resourcesBySuit: Partial<

@@ -1,3 +1,4 @@
+import { allThreats, stoppingDefenders, cloneThreatContext as copyThreatContext } from '../ai/threatModel';
 import './style.css';
 
 import {
@@ -19,6 +20,7 @@ import {
   type Rank,
   type Seat,
   type State,
+  type Hand,
   type SuccessfulTranscript,
   type UserPlayRecord,
   type Suit
@@ -33,7 +35,6 @@ import {
   toCardId,
   updateClassificationAfterPlay,
   type CardId,
-  type Hand,
   type DefenderLabels,
   type Position,
   type ThreatContext,
@@ -1040,7 +1041,7 @@ function createArticleScriptWidgetTransportDriver() {
         scriptCursor: scriptState?.cursor ?? null,
         followPromptCursor: handDiagramSession.followPromptCursor,
         interactionProfile: currentArticleScriptInteractionProfile(),
-        phase: state.phase,
+        phase: state.phase === 'end' ? 'end' : 'play',
         turn: state.turn,
         isUserTurn: currentProblem.userControls.includes(state.turn),
         hasRememberedTail: currentArticleScriptHasRememberedTail(),
@@ -1614,7 +1615,7 @@ function currentDismissibleWidgetOutcomeKey(view: State): string | null {
   }
   if (displayMode !== 'widget') return null;
   if (runStatus === 'success' || runStatus === 'failure') return `run:${runStatus}:${state.phase}`;
-  if (inevitableFailureAlert && runStatus !== 'success' && runStatus !== 'failure') return 'warning:inevitable-failure';
+  if (inevitableFailureAlert) return 'warning:inevitable-failure';
   if (articleScriptState) {
     const terminalLabel = currentArticleScriptTerminalLabel();
     if (terminalLabel === 'Complete') return `script-complete:${articleScriptState.cursor}:${currentArticleScriptStateLabel() ?? ''}`;
@@ -2110,7 +2111,7 @@ function syncRepresentativeVariantWorld(viewState: State): void {
   if (threatCardIds.length === 0 && resourceCardIds.length === 0) return;
 
   const threatSymbolByCardId = Object.fromEntries(
-    Object.values(viewState.threat?.threatsBySuit ?? {})
+    allThreats(viewState.threat)
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       .map((entry) => [entry.threatCardId, entry.symbol])
       .filter(([cardId]) => threatCardIds.includes(cardId as CardId))
@@ -3574,10 +3575,7 @@ function cloneStateForLog(src: State): State {
     ...src,
     contract: { ...src.contract },
     threat: src.threat
-      ? {
-          threatCardIds: [...src.threat.threatCardIds],
-          threatsBySuit: { ...src.threat.threatsBySuit }
-        }
+      ? copyThreatContext(src.threat)
       : null,
     hands: {
       N: { S: [...src.hands.N.S], H: [...src.hands.N.H], D: [...src.hands.N.D], C: [...src.hands.N.C] },
@@ -3653,10 +3651,7 @@ function cloneStateForLog(src: State): State {
 
 function cloneThreatContext(ctx: ThreatContext | null): ThreatContext | null {
   if (!ctx) return null;
-  return {
-    threatCardIds: [...ctx.threatCardIds],
-    threatsBySuit: { ...ctx.threatsBySuit }
-  };
+  return copyThreatContext(ctx);
 }
 
 function cloneThreatLabels(labels: DefenderLabels | null): DefenderLabels | null {
@@ -3860,7 +3855,7 @@ function computeEqcForAutoplayEvent(shadow: State, event: Extract<EngineEvent, {
     if (chosenBucket.startsWith('tier3') || chosenBucket.startsWith('tier4')) return `busy:${card[0]}`;
     if (chosenBucket === 'tier5') return `other:${card[0]}`;
     const labels = shadow.threatLabels as DefenderLabels | null;
-    if (labels) {
+    if (labels && (event.play.seat === 'E' || event.play.seat === 'W')) {
       if (labels[event.play.seat].busy.has(card)) return `busy:${card[0]}`;
       if (labels[event.play.seat].idle.has(card)) return 'idle:tier1';
     }
@@ -3986,7 +3981,7 @@ function computeTierByCardForDecision(shadow: State, event: Extract<EngineEvent,
   }
 
   const isVoidDiscard = shadow.hands[shadow.turn][leadSuit].length === 0;
-  if (isVoidDiscard && shadow.threat && shadow.threatLabels) {
+  if (isVoidDiscard && (shadow.turn === 'E' || shadow.turn === 'W') && shadow.threat && shadow.threatLabels) {
     const tiers = computeDiscardTiers(shadow.turn, positionFromState(shadow), leadSuit, shadow.threat as ThreatContext, shadow.threatLabels as DefenderLabels);
     const priority: Array<[string, CardId[]]> = [
       ['tier1a', tiers.tier1a],
@@ -4189,9 +4184,13 @@ function formatDefenderInventoryEqBlock(s: State): string[] {
   const defenderOrder: Array<'E' | 'W'> = ['E', 'W'];
   const idleSuitOrder: Suit[] = ['C', 'D', 'H', 'S'];
   const busySuitOrder: Suit[] = ['S', 'H', 'D', 'C'];
-  const tierOrder = ['tier3a', 'tier3b', 'tier4a', 'tier4b'];
+  const tierOrder = ['tier3a', 'tier3b', 'tier4a', 'tier4b'] as const;
 
   for (const seat of defenderOrder) {
+    if (ctx?.additionalThreats?.length) {
+      seatRows.push(`${seatName[seat]}: ${formatDefenderInventoryEqSeat(s, seat)}`);
+      continue;
+    }
     const threatSuits = busySuitOrder.filter((suit) => !!ctx?.threatsBySuit[suit]);
     const idleParts: string[] = [];
     for (const suit of idleSuitOrder) {
@@ -4247,7 +4246,8 @@ function formatDefenderInventoryEqSeat(s: State, seat: 'E' | 'W'): string {
   const labels = s.threatLabels as DefenderLabels | null;
   const idleSuitOrder: Suit[] = ['C', 'D', 'H', 'S'];
   const busySuitOrder: Suit[] = ['S', 'H', 'D', 'C'];
-  const tierOrder = ['tier3a', 'tier3b', 'tier4a', 'tier4b'];
+  const tierOrder = ['tier3a', 'tier3b', 'tier4a', 'tier4b'] as const;
+  const actualTiers = ctx?.additionalThreats?.length && labels ? computeDiscardTiers(seat, positionFromState(s), null, ctx, labels) : null;
   const threatSuits = busySuitOrder.filter((suit) => !!ctx?.threatsBySuit[suit]);
 
   const idleParts: string[] = [];
@@ -4273,7 +4273,8 @@ function formatDefenderInventoryEqSeat(s: State, seat: 'E' | 'W'): string {
     const prefix = stopStatus === 'double' ? '3' : '4';
     const tiers = new Map<string, CardId[]>();
     for (const card of cards) {
-      const tier = threshold && isBelowThreshold(card, threshold) ? `tier${prefix}a` : `tier${prefix}b`;
+      const tier = actualTiers ? tierOrder.find((name) => actualTiers[name].includes(card)) ?? 'other'
+        : threshold && isBelowThreshold(card, threshold) ? `tier${prefix}a` : `tier${prefix}b`;
       const list = tiers.get(tier) ?? [];
       list.push(card);
       tiers.set(tier, list);
@@ -4367,15 +4368,14 @@ function addInitialThreatTeachingSummary(s: State): void {
     addTeachingEvent({ kind: 'info', at: 'Start', label: 'No teaching events yet.' });
     return;
   }
-  const suits: Suit[] = ['S', 'H', 'D', 'C'];
   const lines: string[] = [];
-  for (const suit of suits) {
-    const threat = ctx.threatsBySuit[suit];
-    if (!threat) continue;
+  for (const threat of allThreats(ctx)) {
+    const suit = threat.suit;
     const owner = seatName[threat.establishedOwner];
     const card = `${suitSymbol[suit]}${displayRank(threat.threatRank)}`;
-    const busyE = [...labels.E.busy].some((id) => id[0] === suit);
-    const busyW = [...labels.W.busy].some((id) => id[0] === suit);
+    const stoppers = stoppingDefenders(threat, { hands: s.hands });
+    const busyE = stoppers.includes('E');
+    const busyW = stoppers.includes('W');
     let stopText = 'unstopped';
     if (busyE && busyW) stopText = 'stopped by both';
     else if (busyW) stopText = 'stopped by West only';
@@ -4416,7 +4416,7 @@ function applyEventToShadow(s: State, event: EngineEvent): void {
       if (leadSuit && event.play.suit !== leadSuit) {
         const survivingVariantIds = s.ewVariantState.activeVariantIds.filter((variantId) => {
           const variant = s.ewVariantState?.variants.find((item) => item.id === variantId);
-          return variant ? variant.hands[event.play.seat][leadSuit].length === 0 : false;
+          return variant && (event.play.seat === 'E' || event.play.seat === 'W') ? variant.hands[event.play.seat][leadSuit].length === 0 : false;
         });
         pruneVariantsByUserDdError(s, survivingVariantIds);
       }
@@ -4627,13 +4627,13 @@ function logLinesForStep(before: State, attemptedPlay: Play, events: EngineEvent
         const localCtx = shadow.threat as ThreatContext;
         const localLabels = shadow.threatLabels as DefenderLabels;
         const tiers = computeDiscardTiers(shadow.turn, positionFromState(shadow), ledSuit, localCtx, localLabels);
-        const tierCounts = [
+        const tierCounts = ([
           ['t2', tiers.tier2.length],
           ['t3a', tiers.tier3a.length],
           ['t3b', tiers.tier3b.length],
           ['t4a', tiers.tier4a.length],
           ['t4b', tiers.tier4b.length]
-        ].filter(([, count]) => count > 0).map(([name, count]) => `${name}:${count}`).join(' ');
+        ] satisfies Array<[string, number]>).filter(([, count]) => count > 0).map(([name, count]) => `${name}:${count}`).join(' ');
         lines.push(
           `[THREAT] discard seat=${shadow.turn} ledSuit=${ledSuit} legal=${tiers.legal.length} chosen=${event.play.suit}${event.play.rank} bucket=${event.chosenBucket ?? '-'} tiers=${tierCounts || '-'}`
         );
@@ -4764,7 +4764,7 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
         if (eqRec.bucket.startsWith('tier3') || eqRec.bucket.startsWith('tier4')) return `busy:${card[0]}`;
         if (eqRec.bucket === 'tier5') return `other:${card[0]}`;
         const labels = shadow.threatLabels as DefenderLabels | null;
-        if (labels) {
+        if (labels && (event.play.seat === 'E' || event.play.seat === 'W')) {
           if (labels[event.play.seat].busy.has(card)) return `busy:${card[0]}`;
           if (labels[event.play.seat].idle.has(card)) return 'idle:tier1';
         }
@@ -4782,7 +4782,7 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
       const invEqIdleClasses = classOrder.filter((classId) => {
         if (classId.startsWith('idle')) return true;
         const classCards = bucketCards.filter((card) => toDecisionClass(card) === classId);
-        return classCards.length > 0 && !!seatLabels && classCards.every((card) => seatLabels[event.play.seat].idle.has(card));
+        return classCards.length > 0 && !!seatLabels && classCards.every((card) => (event.play.seat === 'E' || event.play.seat === 'W') && seatLabels[event.play.seat].idle.has(card));
       });
       const sourceRec =
         event.replay?.action === 'forced' && shadow.replay.transcript && typeof event.replay.index === 'number'
@@ -4817,11 +4817,11 @@ function appendTranscriptDecisions(before: State, events: EngineEvent[]): void {
             ...logs,
             withRunVisit(
               sourceRec.nodeKey || '-',
-              `[EQC:replay] idx=${event.replay.index} recordedRemaining=${sourceRec.sameBucketAlternativeClassIds.join(',') || '-'} runtimeRemaining=${runtimeText}`
+              `[EQC:replay] idx=${event.replay?.index} recordedRemaining=${sourceRec.sameBucketAlternativeClassIds.join(',') || '-'} runtimeRemaining=${runtimeText}`
             ),
             withRunVisit(
               sourceRec.nodeKey || '-',
-              `[EQC:replayRemaining] idx=${event.replay.index} seat=${event.play.seat} nodeKey=${sourceRec.nodeKey || '-'} policyScope=${busyBranching} availClasses={${availClasses.join(',') || '-'}} branchableAvail={${branchableAvail.join(',') || '-'}} chosenClass=${chosenAltClassId} computedRemaining={${runtimeRemainingForLog?.join(',') || '-'}} reason=${replayReason}`
+              `[EQC:replayRemaining] idx=${event.replay?.index} seat=${event.play.seat} nodeKey=${sourceRec.nodeKey || '-'} policyScope=${busyBranching} availClasses={${availClasses.join(',') || '-'}} branchableAvail={${branchableAvail.join(',') || '-'}} chosenClass=${chosenAltClassId} computedRemaining={${runtimeRemainingForLog?.join(',') || '-'}} reason=${replayReason}`
             )
           ].slice(-500);
         }
@@ -4991,7 +4991,7 @@ function syncSingletonAutoplay(): void {
       isUserTurn: currentProblem.userControls.includes(state.turn),
       profile: activeProfile,
       atInitialCursor: storyAtInitialCursor,
-      phase: state.phase,
+      phase: state.phase === 'end' ? 'end' : 'play',
       trickFrozen,
       canLeadDismiss,
       choice: scriptedChoice,
@@ -5020,7 +5020,7 @@ function syncSingletonAutoplay(): void {
               && articleScriptState.cursor === articleScriptState.initialCursor
               && liveProfile === 'story-viewing'
             ),
-            phase: state.phase,
+            phase: 'play',
             trickFrozen,
             canLeadDismiss,
             choice: liveChoice,

@@ -1,3 +1,4 @@
+import { allThreats, threatsForSuit } from './threatModel';
 import type { EwVariantState, Hand, Play, Policy, Rank, RngState, Seat, State, Suit } from '../core';
 import { computeDiscardTiers, type DiscardTiers, getIdleThreatThresholdRank } from './defenderDiscard';
 import {
@@ -47,12 +48,12 @@ function highestNonWinnerNonThreatRankForNs(suit: Suit, hands: Record<Seat, Hand
   const defenderRanks = [...hands.E[suit], ...hands.W[suit]];
   if (defenderRanks.length === 0) return null;
   const maxDefender = defenderRanks.reduce((max, rank) => Math.max(max, RANK_STRENGTH[rank]), 0);
-  const activeThreatCard = threat?.threatsBySuit[suit]?.active ? threat.threatsBySuit[suit]?.threatCardId : null;
+  const activeThreatCards = new Set(threatsForSuit(threat, suit).filter((t) => t.active).map((t) => t.threatCardId));
   const candidates: Rank[] = [];
   for (const seat of ['N', 'S'] as const) {
     for (const rank of hands[seat][suit]) {
       const cardId = toCardId(suit, rank) as CardId;
-      if (activeThreatCard && cardId === activeThreatCard) continue;
+      if (activeThreatCards.has(cardId)) continue;
       if (RANK_STRENGTH[rank] > maxDefender) continue; // obvious winner
       candidates.push(rank);
     }
@@ -203,7 +204,7 @@ function classifyWorld(input: EvaluatePolicyInput, hands: Record<Seat, Hand>): {
     return { threat: null, resource: null, threatLabels: null, cardRoles: {} };
   }
   const threatSymbolByCardId = Object.fromEntries(
-    Object.values(input.threat?.threatsBySuit ?? {})
+    allThreats(input.threat)
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       .map((entry) => [entry.threatCardId, entry.symbol])
       .filter(([cardId]) => threatCardIds.includes(cardId as CardId))
@@ -657,7 +658,6 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
   let rngAfter = { ...rngBefore };
   const contractStrain = input.contractStrain ?? 'NT';
   const signature = buildCanonicalPositionSignature({ contractStrain, seat, hands, trick });
-  const ddSource = 'off' as const;
   const applyDdFilter = (
     candidates: CardId[],
     legalUniverse?: CardId[]
@@ -668,15 +668,6 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
     found: boolean;
     path: 'intersection' | 'dd-fallback' | 'base-fallback' | 'disabled';
   } => {
-    if (ddSource !== 'runtime') {
-      return {
-        candidates: [...candidates],
-        trace: undefined,
-        lookup: false,
-        found: false,
-        path: 'disabled'
-      };
-    }
     return {
       candidates: [...candidates],
       trace: undefined,
@@ -868,7 +859,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
           }
         }
         const nextSeatToAct = nextSeat(seat);
-        const suitThreat = threat.threatsBySuit[leadSuit];
+        const suitThreat = threatsForSuit(threat, leadSuit).find((t) => t.active && t.establishedOwner === nextSeatToAct);
         const nextSeatIsOpponent = nextSeatToAct === 'N' || nextSeatToAct === 'S';
         if (nextSeatIsOpponent && suitThreat && suitThreat.active && suitThreat.establishedOwner === nextSeatToAct) {
           const highestLedSoFar = trick.reduce((max, play) => {

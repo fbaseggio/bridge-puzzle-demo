@@ -300,7 +300,7 @@ describe('article script runtime', () => {
     offScriptHistory[checkpoint.cursor] = 'DJ';
     expect(deriveArticleScriptState(experimentalDraftIntroScript, '1b', offScriptHistory, checkpoint.cursor + 1)).toBe('off-script');
 
-    const authoredBranchHistory = [
+    const authoredBranchHistory: CardId[] = [
       ...inScriptHistory,
       'DJ',
       'H5',
@@ -324,7 +324,7 @@ describe('article script runtime', () => {
 
   it('replays arbitrary local article history after divergence or post-script continuation', () => {
     const checkpoint = resolveArticleScriptCheckpoint(experimentalDraftIntroScript, '1b');
-    const history = [...defaultArticleScriptHistory(experimentalDraftIntroScript, checkpoint.cursor + 1), 'DJ', 'S2'];
+    const history: CardId[] = [...defaultArticleScriptHistory(experimentalDraftIntroScript, checkpoint.cursor + 1), 'DJ', 'S2'];
     const replay = replayArticleHistory(experimentalDraft01, history, history.length);
 
     expect(replay.playedCardIds).toEqual(history.slice(0, replay.playedCardIds.length));
@@ -333,7 +333,7 @@ describe('article script runtime', () => {
   });
 
   it('does not treat SKDJ as complete immediately after the first branch choice', () => {
-    const history = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ'] as const;
+    const history: CardId[] = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ'] as const;
     const stateAtChoice = deriveArticleScriptState(doubleDummy01Script, '1', [...history], history.length);
     const replayAfterChoice = replayArticleHistory(doubleDummy01, [...history], history.length);
 
@@ -636,7 +636,7 @@ describe('article script runtime', () => {
   });
 
   it('keeps the authored SKDJ line in-script through the end of trick 4', () => {
-    const history = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ', 'D4', 'DQ', 'DK', 'DA', 'HA', 'H5', 'HQ', 'H7'];
+    const history: CardId[] = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ', 'D4', 'DQ', 'DK', 'DA', 'HA', 'H5', 'HQ', 'H7'];
     const replay = replayArticleHistory(doubleDummy01, history, history.length);
 
     expect(replay.playedCardIds).toEqual(history);
@@ -644,7 +644,7 @@ describe('article script runtime', () => {
   });
 
   it('treats SKD4 as complete at East’s branch choice and transitions to post-script after it', () => {
-    const history = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'D4'];
+    const history: CardId[] = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'D4'];
     const replay = replayArticleHistory(doubleDummy01, history, history.length);
 
     expect(resolvePendingArticleScriptChoice(doubleDummy01Script, history.length, { 7: 'D4' }) as ArticleScriptChoiceStep).toMatchObject({
@@ -840,7 +840,7 @@ describe('article script runtime', () => {
   });
 
   it('keeps SKDJ in-script when West follows South’s diamond with DK', () => {
-    const history = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ', 'D4', 'DQ', 'DK'];
+    const history: CardId[] = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ', 'D4', 'DQ', 'DK'];
 
     expect(deriveWidgetStyleArticleScriptState(history, 10)).toBe('in-script');
     expect(deriveWidgetStyleArticleScriptState(history, history.length)).toBe('in-script');
@@ -848,7 +848,7 @@ describe('article script runtime', () => {
 
   it('keeps SKDJ in-script through DK for every asserted South diamond', () => {
     for (const southDiamond of ['DQ', 'D8', 'D7', 'D2'] as const) {
-      const history = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ', 'D4', southDiamond, 'DK'];
+      const history: CardId[] = ['SK', 'S7', 'S8', 'SA', 'DT', 'D9', 'D3', 'DJ', 'D4', southDiamond, 'DK'];
       expect(deriveWidgetStyleArticleScriptState(history, history.length)).toBe('in-script');
     }
   });

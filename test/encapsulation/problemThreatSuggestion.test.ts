@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { explainPositionInverse } from '../../src/encapsulation';
+import { deriveInverseThreatCards, explainPositionInverse } from '../../src/encapsulation';
 import { demoProblems, resolveDemoProblem } from '../../src/demo/problems';
 import type { CardId, Suit } from '../../src/core';
 
@@ -18,21 +18,7 @@ function suggestedThreatsForProblem(problem: { hands: Record<'N' | 'E' | 'S' | '
     suitOrder: SUITS
   });
 
-  const out: CardId[] = [];
-  for (const suit of explained.suits) {
-    if (!/[abcfgABCFG]/.test(suit.finalText)) continue;
-    const stepSource = suit.selectedByScorer?.assignmentSteps ?? suit.bindingLabels ?? [];
-    for (const step of stepSource) {
-      const m = /^([NESW])([AKQJT2-9])->([abcfgABCFG])/.exec(step);
-      if (!m) continue;
-      const seat = m[1] as 'N' | 'E' | 'S' | 'W';
-      if (seat !== 'N' && seat !== 'S') continue;
-      const rank = m[2];
-      const cardId = `${suit.suit}${rank}` as CardId;
-      if (!out.includes(cardId)) out.push(cardId);
-    }
-  }
-  return out;
+  return deriveInverseThreatCards(explained).filter((card) => card.symbol.toLowerCase() !== 'f').map((card) => card.cardId as CardId);
 }
 
 describe('problem threat suggestions', () => {

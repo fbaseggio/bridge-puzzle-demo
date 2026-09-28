@@ -15,6 +15,9 @@ const HELP = `Usage: npm run puzzle:onboard -- --encap "[schd] wA' Ww > WLc, c" 
                       Default: logs/onboarding/<title>-<timestamp>
   --python PATH       Python with endplay (default project .venv, else python3)
   --skip-dda          Run encapsulation checks only; report remains incomplete
+  --companion-threats include|omit
+                      Required for secondary squeezes with A/B/C companions
+                      All-tricks goals include companions by default
   --allow-additional-threats REASON
                       Explicit per-candidate permission for extra lowercase a/b/c
   --omit-original-comparison REASON
@@ -31,6 +34,7 @@ function main(): void {
       encap: { type: 'string' }, title: { type: 'string' }, source: { type: 'string' },
       strain: { type: 'string', default: 'NT' }, leader: { type: 'string' }, out: { type: 'string' },
       python: { type: 'string' }, 'skip-dda': { type: 'boolean', default: false },
+      'companion-threats': { type: 'string' },
       'allow-additional-threats': { type: 'string' }, 'omit-original-comparison': { type: 'string' },
       help: { type: 'boolean', default: false }
     }, strict: true
@@ -39,12 +43,16 @@ function main(): void {
   if (!values.encap?.trim()) throw new Error('--encap is required; use --help for usage');
   if (!['NT', 'S', 'H', 'D', 'C'].includes(values.strain!)) throw new Error('Invalid --strain');
   if (values.leader !== undefined && !['N', 'S'].includes(values.leader)) throw new Error('--leader must be N or S');
+  if (values['companion-threats'] !== undefined && !['include', 'omit'].includes(values['companion-threats'])) {
+    throw new Error('--companion-threats must be include or omit');
+  }
   for (const key of ['allow-additional-threats', 'omit-original-comparison'] as const) {
     if (values[key] !== undefined && !values[key]?.trim()) throw new Error(`--${key} requires a reason`);
   }
   const candidate: Candidate = {
     encapsulation: values.encap, title: values.title, source: values.source,
     strain: values.strain as Candidate['strain'], leader: values.leader as Candidate['leader'],
+    includeCompanionThreats: values['companion-threats'] === undefined ? undefined : values['companion-threats'] === 'include',
     allowAdditionalThreats: values['allow-additional-threats'], omitOriginalComparison: values['omit-original-comparison']
   };
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -72,6 +80,9 @@ function main(): void {
   writeFileSync(`${basename}.json`, JSON.stringify(report, null, 2) + '\n');
   writeFileSync(`${basename}.md`, renderOnboardingReport(report));
   console.log(`Automated checks: ${report.automatedStatus}; human review pending.`);
+  if (report.original.companionThreatDecisionRequired || report.cooks.some((cook) => cook.companionThreatDecisionRequired)) {
+    console.log('Explicit threat decision required: --companion-threats include|omit');
+  }
   console.log(`Original DDA: ${report.dda.status}${report.dda.result ? ` (${report.dda.result.maxTricksNS} tricks)` : ''}`);
   for (const cook of report.cooks) console.log(`Cook ${cook.id} ${cook.from} → ${cook.to}: ${cook.dda.status}${cook.dda.result ? ` (${cook.dda.result.maxTricksNS} tricks)` : ''}`);
   console.log(`Report: ${basename}.md\nData: ${basename}.json`);

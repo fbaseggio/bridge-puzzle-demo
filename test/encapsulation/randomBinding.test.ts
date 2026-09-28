@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { bindRandom, bindStandard, prepareRandomBindingInput, type Seat, type Suit } from '../../src/encapsulation';
+import { bindRandom, bindStandard, prepareRandomBindingInput, type Side, type Suit } from '../../src/encapsulation';
 
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
-const SEATS: Seat[] = ['N', 'E', 'S', 'W'];
+const SEATS: Side[] = ['N', 'E', 'S', 'W'];
 const RANKS_HIGH_TO_LOW = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
 
 function rankIndex(rank: string): number {
@@ -10,8 +10,8 @@ function rankIndex(rank: string): number {
   return idx >= 0 ? idx : 99;
 }
 
-function ordinalSeatPattern(bound: ReturnType<typeof bindStandard>, suit: Suit): Seat[] {
-  const cards: Array<{ seat: Seat; rank: string }> = [];
+function ordinalSeatPattern(bound: ReturnType<typeof bindStandard>, suit: Suit): Side[] {
+  const cards: Array<{ seat: Side; rank: string }> = [];
   for (const seat of SEATS) {
     for (const rank of bound.hands[seat][suit]) cards.push({ seat, rank });
   }

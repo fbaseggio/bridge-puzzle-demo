@@ -1,3 +1,4 @@
+import { allThreats, threatsForSuit } from './threatModel';
 import type { Play, Rank, Seat, Suit } from '../core';
 import type { CardId, DefenderLabels, Position, ThreatContext } from './threatModel';
 import { parseCardId, toCardId } from './threatModel';
@@ -118,9 +119,8 @@ export function formatInitBlock(params: {
     return lines.join('\n');
   }
 
-  for (const suit of threatSuits(params.ctx)) {
-    const threat = params.ctx.threatsBySuit[suit];
-    if (!threat) continue;
+  for (const threat of allThreats(params.ctx)) {
+    const suit = threat.suit;
     const owners = ownersOfCard(params.position, threat.threatCardId);
     const currentOwner = owners.length === 1 ? owners[0] : '-';
     const ownerHold = currentOwner === '-' ? [] : suitHolding(params.position, currentOwner, suit);
@@ -165,10 +165,9 @@ export function formatAfterTrickBlock(params: {
   const touchedThreatSuits = [...suitsInTrick].filter((s) => threatened.has(s));
   lines.push(`touchedThreatSuits=${touchedThreatSuits.join(' ') || '-'}`);
 
-  for (const suit of touchedThreatSuits) {
-    const before = params.beforeCtx?.threatsBySuit[suit];
-    const after = params.afterCtx?.threatsBySuit[suit];
-    if (!after) continue;
+  for (const after of allThreats(params.afterCtx).filter((t) => touchedThreatSuits.includes(t.suit))) {
+    const suit = after.suit;
+    const before = threatsForSuit(params.beforeCtx, suit).find((t) => t.establishedOwner === after.establishedOwner);
 
     const owners = ownersOfCard(params.position, after.threatCardId);
     const currentOwner = owners.length === 1 ? owners[0] : '-';
@@ -226,12 +225,11 @@ export function formatAfterPlayBlock(params: {
   const suit = params.play.suit;
   const dirty = (params.beforeCtx?.threatsBySuit[suit] || params.afterCtx?.threatsBySuit[suit]) ? [suit] : [];
   lines.push(`dirtyThreatSuits=${dirty.join(' ') || '-'}`);
-  for (const ds of dirty) {
-    const before = params.beforeCtx?.threatsBySuit[ds];
-    const after = params.afterCtx?.threatsBySuit[ds];
-    if (!after) continue;
+  for (const after of allThreats(params.afterCtx).filter((t) => dirty.includes(t.suit))) {
+    const ds = after.suit;
+    const before = threatsForSuit(params.beforeCtx, ds).find((t) => t.establishedOwner === after.establishedOwner);
     lines.push(
-      `suit=${ds} active=${after.active} threatLength ${(before?.threatLength ?? 0)}->${after.threatLength} stopStatus=${before?.stopStatus ?? '-'}->${after.stopStatus ?? '-'}`
+      `suit=${ds} threatCard=${after.threatCardId} active=${after.active} threatLength ${(before?.threatLength ?? 0)}->${after.threatLength} stopStatus=${before?.stopStatus ?? '-'}->${after.stopStatus ?? '-'}`
     );
     for (const defender of ['E', 'W'] as const) {
       const bBusy = params.beforeLabels ? sortCardIds([...params.beforeLabels[defender].busy].filter((id) => id.startsWith(ds))) : [];
@@ -288,9 +286,8 @@ export function formatDiscardDecisionBlock(params: {
     `rng=${params.rngState ? `seed:${params.rngState.seed} counter:${params.rngState.counter}` : 'n/a'}`
   ];
 
-  for (const suit of legalSuits) {
-    const threat = params.ctx?.threatsBySuit[suit];
-    if (!threat) continue;
+  for (const threat of allThreats(params.ctx).filter((t) => legalSuits.includes(t.suit))) {
+    const suit = threat.suit;
     lines.push(
       `threat suit=${suit} active=${threat.active} threatRank=${threat.threatRank} threatLength=${threat.threatLength} stopStatus=${threat.stopStatus ?? '-'}`
     );

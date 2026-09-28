@@ -1,6 +1,7 @@
+import type { Hand } from '../../src/core';
 import { describe, expect, it } from 'vitest';
 import { evaluatePolicy } from '../../src/ai/evaluatePolicy';
-import { initClassification, type CardId, type Hand } from '../../src/ai/threatModel';
+import { initClassification, type CardId } from '../../src/ai/threatModel';
 
 describe('evaluatePolicy threatAware follow cover guard', () => {
   it('preserves the last card above threat rank when it is not guaranteed to win the trick', () => {

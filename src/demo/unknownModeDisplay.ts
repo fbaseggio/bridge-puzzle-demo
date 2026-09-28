@@ -8,7 +8,7 @@ import type { UnknownModeVariantReplay, UnknownModeTeachingEntry } from './unkno
 //   than rebuilding them inside main.ts.
 
 export function mergeUnknownTeachingEntries(
-  perVariant: Map<string, UnknownModeVariantReplay>,
+  perVariant: Map<string, Pick<UnknownModeVariantReplay, 'entries' | 'ddsSummaries'>>,
   labelForVariant: (variantId: string) => string
 ): UnknownModeTeachingEntry[] {
   if (perVariant.size <= 1) return [];
@@ -46,7 +46,7 @@ export function mergeUnknownTeachingEntries(
 }
 
 export function mergeUnknownDdsSummaries(
-  perVariant: Map<string, UnknownModeVariantReplay>,
+  perVariant: Map<string, Pick<UnknownModeVariantReplay, 'entries' | 'ddsSummaries'>>,
   labelForVariant: (variantId: string) => string
 ): Array<string | { labels: string[]; text: string }[]> {
   if (perVariant.size <= 1) return [];

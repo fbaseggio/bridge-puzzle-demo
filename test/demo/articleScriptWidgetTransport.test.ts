@@ -153,7 +153,7 @@ function createTransportHarness(config: TransportHarnessConfig) {
       scriptCursor: progression.cursor,
       followPromptCursor,
       interactionProfile: config.interactionProfile,
-      phase: replayed.phase,
+      phase: replayed.phase === 'end' ? 'end' : 'play',
       turn: replayed.turn,
       isUserTurn: config.problem.userControls.includes(replayed.turn),
       hasRememberedTail: progression.cursor < progression.history.length,
@@ -300,7 +300,7 @@ function deriveDd1ReferenceStates(): DerivedDd1ReferenceStates {
       hasRememberedTail: false,
       trickFrozen: false,
       canLeadDismiss: false,
-      phase: replayed.phase
+      phase: replayed.phase === 'end' ? 'end' : 'play'
     });
     if (blocked) continue;
     midLoopFollowPromptStart = { cursor, history };

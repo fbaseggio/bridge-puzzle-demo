@@ -44,6 +44,25 @@ describe('onboarding cook tweaks', () => {
 });
 
 describe('onboarding review', () => {
+  it('keeps a secondary squeeze pending until companions are explicitly included or omitted', () => {
+    for (const includeCompanionThreats of [undefined, true, false]) {
+      let call = 0;
+      const solver = vi.fn((request: DdsRequest) => scored(request, ++call === 1 ? 5 : 4));
+      const report = runOnboarding({ encapsulation: `${ENCAP} -1`, includeCompanionThreats }, solver);
+      expect(report.automatedStatus).toBe(includeCompanionThreats === undefined ? 'needs-review' : 'passed');
+      expect(report.dda.status).toBe('pass');
+      expect(report.cooks[0].dda.status).toBe('pass');
+      expect(solver).toHaveBeenCalledTimes(2);
+      for (const binding of [report.original, ...report.cooks]) {
+        expect(binding.companionThreatDecisionRequired).toBe(includeCompanionThreats === undefined);
+        expect(binding.includeCompanionThreats).toBe(includeCompanionThreats);
+        if (includeCompanionThreats === undefined) expect(binding.threats).toBeUndefined();
+        else expect(binding.threats).toHaveLength(includeCompanionThreats ? 4 : 3);
+      }
+      if (includeCompanionThreats === undefined) expect(renderOnboardingReport(report)).toContain('Threat selection PENDING');
+    }
+  });
+
   it('reports a stable original and a failed tweak without approving the candidate', () => {
     let call = 0;
     const solver = vi.fn((request: DdsRequest) => scored(request, ++call === 1 ? 6 : 5));

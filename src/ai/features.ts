@@ -22,6 +22,7 @@ export type FeatureState = {
   goalStatus: GoalStatus | null;
   threatCardIds: CardId[];
   threatBySuit: Partial<Record<Suit, FeatureSuitState>>;
+  additionalThreats?: FeatureSuitState[];
   cardRoleById: Partial<Record<CardId, FeatureCardRole>>;
   highCardEntries: Record<Seat, Suit[]>;
   labels: {
@@ -134,6 +135,7 @@ export function buildFeatureStateFromClassification(state: ClassificationState, 
     goalStatus: null,
     threatCardIds: [...state.threat.threatCardIds],
     threatBySuit: normalizeThreatBySuit(state.threat),
+    additionalThreats: (state.threat.additionalThreats ?? []).map((t) => ({ ...t, stopStatus: t.stopStatus ?? null })),
     cardRoleById,
     highCardEntries: computeHighCardEntries(position?.hands, cardRoleById),
     labels: {
@@ -162,6 +164,7 @@ export function buildFeatureStateFromRuntime(input: {
     goalStatus: resolvedGoalStatus,
     threatCardIds: [...(input.threat?.threatCardIds ?? [])],
     threatBySuit: normalizeThreatBySuit(input.threat),
+    additionalThreats: (input.threat?.additionalThreats ?? []).map((t) => ({ ...t, stopStatus: t.stopStatus ?? null })),
     cardRoleById,
     highCardEntries: computeHighCardEntries(input.hands, cardRoleById),
     labels: input.threatLabels
@@ -209,6 +212,14 @@ export function diffFeatureStates(before: FeatureState, after: FeatureState): Fe
     if (!sameSuitState(prev, next)) {
       suitChanges.push({ suit, before: prev, after: next });
     }
+  }
+
+  const extraKeys = new Set([...(before.additionalThreats ?? []), ...(after.additionalThreats ?? [])]
+    .map((threat) => `${threat.suit}:${threat.establishedOwner}`));
+  for (const key of extraKeys) {
+    const prev = before.additionalThreats?.find((t) => `${t.suit}:${t.establishedOwner}` === key) ?? null;
+    const next = after.additionalThreats?.find((t) => `${t.suit}:${t.establishedOwner}` === key) ?? null;
+    if (!sameSuitState(prev, next)) suitChanges.push({ suit: (next ?? prev)!.suit, before: prev, after: next });
   }
 
   const goalStatusChange =

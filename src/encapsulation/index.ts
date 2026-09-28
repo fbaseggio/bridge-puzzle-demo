@@ -1,4 +1,5 @@
 export * from './types';
+export { deriveBoundThreatCards, deriveInverseThreatCards, resolveCompanionThreatPolicy } from './threats';
 export { parseEncapsulation } from './parser';
 export { bindStandard, computeSpecifiedCardCounts } from './binder';
 export { bindRandom, prepareRandomBindingInput, type BindRandomOptions } from './random';

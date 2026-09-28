@@ -8,7 +8,7 @@ type SureTricksEndingVariantId = 'a' | 'b';
 const baseNorthSouth = {
   N: { S: ['A', 'T'], H: ['A', 'T'], D: [], C: ['A', 'Q'] },
   S: { S: ['3', '2'], H: [], D: ['Q'], C: ['K', 'J', 'T'] }
-} as const;
+} satisfies Pick<Problem['hands'], 'N' | 'S'>;
 
 const eastWestByVariant: Record<SureTricksVariantId, Pick<ThreatProblem['hands'], 'E' | 'W'>> = {
   a: {
@@ -71,7 +71,7 @@ export const sureTricksDemo: ThreatProblem = buildSureTricksDemo();
 const baseRuffOrSluffEndingNorthSouth = {
   N: { S: ['K', 'J'], H: [], D: ['A', '8', '6'], C: ['K', '6'] },
   S: { S: [], H: ['K', '5'], D: ['9', '7', '5', '4', '3'], C: [] }
-} as const;
+} satisfies Pick<Problem['hands'], 'N' | 'S'>;
 
 const ruffOrSluffEndingEastWestByVariant: Record<SureTricksEndingVariantId, Pick<ThreatProblem['hands'], 'E' | 'W'>> = {
   a: {

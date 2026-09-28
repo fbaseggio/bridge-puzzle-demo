@@ -1,7 +1,8 @@
+import { threatsForSuit } from '../ai/threatModel';
 import type { CardId, DefenderLabels, ThreatContext } from '../ai/threatModel';
-import { getRankColorForFeatureRole, type FeatureCardRole, type FeatureState } from '../ai/features';
+import { getRankColorForFeatureRole, type FeatureCardRole, type FeatureColor, type FeatureState } from '../ai/features';
 
-export type RankColor = 'purple' | 'green' | 'blue' | 'black';
+export type RankColor = FeatureColor;
 
 function isBusy(cardId: CardId, labels: DefenderLabels): boolean {
   return labels.E.busy.has(cardId) || labels.W.busy.has(cardId);
@@ -10,15 +11,16 @@ function isBusy(cardId: CardId, labels: DefenderLabels): boolean {
 function isDesignatedThreat(cardId: CardId, ctx: ThreatContext): boolean {
   if (!ctx.threatCardIds.includes(cardId)) return false;
   const { suit } = cardId.length >= 2 ? { suit: cardId[0] as 'S' | 'H' | 'D' | 'C' } : { suit: 'S' as const };
-  const threat = ctx.threatsBySuit[suit];
-  return Boolean(threat?.active && threat.threatCardId === cardId);
+  return threatsForSuit(ctx, suit).some((threat) => threat.active && threat.threatCardId === cardId);
 }
 
 export function isPromotedWinner(cardId: CardId, ctx: ThreatContext, labels: DefenderLabels): boolean {
   const { suit } = cardId.length >= 2 ? { suit: cardId[0] as 'S' | 'H' | 'D' | 'C' } : { suit: 'S' as const };
-  const threat = ctx.threatsBySuit[suit];
+  const threat = threatsForSuit(ctx, suit).find((entry) => entry.threatCardId === cardId);
   if (!threat || !threat.active || threat.threatCardId !== cardId) return false;
 
+  if (threat.stranded) return false;
+  if (threat.stopStatus !== undefined) return threat.stopStatus === 'none';
   const eBusyInSuit = [...labels.E.busy].some((id) => id.startsWith(suit));
   const wBusyInSuit = [...labels.W.busy].some((id) => id.startsWith(suit));
   return !eBusyInSuit && !wBusyInSuit;

@@ -1,12 +1,7 @@
-import type { Problem } from '../core';
+import type { Problem, Hand } from '../core';
 import type { CardId } from '../ai/threatModel';
 
-type HandSpec = {
-  S: string[];
-  H: string[];
-  D: string[];
-  C: string[];
-};
+type HandSpec = Hand;
 
 function makeGorillaProblem(
   id: string,

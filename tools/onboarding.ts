@@ -1,4 +1,4 @@
-import { bindStandard, normalizeEncapsulationRoundTrip, parseEncapsulation } from '../src/encapsulation';
+import { bindStandard, deriveBoundThreatCards, resolveCompanionThreatPolicy, normalizeEncapsulationRoundTrip, parseEncapsulation } from '../src/encapsulation';
 import { authoredStructureDifferences } from '../src/encapsulation/structureComparison';
 import type { BoundEncapsulation, FourHands, ParsedEncapsulation, Side, Suit } from '../src/encapsulation';
 
@@ -10,6 +10,7 @@ export type Candidate = {
   leader?: 'N' | 'S';
   allowAdditionalThreats?: string;
   omitOriginalComparison?: string;
+  includeCompanionThreats?: boolean;
 };
 export type CookTweak = { id: string; suit: Suit; tokenNumber: number; from: string; to: string; encapsulation: string };
 export type DdsRequest = { hands: FourHands; turn: 'N' | 'S'; strain: Suit | 'NT'; goal: number };
@@ -24,7 +25,13 @@ export type DdsResult = {
 };
 export type DdsSolver = (request: DdsRequest) => DdsResult;
 type Analysis = { status: 'pass' | 'fail' | 'inconclusive'; result?: DdsResult; error?: string };
-type Binding = { bound?: BoundEncapsulation; errors: string[] };
+type Binding = {
+  bound?: BoundEncapsulation;
+  threats?: ReturnType<typeof deriveBoundThreatCards>;
+  includeCompanionThreats?: boolean;
+  companionThreatDecisionRequired?: boolean;
+  errors: string[];
+};
 export type OnboardingReport = {
   schemaVersion: 1;
   createdAt: string;
@@ -73,7 +80,7 @@ export function generateCookTweaks(encapsulation: string): CookTweak[] {
   return tweaks;
 }
 
-function inspectBinding(input: string): Binding {
+function inspectBinding(input: string, choice?: boolean): Binding {
   try {
     const bound = bindStandard(input);
     const target = bound.metadata.finalHandSize;
@@ -89,7 +96,13 @@ function inspectBinding(input: string): Binding {
         seen.add(card);
       }
     }
-    return { bound, errors };
+    const includeCompanionThreats = resolveCompanionThreatPolicy(bound, choice);
+    return {
+      bound, errors, includeCompanionThreats,
+      companionThreatDecisionRequired: includeCompanionThreats === undefined,
+      threats: includeCompanionThreats === undefined ? undefined
+        : deriveBoundThreatCards(bound, includeCompanionThreats).filter((card) => card.symbol.toLowerCase() !== 'f')
+    };
   } catch (error) {
     return { errors: [error instanceof Error ? error.message : String(error)] };
   }
@@ -111,7 +124,7 @@ function analyze(binding: Binding, leader: 'N' | 'S' | undefined, strain: Suit |
 }
 
 export function runOnboarding(candidate: Candidate, solver?: DdsSolver): OnboardingReport {
-  const original = inspectBinding(candidate.encapsulation);
+  const original = inspectBinding(candidate.encapsulation, candidate.includeCompanionThreats);
   const report: OnboardingReport = {
     schemaVersion: 1, createdAt: new Date().toISOString(), candidate,
     strain: candidate.strain ?? 'NT', original, encapsulation: { differences: [] },
@@ -146,13 +159,14 @@ export function runOnboarding(candidate: Candidate, solver?: DdsSolver): Onboard
   }
   report.dda = analyze(original, report.leader, report.strain, report.target, solver, false);
   for (const tweak of generateCookTweaks(candidate.encapsulation)) {
-    const binding = inspectBinding(tweak.encapsulation);
+    const binding = inspectBinding(tweak.encapsulation, candidate.includeCompanionThreats);
     report.cooks.push({ ...tweak, ...binding, dda: analyze(binding, report.leader, report.strain, report.target, solver, true,
       original.errors.length ? 'Original binding/parameters are invalid' : undefined) });
   }
   const analyses = [report.dda, ...report.cooks.map((cook) => cook.dda)];
   report.automatedStatus = analyses.some((result) => result.status === 'inconclusive') ? 'incomplete'
-    : report.encapsulation.error || report.encapsulation.differences.length || !report.encapsulation.stable || analyses.some((result) => result.status === 'fail')
+    : original.companionThreatDecisionRequired || report.cooks.some((cook) => cook.companionThreatDecisionRequired)
+      || report.encapsulation.error || report.encapsulation.differences.length || !report.encapsulation.stable || analyses.some((result) => result.status === 'fail')
       ? 'needs-review' : 'passed';
   return report;
 }
@@ -185,6 +199,10 @@ function bindingMarkdown(binding: Binding): string {
   if (!binding.bound) return output.join('\n');
   const b = binding.bound;
   output.push('', '```text', newspaperDiagram(b.hands), '```', '',
+    binding.companionThreatDecisionRequired
+      ? 'Threat selection PENDING: this secondary squeeze requires an explicit --companion-threats include|omit decision.'
+      : `Threats (capital companions ${binding.includeCompanionThreats ? 'included' : 'omitted'}):`,
+    ...(binding.threats ?? []).map((card) => `- ${card.seat}: ${GLYPHS[card.suit]}${card.rank} (${card.symbol})`), '',
     '| Hand | Specified | Idle needed | Final |', '| --- | ---: | ---: | ---: |',
     ...SEATS.map((seat) => `| ${seat} | ${b.metadata.preCompletionTotals[seat]} | ${b.metadata.idleCardsNeededByHand[seat]} | ${SUITS.reduce((n, suit) => n + b.hands[seat][suit].length, 0)} |`));
   return output.join('\n');

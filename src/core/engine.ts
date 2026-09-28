@@ -1,3 +1,4 @@
+import { allThreats, cloneThreatContext as copyThreatContext } from '../ai/threatModel';
 import type { EngineEvent, EwVariant, EwVariantState, Goal, Hand, Play, Policy, Problem, Rank, Seat, State, Suit } from './types';
 import { evaluatePolicy } from '../ai/evaluatePolicy';
 import {
@@ -80,7 +81,7 @@ function syncRepresentativeVariantHands(state: State): void {
   const resourceCardIds = (state.resource?.resourceCardIds ?? []).filter((cardId) => cardExistsInStateHands(state.hands, cardId));
   if (threatCardIds.length === 0 && resourceCardIds.length === 0) return;
   const threatSymbolByCardId = Object.fromEntries(
-    Object.values(state.threat?.threatsBySuit ?? {})
+    allThreats(state.threat)
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       .map((entry) => [entry.threatCardId, entry.symbol])
       .filter(([cardId]) => threatCardIds.includes(cardId as CardId))
@@ -132,7 +133,7 @@ function cloneState(state: State): State {
   return {
     ...state,
     contract: { ...state.contract },
-    threat: state.threat ? { threatCardIds: [...state.threat.threatCardIds], threatsBySuit: { ...state.threat.threatsBySuit } } : null,
+    threat: state.threat ? copyThreatContext(state.threat) : null,
     resource: state.resource
       ? { resourceCardIds: [...state.resource.resourceCardIds], resourcesBySuit: { ...state.resource.resourcesBySuit } }
       : null,
@@ -309,6 +310,10 @@ function removeCard(hand: Hand, suit: Suit, rank: Rank): boolean {
   return true;
 }
 
+function isHandComplete(state: State): boolean {
+  return state.phase === 'end';
+}
+
 function isUserTurn(state: State): boolean {
   return state.userControls.includes(state.turn);
 }
@@ -362,6 +367,7 @@ type AutoChoice = {
       chosenCardId: CardId | null;
       a: CardId[];
       b: CardId[];
+      bBuckets: string[];
       c: CardId[];
       d: CardId[];
     }>;
@@ -450,7 +456,7 @@ function advanceAutoplayLoop(next: State, events: EngineEvent[], collector: Sema
         events.push({ type: 'illegal', reason: adjusted.reason });
         break;
       }
-      if (adjusted?.play) {
+      if (adjusted && 'play' in adjusted) {
         auto = {
           ...auto,
           play: adjusted.play,
@@ -458,6 +464,7 @@ function advanceAutoplayLoop(next: State, events: EngineEvent[], collector: Sema
         };
       }
     }
+    if (!auto.play) break;
     emitSemantic(collector, {
       type: 'decision-evaluated',
       seat: next.turn,
@@ -644,7 +651,7 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
       let forceCard: CardId = rec.chosenCard;
       let forcedClassFailed = false;
       if (isDivergence && state.replay.forcedClassId) {
-        const match = legal.find((p) => altClassByCard[toCardId(p.suit, p.rank)] === state.replay.forcedClassId);
+        const match = legal.find((p) => altClassByCard?.[toCardId(p.suit, p.rank)] === state.replay.forcedClassId);
         if (match) {
           forced = match;
           forceCard = toCardId(match.suit, match.rank);
@@ -684,7 +691,7 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
             replay: { action: 'forced', index: rec.index, card: toCardId(fallback.suit, fallback.rank) }
           };
         }
-      } else {
+      } else if (forced) {
         state.replay.cursor += 1;
         const chosenBucket = rec.chosenBucket;
         const bucketCards = [...rec.bucketCards];
@@ -716,7 +723,7 @@ function chooseAutoplay(state: State, policy: Policy, collector?: SemanticEventC
   }
 
   if (policy.kind === 'randomLegal') {
-    if (!isDefender) {
+    if (state.turn !== 'E' && state.turn !== 'W') {
       const legal = legalPlays(state);
       const chosenBucket = 'legal';
       const bucketCards = legal.map((p) => toCardId(p.suit, p.rank));
@@ -1159,7 +1166,7 @@ export function apply(state: State, play: Play, options?: ApplyOptions): { state
   const events: EngineEvent[] = [];
   const collector = options?.eventCollector;
 
-  if (next.phase === 'end') {
+  if (isHandComplete(next)) {
     events.push({ type: 'illegal', reason: 'Hand already complete' });
     return { state: next, events };
   }
@@ -1226,7 +1233,7 @@ export function apply(state: State, play: Play, options?: ApplyOptions): { state
 
   advanceAutoplayLoop(next, events, collector, options);
 
-  if (next.phase === 'end') {
+  if (isHandComplete(next)) {
     return { state: next, events };
   }
 

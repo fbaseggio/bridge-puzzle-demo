@@ -1,6 +1,7 @@
 import type { Problem, Rank, Seat } from '../core';
 import { bindRandom } from './random';
 import { bindStandard } from './binder';
+import { deriveBoundThreatCards, resolveCompanionThreatPolicy } from './threats';
 import type { CardId } from '../core';
 
 export type EncapsulationWorkbenchEntry = {
@@ -9,33 +10,37 @@ export type EncapsulationWorkbenchEntry = {
   encapsulation: string;
   bindingMode?: 'standard' | 'random';
   source?: Problem['source'];
+  /** Defaults to inclusion for all-tricks goals; secondary squeezes require an explicit choice. */
+  includeCompanionThreats?: boolean;
 };
 
 const ENCAPSULATION_WORKBENCH_ENTRIES: EncapsulationWorkbenchEntry[] = [
-  { id: 'encap_wa_a_gt_w', name: 'Encap: Wa, a > w', encapsulation: 'Wa, a > w' },
-  { id: 'encap_wwc_gt_a_b_w', name: 'Encap: Wwc > a, b, W', encapsulation: 'Wwc > a, b, W' },
-  { id: 'encap_wla_wb_gt_b_w', name: "Encap: WLa, WB > b', W -1", encapsulation: "WLa, WB > b', W -1" },
-  { id: 'encap_a_wc_gt_wwc_ww', name: 'Encap: a, Wc > Wwc, WW', encapsulation: 'a, Wc > Wwc, WW' },
-  { id: 'encap_la_eq_lb_w', name: 'Encap: La = Lb, W', encapsulation: 'La = Lb, W' },
-  { id: 'encap_wa_gt_b_wl', name: 'Encap: Wa > b, WL', encapsulation: 'Wa > b, WL' },
-  { id: 'encap_wla_w_eq_b', name: 'Encap: WLa, W = b', encapsulation: 'WLa, W = b' },
-  { id: 'encap_a_wc_gt_a_w', name: 'Encap: a, Wc > a, w', encapsulation: 'a, Wc > a, w' },
-  { id: 'encap_wa_ww_gt_wlc_wc', name: 'Encap: wa, WW > WLc, Wc', encapsulation: 'wa, WW > WLc, Wc' },
-  { id: 'encap_wa_wb_gt_wc_ww', name: 'Encap: Wa, Wb > Wc, Ww', encapsulation: 'Wa, Wb > Wc, Ww' },
-  { id: 'encap_wlau_waouou_gt_b_wo', name: 'Encap: WLau, WAuu > b, Wo -1', encapsulation: 'WLau, WAuu > b, Wo -1' },
-  { id: 'encap_wg_a_gt_wc_ww', name: "Encap: Wg', c > wc, WW", encapsulation: "Wg', c > wc, WW" },
-  { id: 'encap_wwa_ww_gt_wc_wc', name: 'Encap: Wwa, WW > Wc, Wc', encapsulation: 'Wwa, WW > Wc, Wc' },
-  { id: 'encap_wa_ww_gt_wlc_wc_b', name: 'Encap: wa, WW > WLc, Wc', encapsulation: 'wa, WW > WLc, Wc' },
-  { id: 'encap_wa_ww_alt_gt_wc_wc', name: 'Encap: Wa, Ww > Wc, Wc', encapsulation: 'Wa, Ww > Wc, Wc' },
-  { id: 'encap_a_ww_gt_wlc_wc', name: 'Encap: a, Ww > WLc, Wc', encapsulation: 'a, Ww > WLc, Wc' },
-  { id: 'encap_wa_ww_gt_wc_wc_b', name: 'Encap: wa, WW > Wc, Wc', encapsulation: 'wa, WW > Wc, Wc' },
-  { id: 'encap_wla_wc_gt_wc_ww', name: 'Encap: WLa, Wc > Wc, Ww', encapsulation: 'WLa, Wc > Wc, Ww' },
-  { id: 'encap_wa_wlc_gt_wc_ww', name: 'Encap: Wa, WLc > Wc, Ww', encapsulation: 'Wa, WLc > Wc, Ww' },
-  { id: 'encap_la_wc_gt_wlc_ww', name: 'Encap: La, Wc > WLc, Ww', encapsulation: 'La, Wc > WLc, Ww' },
-  { id: 'encap_a_wlc_gt_wlc_ww', name: 'Encap: a, WLc > WLc, Ww', encapsulation: 'a, WLc > WLc, Ww' },
+  { id: 'encap_wa_a_gt_w', name: 'Encap: Wa, a > w', includeCompanionThreats: false, encapsulation: 'Wa, a > w' },
+  { id: 'encap_wwc_gt_a_b_w', name: 'Encap: Wwc > a, b, W', includeCompanionThreats: false, encapsulation: 'Wwc > a, b, W' },
+  // Owner reviewed: secondary squeeze; retain the explicit threats only.
+  { id: 'encap_wla_wb_gt_b_w', name: "Encap: WLa, WB > b', W -1", includeCompanionThreats: false, encapsulation: "WLa, WB > b', W -1" },
+  { id: 'encap_a_wc_gt_wwc_ww', name: 'Encap: a, Wc > Wwc, WW', includeCompanionThreats: false, encapsulation: 'a, Wc > Wwc, WW' },
+  { id: 'encap_la_eq_lb_w', name: 'Encap: La = Lb, W', includeCompanionThreats: false, encapsulation: 'La = Lb, W' },
+  { id: 'encap_wa_gt_b_wl', name: 'Encap: Wa > b, WL', includeCompanionThreats: false, encapsulation: 'Wa > b, WL' },
+  { id: 'encap_wla_w_eq_b', name: 'Encap: WLa, W = b', includeCompanionThreats: false, encapsulation: 'WLa, W = b' },
+  { id: 'encap_a_wc_gt_a_w', name: 'Encap: a, Wc > a, w', includeCompanionThreats: false, encapsulation: 'a, Wc > a, w' },
+  { id: 'encap_wa_ww_gt_wlc_wc', name: 'Encap: wa, WW > WLc, Wc', includeCompanionThreats: false, encapsulation: 'wa, WW > WLc, Wc' },
+  { id: 'encap_wa_wb_gt_wc_ww', name: 'Encap: Wa, Wb > Wc, Ww', includeCompanionThreats: false, encapsulation: 'Wa, Wb > Wc, Ww' },
+  // Owner reviewed: secondary squeeze; omit the capital companion.
+  { id: 'encap_wlau_waouou_gt_b_wo', name: 'Encap: WLau, WAuu > b, Wo -1', includeCompanionThreats: false, encapsulation: 'WLau, WAuu > b, Wo -1' },
+  { id: 'encap_wg_a_gt_wc_ww', name: "Encap: Wg', c > wc, WW", includeCompanionThreats: false, encapsulation: "Wg', c > wc, WW" },
+  { id: 'encap_wwa_ww_gt_wc_wc', name: 'Encap: Wwa, WW > Wc, Wc', includeCompanionThreats: false, encapsulation: 'Wwa, WW > Wc, Wc' },
+  { id: 'encap_wa_ww_gt_wlc_wc_b', name: 'Encap: wa, WW > WLc, Wc', includeCompanionThreats: false, encapsulation: 'wa, WW > WLc, Wc' },
+  { id: 'encap_wa_ww_alt_gt_wc_wc', name: 'Encap: Wa, Ww > Wc, Wc', includeCompanionThreats: false, encapsulation: 'Wa, Ww > Wc, Wc' },
+  { id: 'encap_a_ww_gt_wlc_wc', name: 'Encap: a, Ww > WLc, Wc', includeCompanionThreats: false, encapsulation: 'a, Ww > WLc, Wc' },
+  { id: 'encap_wa_ww_gt_wc_wc_b', name: 'Encap: wa, WW > Wc, Wc', includeCompanionThreats: false, encapsulation: 'wa, WW > Wc, Wc' },
+  { id: 'encap_wla_wc_gt_wc_ww', name: 'Encap: WLa, Wc > Wc, Ww', includeCompanionThreats: false, encapsulation: 'WLa, Wc > Wc, Ww' },
+  { id: 'encap_wa_wlc_gt_wc_ww', name: 'Encap: Wa, WLc > Wc, Ww', includeCompanionThreats: false, encapsulation: 'Wa, WLc > Wc, Ww' },
+  { id: 'encap_la_wc_gt_wlc_ww', name: 'Encap: La, Wc > WLc, Ww', includeCompanionThreats: false, encapsulation: 'La, Wc > WLc, Ww' },
+  { id: 'encap_a_wlc_gt_wlc_ww', name: 'Encap: a, WLc > WLc, Ww', includeCompanionThreats: false, encapsulation: 'a, WLc > WLc, Ww' },
   { id: 'encap_wwa_wc_gt_wc_ww', name: 'Encap: Wwa, WC > Wc, Ww', encapsulation: 'Wwa, WC > Wc, Ww' },
-  { id: 'encap_c_wg_gt_wa_ww', name: 'Encap: c, Wg > wa, WW', encapsulation: 'c, Wg > wa, WW' },
-  { id: 'encap_wlg_ww_gt_a_c', name: 'Encap: WLg, WW > a, c', encapsulation: 'WLg, WW > a, c' },
+  { id: 'encap_c_wg_gt_wa_ww', name: 'Encap: c, Wg > wa, WW', includeCompanionThreats: false, encapsulation: 'c, Wg > wa, WW' },
+  { id: 'encap_wlg_ww_gt_a_c', name: 'Encap: WLg, WW > a, c', includeCompanionThreats: false, encapsulation: 'WLg, WW > a, c' },
   { id: 'encap_clash_wla_gt_wa_lc_ww', name: 'Encap: wLa > wA, Lc, WW', encapsulation: 'wLa > wA, Lc, WW' },
   { id: 'encap_moon_double_clash_3', name: 'Encap: Wa, Lc > wA, Ww', encapsulation: 'Wa, Lc > wA, Ww', source: { title: 'Moon Double Clash 3' } },
   { id: 'encap_moon_double_clash_5', name: 'Encap: WLa, wB > wc, WL', encapsulation: 'WLa, wB > wc, WL', source: { title: 'Moon Double Clash 5' } },
@@ -78,14 +83,19 @@ export function buildEncapsulationWorkbenchProblem(
   const handSize = bound.metadata.finalHandSize;
   const goal = Math.max(0, handSize + bound.parsed.goalOffset);
   const resourceSymbols = new Set(['f', 'F']);
+  const includeCompanions = resolveCompanionThreatPolicy(bound, entry.includeCompanionThreats);
+  if (includeCompanions === undefined) {
+    throw new Error('Secondary squeeze requires an explicit includeCompanionThreats choice at onboarding');
+  }
+  const boundThreats = deriveBoundThreatCards(bound, includeCompanions);
   const threatCardIds = [
-    ...new Set(bound.threatCards.filter((t) => !resourceSymbols.has(t.symbol)).map((t) => t.cardId as CardId))
+    ...new Set(boundThreats.filter((t) => !resourceSymbols.has(t.symbol)).map((t) => t.cardId as CardId))
   ];
   const resourceCardIds = [
     ...new Set(bound.threatCards.filter((t) => resourceSymbols.has(t.symbol)).map((t) => t.cardId as CardId))
   ];
   const threatSymbolByCardId: Partial<Record<CardId, string>> = {};
-  for (const t of bound.threatCards) {
+  for (const t of boundThreats) {
     if (resourceSymbols.has(t.symbol)) continue;
     threatSymbolByCardId[t.cardId as CardId] = t.symbol;
   }

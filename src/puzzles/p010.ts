@@ -5,7 +5,7 @@ type ThreatProblem = Problem & { threatCardIds: CardId[] };
 
 export const p010: ThreatProblem = {
   id: 'p010',
-  contract: { strain: 'C', declarer: 'S' },
+  contract: { strain: 'C' },
   leader: 'S',
   userControls: ['N', 'S'],
   goal: { type: 'minTricks', side: 'NS', n: 4 },

@@ -1,3 +1,4 @@
+import { allThreats } from '../ai/threatModel';
 import type { CardId, EwVariantState, Hand, Rank, Seat, State, Suit } from '../core';
 import { initClassification, parseCardId, type ThreatContext, type ResourceContext } from '../ai/threatModel';
 import { buildFeatureStateFromRuntime, getRankColorForFeatureRole, type FeatureColor } from '../ai/features';
@@ -49,7 +50,7 @@ function classifyWorldForVariant(
     return { threat: null, resource: null, cardRoles: {}, threatLabels: null };
   }
   const threatSymbolByCardId = Object.fromEntries(
-    Object.values(view.threat?.threatsBySuit ?? {})
+    allThreats(view.threat)
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       .map((entry) => [entry.threatCardId, entry.symbol])
       .filter(([cardId]) => threatCardIds.includes(cardId as CardId))

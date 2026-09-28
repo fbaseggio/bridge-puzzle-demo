@@ -5,7 +5,7 @@ export type Position = { hands: Record<Seat, Hand> };
 export type DefenderSeat = 'E' | 'W';
 export type StopStatus = 'none' | 'single' | 'double';
 
-type ThreatSuitState = {
+export type ThreatSuitState = {
   suit: Suit;
   threatCardId: CardId;
   threatRank: Rank;
@@ -29,7 +29,29 @@ type ResourceSuitState = {
 export type ThreatContext = {
   threatsBySuit: Partial<Record<Suit, ThreatSuitState>>;
   threatCardIds: CardId[];
+  /** Additional threats in suits already represented by threatsBySuit. */
+  additionalThreats?: ThreatSuitState[];
 };
+export function allThreats(ctx: ThreatContext | null | undefined): ThreatSuitState[] {
+  return ctx ? [...Object.values(ctx.threatsBySuit).filter((t): t is ThreatSuitState => !!t), ...(ctx.additionalThreats ?? [])] : [];
+}
+
+export function threatsForSuit(ctx: ThreatContext | null | undefined, suit: Suit): ThreatSuitState[] {
+  return allThreats(ctx).filter((threat) => threat.suit === suit);
+}
+
+export function cloneThreatContext(ctx: ThreatContext): ThreatContext {
+  return mapThreats(ctx, (threat) => ({ ...threat }));
+}
+
+function mapThreats(ctx: ThreatContext, transform: (threat: ThreatSuitState) => ThreatSuitState): ThreatContext {
+  return {
+    threatCardIds: [...ctx.threatCardIds],
+    threatsBySuit: Object.fromEntries(Object.entries(ctx.threatsBySuit).map(([suit, threat]) => [suit, transform(threat)])),
+    ...(ctx.additionalThreats?.length ? { additionalThreats: ctx.additionalThreats.map(transform) } : {})
+  };
+}
+
 export type ResourceContext = {
   resourcesBySuit: Partial<Record<Suit, ResourceSuitState>>;
   resourceCardIds: CardId[];
@@ -236,13 +258,7 @@ function shouldStrandThreat(
 }
 
 function applyStrandedFlags(ctx: ThreatContext, position: Position, runtime?: RuntimeThreatContext): ThreatContext {
-  const next: ThreatContext = { threatCardIds: [...ctx.threatCardIds], threatsBySuit: { ...ctx.threatsBySuit } };
-  for (const suit of SUITS) {
-    const t = next.threatsBySuit[suit];
-    if (!t) continue;
-    next.threatsBySuit[suit] = { ...t, stranded: shouldStrandThreat(t, position, runtime) };
-  }
-  return next;
+  return mapThreats(ctx, (threat) => ({ ...threat, stranded: shouldStrandThreat(threat, position, runtime) }));
 }
 
 function wasThreatPlayedThisTrick(threat: ThreatSuitState, trick: Play[] | undefined): boolean {
@@ -267,25 +283,20 @@ function applyTrickEndThreatSubstitution(
   const trick = runtime?.trick;
   if (!trick || trick.length !== 4) return ctx;
 
-  const next: ThreatContext = { threatCardIds: [...ctx.threatCardIds], threatsBySuit: { ...ctx.threatsBySuit } };
-  for (const suit of SUITS) {
-    const threat = next.threatsBySuit[suit];
-    if (!threat || threat.active) continue;
-    if (!wasThreatPlayedThisTrick(threat, trick)) continue;
-
-    const substitute = pickSubstituteThreatRank(position, threat.establishedOwner, suit, threat.threatRank);
-    if (!substitute) continue;
-    next.threatsBySuit[suit] = {
+  return mapThreats(ctx, (threat) => {
+    if (threat.active || !wasThreatPlayedThisTrick(threat, trick)) return threat;
+    const substitute = pickSubstituteThreatRank(position, threat.establishedOwner, threat.suit, threat.threatRank);
+    if (!substitute) return threat;
+    return {
       ...threat,
-      threatCardId: toCardId(suit, substitute),
+      threatCardId: toCardId(threat.suit, substitute),
       threatRank: substitute,
       active: true,
       stranded: false,
-      threatLength: countThreatLength(position, threat.establishedOwner, suit, substitute),
+      threatLength: countThreatLength(position, threat.establishedOwner, threat.suit, substitute),
       stopStatus: undefined
     };
-  }
-  return next;
+  });
 }
 
 function partnerOf(seat: Seat): Seat {
@@ -359,14 +370,13 @@ function defenderRelevantForThreatSymbol(threat: ThreatSuitState, defender: Defe
 }
 
 function normalizeSpecialThreatSymbols(ctx: ThreatContext, position: Position): ThreatContext {
-  const next: ThreatContext = { threatCardIds: [...ctx.threatCardIds], threatsBySuit: { ...ctx.threatsBySuit } };
-  for (const suit of SUITS) {
-    const threat = next.threatsBySuit[suit];
-    if (!threat || !threat.active || !threat.symbol) continue;
+  return mapThreats(ctx, (threat) => {
+    const suit = threat.suit;
+    if (!threat || !threat.active || !threat.symbol) return threat;
     const owner = threat.establishedOwner;
-    if (owner !== 'N' && owner !== 'S') continue;
+    if (owner !== 'N' && owner !== 'S') return threat;
     const base = symbolBase(threat.symbol);
-    if (base !== 'g' && base !== "g'") continue;
+    if (base !== 'g' && base !== "g'") return threat;
     const ret = returnDefender(owner);
     const out = outgoingDefender(owner);
     const retStops = defenderCanStopThreat(position, ret, suit, threat.threatRank, threat.threatLength);
@@ -385,13 +395,13 @@ function normalizeSpecialThreatSymbols(ctx: ThreatContext, position: Position): 
       nextSymbol = sameCaseSymbol(threat.symbol, base === "g'" ? "g'" : 'g');
     }
     if (nextSymbol !== threat.symbol) {
-      next.threatsBySuit[suit] = {
+      return {
         ...threat,
         symbol: nextSymbol
       };
     }
-  }
-  return next;
+    return threat;
+  });
 }
 
 function countThreatLength(position: Position, owner: Seat, suit: Suit, threatRank: Rank): number {
@@ -421,12 +431,13 @@ export function initThreatContext(
   threatSymbolByCardId?: Partial<Record<CardId, string>>
 ): ThreatContext {
   const bySuit: Partial<Record<Suit, ThreatSuitState>> = {};
+  const additionalThreats: ThreatSuitState[] = [];
+  const seen = new Set<CardId>();
 
   for (const cardId of threatCardIds) {
     const { suit, rank } = parseCardId(cardId);
-    if (bySuit[suit]) {
-      throw new Error(`Duplicate threat suit: ${suit}`);
-    }
+    if (seen.has(cardId)) throw new Error(`Duplicate threat card: ${cardId}`);
+    seen.add(cardId);
 
     const owners = ownersOfCard(position, cardId);
     if (owners.length !== 1) {
@@ -434,7 +445,7 @@ export function initThreatContext(
     }
 
     const establishedOwner = owners[0];
-    bySuit[suit] = {
+    const threat: ThreatSuitState = {
       suit,
       threatCardId: cardId,
       threatRank: rank,
@@ -443,9 +454,11 @@ export function initThreatContext(
       threatLength: countThreatLength(position, establishedOwner, suit, rank),
       symbol: threatSymbolByCardId?.[cardId]
     };
+    if (bySuit[suit]) additionalThreats.push(threat);
+    else bySuit[suit] = threat;
   }
 
-  return { threatsBySuit: bySuit, threatCardIds: [...threatCardIds] };
+  return { threatsBySuit: bySuit, threatCardIds: [...threatCardIds], ...(additionalThreats.length ? { additionalThreats } : {}) };
 }
 
 export function initResourceContext(position: Position, resourceCardIds: CardId[]): ResourceContext {
@@ -501,30 +514,39 @@ export function updateThreatContextAfterTrick(
   position: Position,
   trickCardsPlayed: CardId[]
 ): ThreatContext {
-  const next: ThreatContext = {
-    threatsBySuit: { ...ctx.threatsBySuit },
-    threatCardIds: [...ctx.threatCardIds]
-  };
-
   const touchedSuits = new Set<Suit>(trickCardsPlayed.map((c) => parseCardId(c).suit));
-
-  for (const suit of touchedSuits) {
-    const threat = next.threatsBySuit[suit];
-    if (!threat) continue;
-
+  return mapThreats(ctx, (threat) => {
+    if (!touchedSuits.has(threat.suit)) return threat;
     const owners = ownersOfCard(position, threat.threatCardId);
     const stillEstablished = owners.length === 1 && owners[0] === threat.establishedOwner;
-
-    next.threatsBySuit[suit] = {
+    return {
       ...threat,
       active: stillEstablished,
-      threatLength: stillEstablished
-        ? countThreatLength(position, threat.establishedOwner, suit, threat.threatRank)
-        : 0
+      threatLength: stillEstablished ? countThreatLength(position, threat.establishedOwner, threat.suit, threat.threatRank) : 0
     };
-  }
+  });
+}
 
-  return next;
+function busyCardsForThreat(threat: ThreatSuitState, position: Position, defender: DefenderSeat): CardId[] {
+  if (!threat.active || threat.stranded || threat.threatLength <= 0 || !defenderRelevantForThreatSymbol(threat, defender)) return [];
+  if (!defenderCanStopThreat(position, defender, threat.suit, threat.threatRank, threat.threatLength)) return [];
+  return [...position.hands[defender][threat.suit]]
+    .sort((a, b) => rankValue(b) - rankValue(a)).slice(0, threat.threatLength)
+    .map((rank) => toCardId(threat.suit, rank));
+}
+
+function threatStopStatus(threat: ThreatSuitState, position: Position): StopStatus | undefined {
+  if (!threat.active || threat.stranded) return undefined;
+  const count = stoppingDefenders(threat, position).length;
+  return count === 2 ? 'double' : count === 1 ? 'single' : 'none';
+}
+
+export function stoppingDefenders(threat: ThreatSuitState, position: Position): DefenderSeat[] {
+  return DEFENDERS.filter((defender) => busyCardsForThreat(threat, position, defender).length > 0);
+}
+
+export function threatsGuardedByCard(ctx: ThreatContext, position: Position, defender: DefenderSeat, cardId: CardId): ThreatSuitState[] {
+  return threatsForSuit(ctx, parseCardId(cardId).suit).filter((threat) => busyCardsForThreat(threat, position, defender).includes(cardId));
 }
 
 export function computeDefenderLabels(ctx: ThreatContext, position: Position): DefenderLabels {
@@ -532,34 +554,7 @@ export function computeDefenderLabels(ctx: ThreatContext, position: Position): D
     E: { busy: new Set<CardId>(), idle: new Set<CardId>() },
     W: { busy: new Set<CardId>(), idle: new Set<CardId>() }
   };
-
-  for (const defender of DEFENDERS) {
-    for (const suit of SUITS) {
-      for (const rank of position.hands[defender][suit]) {
-        labels[defender].idle.add(toCardId(suit, rank));
-      }
-
-      const threat = ctx.threatsBySuit[suit];
-      if (!threat || !threat.active || threat.stranded || threat.threatLength <= 0) continue;
-      if (!defenderRelevantForThreatSymbol(threat, defender)) continue;
-
-      const suitRanks = position.hands[defender][suit];
-      const hasHigher = suitRanks.some((r) => rankValue(r) > rankValue(threat.threatRank));
-      const longEnough = suitRanks.length >= threat.threatLength;
-      if (!hasHigher || !longEnough) continue;
-
-      const busyRanks = [...suitRanks]
-        .sort((a, b) => rankValue(b) - rankValue(a))
-        .slice(0, threat.threatLength);
-
-      for (const rank of busyRanks) {
-        const id = toCardId(suit, rank);
-        labels[defender].idle.delete(id);
-        labels[defender].busy.add(id);
-      }
-    }
-  }
-
+  for (const suit of SUITS) recomputeSuitLabels(ctx, position, labels, suit);
   return labels;
 }
 
@@ -584,19 +579,10 @@ function computeStopStatus(ctx: ThreatContext, labels: DefenderLabels, suit: Sui
   return 'none';
 }
 
-function isPromotedWinnerSuit(ctx: ThreatContext, labels: DefenderLabels, suit: Suit): boolean {
-  const threat = ctx.threatsBySuit[suit];
-  if (!threat || !threat.active || threat.stranded) return false;
-  return (threat.stopStatus ?? computeStopStatus(ctx, labels, suit)) === 'none';
-}
-
-export function getPromotedWinnerRankForSuit(
-  ctx: ThreatContext,
-  labels: DefenderLabels,
-  suit: Suit
-): Rank | null {
-  if (!isPromotedWinnerSuit(ctx, labels, suit)) return null;
-  return ctx.threatsBySuit[suit]?.threatRank ?? null;
+export function getPromotedWinnerRankForSuit(ctx: ThreatContext, labels: DefenderLabels, suit: Suit): Rank | null {
+  const promoted = threatsForSuit(ctx, suit).filter((threat) => threat.active && !threat.stranded
+    && (threat.stopStatus ?? computeStopStatus(ctx, labels, suit)) === 'none');
+  return promoted.length ? promoted.map((threat) => threat.threatRank).sort((a, b) => rankValue(b) - rankValue(a))[0] : null;
 }
 
 function recomputeSuitLabels(ctx: ThreatContext, position: Position, labels: DefenderLabels, suit: Suit): void {
@@ -612,20 +598,11 @@ function recomputeSuitLabels(ctx: ThreatContext, position: Position, labels: Def
       labels[defender].idle.add(toCardId(suit, rank));
     }
 
-    const threat = ctx.threatsBySuit[suit];
-    if (!threat || !threat.active || threat.stranded || threat.threatLength <= 0) continue;
-    if (!defenderRelevantForThreatSymbol(threat, defender)) continue;
-    const suitRanks = position.hands[defender][suit];
-    const hasHigher = suitRanks.some((r) => rankValue(r) > rankValue(threat.threatRank));
-    const longEnough = suitRanks.length >= threat.threatLength;
-    if (!hasHigher || !longEnough) continue;
-    const busyRanks = [...suitRanks]
-      .sort((a, b) => rankValue(b) - rankValue(a))
-      .slice(0, threat.threatLength);
-    for (const rank of busyRanks) {
-      const id = toCardId(suit, rank);
-      labels[defender].idle.delete(id);
-      labels[defender].busy.add(id);
+    for (const threat of threatsForSuit(ctx, suit)) {
+      for (const id of busyCardsForThreat(threat, position, defender)) {
+        labels[defender].idle.delete(id);
+        labels[defender].busy.add(id);
+      }
     }
   }
 }
@@ -675,13 +652,11 @@ function updateRolesForSuit(
     }
   }
 
-  const threat = ctx.threatsBySuit[suit];
-  if (threat?.active) {
+  for (const threat of threatsForSuit(ctx, suit)) {
+    if (!threat.active) continue;
     const base = symbolBase(threat.symbol);
     perCardRole[threat.threatCardId] = threat.stranded ? 'strandedThreat' : base === 'f' ? 'resource' : 'threat';
-    if (!threat.stranded && isPromotedWinnerSuit(ctx, labels, suit)) {
-      perCardRole[threat.threatCardId] = 'promotedWinner';
-    }
+    if (!threat.stranded && threat.stopStatus === 'none') perCardRole[threat.threatCardId] = 'promotedWinner';
   }
 }
 
@@ -740,17 +715,11 @@ export function initClassification(
   threatSymbolByCardId?: Partial<Record<CardId, string>>
 ): ClassificationState {
   const strandedThreat = applyStrandedFlags(initThreatContext(position, threatCardIds, threatSymbolByCardId), position, runtime);
-  const threat = normalizeSpecialThreatSymbols(strandedThreat, position);
+  const threat = mapThreats(normalizeSpecialThreatSymbols(strandedThreat, position), (entry) => ({
+    ...entry, stopStatus: threatStopStatus(entry, position)
+  }));
   const resource = initResourceContext(position, resourceCardIds);
   const labels = computeDefenderLabels(threat, position);
-  for (const suit of SUITS) {
-    const entry = threat.threatsBySuit[suit];
-    if (!entry) continue;
-    threat.threatsBySuit[suit] = {
-      ...entry,
-      stopStatus: computeStopStatus(threat, labels, suit)
-    };
-  }
   const perCardRole: Partial<Record<CardId, CardRole>> = {};
   for (const suit of SUITS) {
     updateRolesForSuit(perCardRole, threat, labels, position, suit);
@@ -767,10 +736,7 @@ export function updateClassificationAfterPlay(
   trigger: ClassificationTrigger = 'follow',
   phase: ClassificationPhase = 'all'
 ): ClassificationState {
-  const nextThreat: ThreatContext = {
-    threatCardIds: [...state.threat.threatCardIds],
-    threatsBySuit: { ...state.threat.threatsBySuit }
-  };
+  const nextThreat = cloneThreatContext(state.threat);
   const baseResource: ResourceContext = state.resource ?? { resourceCardIds: [], resourcesBySuit: {} };
   const nextResource: ResourceContext = {
     resourceCardIds: [...baseResource.resourceCardIds],
@@ -784,56 +750,29 @@ export function updateClassificationAfterPlay(
 
   let immediateThreat = nextThreat;
   if (phase === 'immediate' || phase === 'all') {
-    if (immediateThreat.threatsBySuit[playedSuit]) {
-      const threat = immediateThreat.threatsBySuit[playedSuit];
-      if (threat) {
-        const owners = ownersOfCard(position, threat.threatCardId);
-        const stillEstablished = owners.length === 1 && owners[0] === threat.establishedOwner;
-        immediateThreat.threatsBySuit[playedSuit] = {
-          ...threat,
-          active: stillEstablished,
-          threatLength: stillEstablished ? threat.threatLength : 0
-        };
-      }
-    }
-    const beforeStrandedBySuit = new Map<Suit, boolean>();
-    for (const suit of SUITS) {
-      beforeStrandedBySuit.set(suit, Boolean(immediateThreat.threatsBySuit[suit]?.stranded));
-    }
-    immediateThreat = applyStrandedFlags(immediateThreat, position, runtime);
-    const beforeSymbolBySuit = new Map<Suit, string | undefined>();
-    for (const suit of SUITS) {
-      beforeSymbolBySuit.set(suit, immediateThreat.threatsBySuit[suit]?.symbol);
-    }
-    immediateThreat = normalizeSpecialThreatSymbols(immediateThreat, position);
-    const strandedChangedSuits: Suit[] = [];
-    for (const suit of SUITS) {
-      const before = beforeStrandedBySuit.get(suit) ?? false;
-      const after = Boolean(immediateThreat.threatsBySuit[suit]?.stranded);
-      if (before !== after) strandedChangedSuits.push(suit);
-    }
-    for (const suit of SUITS) {
-      const before = beforeSymbolBySuit.get(suit);
-      const after = immediateThreat.threatsBySuit[suit]?.symbol;
-      if (before !== after && !strandedChangedSuits.includes(suit)) strandedChangedSuits.push(suit);
-    }
+    immediateThreat = mapThreats(immediateThreat, (threat) => {
+      if (threat.suit !== playedSuit) return threat;
+      const owners = ownersOfCard(position, threat.threatCardId);
+      const stillEstablished = owners.length === 1 && owners[0] === threat.establishedOwner;
+      return { ...threat, active: stillEstablished, threatLength: stillEstablished ? threat.threatLength : 0 };
+    });
+    const before = new Map(allThreats(immediateThreat).map((threat) => [threat.threatCardId, threat]));
+    immediateThreat = normalizeSpecialThreatSymbols(applyStrandedFlags(immediateThreat, position, runtime), position);
+    const strandedChangedSuits = [...new Set(allThreats(immediateThreat).filter((threat) => {
+      const prior = before.get(threat.threatCardId);
+      return Boolean(prior?.stranded) !== Boolean(threat.stranded) || prior?.symbol !== threat.symbol;
+    }).map((threat) => threat.suit))];
     // Strandedness changes alter whether defenders must keep guards in a suit.
     // Recompute that suit's defender labels/roles immediately so policy sees it
     // on the very next defender decision, without waiting for deferred phases.
     for (const suit of strandedChangedSuits) {
       recomputeSuitLabels(immediateThreat, position, nextLabels, suit);
-      const updatedThreat = immediateThreat.threatsBySuit[suit];
-      if (updatedThreat) {
-        immediateThreat.threatsBySuit[suit] = {
-          ...updatedThreat,
-          stopStatus: computeStopStatus(immediateThreat, nextLabels, suit)
-        };
-      }
+      immediateThreat = mapThreats(immediateThreat, (threat) => threat.suit === suit
+        ? { ...threat, stopStatus: threatStopStatus(threat, position) } : threat);
       updateRolesForSuit(nextRoles, immediateThreat, nextLabels, position, suit);
       markResourceRoleForSuit(nextRoles, nextResource, immediateThreat, suit);
     }
-    for (const suit of SUITS) {
-      const t = immediateThreat.threatsBySuit[suit];
+    for (const t of allThreats(immediateThreat)) {
       if (!t || !t.active) continue;
       const currentRole = nextRoles[t.threatCardId];
       const base = symbolBase(t.symbol);
@@ -876,7 +815,8 @@ export function updateClassificationAfterPlay(
   const substitutedThreat = isTrickEnd
     ? applyTrickEndThreatSubstitution(trickAdjustedThreat, position, runtime)
     : trickAdjustedThreat;
-  const strandedThreat = normalizeSpecialThreatSymbols(applyStrandedFlags(substitutedThreat, position, runtime), position);
+  const strandedThreat = mapThreats(normalizeSpecialThreatSymbols(applyStrandedFlags(substitutedThreat, position, runtime), position),
+    (threat) => ({ ...threat, stopStatus: threatStopStatus(threat, position) }));
   const updatedResource = isTrickEnd
     ? updateResourceContextAfterTrick(
         nextResource,
@@ -886,13 +826,6 @@ export function updateClassificationAfterPlay(
     : nextResource;
   const recomputedLabels = computeDefenderLabels(strandedThreat, position);
   for (const suit of SUITS) {
-    const updatedThreat = strandedThreat.threatsBySuit[suit];
-    if (updatedThreat) {
-      strandedThreat.threatsBySuit[suit] = {
-        ...updatedThreat,
-        stopStatus: computeStopStatus(strandedThreat, recomputedLabels, suit)
-      };
-    }
     updateRolesForSuit(nextRoles, strandedThreat, recomputedLabels, position, suit);
     markResourceRoleForSuit(nextRoles, updatedResource, strandedThreat, suit);
   }

@@ -1,3 +1,4 @@
+import { parseCardId } from '../../src/ai/threatModel';
 import { describe, expect, it } from 'vitest';
 import { apply, init } from '../../src/core';
 import { sureTricksDemo } from '../../src/puzzles/sure_tricks_demo';
@@ -27,7 +28,7 @@ describe('multi-EW version-unknown view', () => {
   it('aggregates fixed-card colors across active variants', () => {
     let state = init(sureTricksDemo);
     for (const cardId of ['CT', 'CA', 'CQ']) {
-      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+      state = apply(state, { seat: state.turn, ...parseCardId(cardId) } as const).state;
     }
 
     expect(cardVariantColors(state, 'W', 'SK', true)).toEqual(['blue']);
@@ -37,13 +38,13 @@ describe('multi-EW version-unknown view', () => {
   it('shows ST as ambiguous after CK and uniform threat again after S2, SA', () => {
     let state = init(sureTricksDemo);
     for (const cardId of ['CT', 'CA', 'CQ', 'CK']) {
-      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+      state = apply(state, { seat: state.turn, ...parseCardId(cardId) } as const).state;
     }
 
     expect(cardVariantColors(state, 'N', 'ST', true)).toEqual(['green', 'purple']);
 
     for (const cardId of ['S2', 'SA']) {
-      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+      state = apply(state, { seat: state.turn, ...parseCardId(cardId) } as const).state;
     }
 
     expect(cardVariantColors(state, 'N', 'ST', true)).toEqual(['green']);

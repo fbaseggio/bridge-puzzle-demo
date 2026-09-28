@@ -22,6 +22,7 @@ describe('single-suit inverse analyzer', () => {
     expect(typeof result).toBe('object');
     if (typeof result === 'string') throw new Error('Expected ambiguous result');
     expect(result.type).toBe('ambiguous');
+    if (result.type !== 'ambiguous') throw new Error('Expected ambiguous result');
     expect(result.candidates.length).toBeGreaterThan(1);
   });
 

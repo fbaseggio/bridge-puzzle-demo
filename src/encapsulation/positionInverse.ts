@@ -19,6 +19,7 @@ type SuitInference = {
     forcedPrimary: 'N' | 'S' | null;
     matched: Array<{ text: string; primary: 'N' | 'S'; score: number; residualOpposite: number }>;
     contenders: Array<{ text: string; primary: 'N' | 'S'; score: number; residualOpposite: number }>;
+    selectedAssignmentSteps?: string[];
     selectedText?: string;
     selectedPrimary?: 'N' | 'S' | 'unknown';
   };

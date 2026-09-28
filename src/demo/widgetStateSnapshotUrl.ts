@@ -1,3 +1,4 @@
+import type { CardId } from '../core';
 import { normalizeWidgetStateSnapshotV1, type WidgetStateSnapshotV1 } from './widgetStateSnapshot';
 import type { InteractionProfile } from './interactionProfiles';
 import type { WidgetJourneyProfile } from './widgetJourneyState';
@@ -20,17 +21,17 @@ function isWidgetJourneyProfile(value: unknown): value is WidgetJourneyProfile {
     || value === 'reading-profile';
 }
 
-function isCardId(value: unknown): value is string {
+function isCardId(value: unknown): value is CardId {
   return typeof value === 'string' && CARD_ID_PATTERN.test(value);
 }
 
-function isCardIdArray(value: unknown): value is string[] {
+function isCardIdArray(value: unknown): value is CardId[] {
   return Array.isArray(value) && value.every((entry) => isCardId(entry));
 }
 
-function normalizeChoiceSelectionRecord(value: unknown): Record<number, string> | null {
+function normalizeChoiceSelectionRecord(value: unknown): Record<number, CardId> | null {
   if (!isPlainObject(value)) return null;
-  const normalized: Record<number, string> = {};
+  const normalized: Record<number, CardId> = {};
   for (const [key, raw] of Object.entries(value)) {
     if (!/^\d+$/.test(key)) return null;
     if (!isCardId(raw)) return null;
@@ -102,7 +103,7 @@ export function decodeWidgetStateSnapshotPayload(payload: string): WidgetStateSn
   if (!isPlainObject(parsed.problem)) return null;
   if (typeof parsed.problem.problemId !== 'string' || !parsed.problem.problemId.trim()) return null;
   if (!(parsed.problem.variantId === null || typeof parsed.problem.variantId === 'string')) return null;
-  if (!Number.isInteger(parsed.problem.seed)) return null;
+  if (!(typeof parsed.problem.seed === 'number' && Number.isInteger(parsed.problem.seed))) return null;
 
   if (!isPlainObject(parsed.initialConfig)) return null;
   if (
@@ -128,8 +129,8 @@ export function decodeWidgetStateSnapshotPayload(payload: string): WidgetStateSn
     if (!isPlainObject(parsed.articleScript)) return null;
     if (typeof parsed.articleScript.scriptId !== 'string' || !parsed.articleScript.scriptId.trim()) return null;
     if (!(parsed.articleScript.checkpointId === null || typeof parsed.articleScript.checkpointId === 'string')) return null;
-    if (!Number.isInteger(parsed.articleScript.initialCursor)) return null;
-    if (!Number.isInteger(parsed.articleScript.cursor)) return null;
+    if (!(typeof parsed.articleScript.initialCursor === 'number' && Number.isInteger(parsed.articleScript.initialCursor))) return null;
+    if (!(typeof parsed.articleScript.cursor === 'number' && Number.isInteger(parsed.articleScript.cursor))) return null;
     if (!isCardIdArray(parsed.articleScript.history)) return null;
     const choiceSelections = normalizeChoiceSelectionRecord(parsed.articleScript.choiceSelections);
     if (!choiceSelections) return null;

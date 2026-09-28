@@ -1,6 +1,10 @@
 import type { Hand, Rank, Suit } from '../core';
 import {
   getPromotedWinnerRankForSuit,
+  allThreats,
+  threatsForSuit,
+  threatsGuardedByCard,
+  stoppingDefenders,
   parseCardId,
   toCardId,
   type CardId,
@@ -110,13 +114,12 @@ function cardSuit(cardId: CardId): Suit {
 }
 
 function suitHasActiveThreat(suit: Suit, ctx: ThreatContext): boolean {
-  return Boolean(ctx.threatsBySuit[suit]?.active);
+  return threatsForSuit(ctx, suit).some((threat) => threat.active);
 }
 
 function threatRankForSuit(suit: Suit, ctx: ThreatContext): Rank | null {
-  const threat = ctx.threatsBySuit[suit];
-  if (!threat || !threat.active) return null;
-  return threat.threatRank;
+  const ranks = threatsForSuit(ctx, suit).filter((t) => t.active).map((t) => t.threatRank);
+  return ranks.sort((a, b) => RANK_VALUE[b] - RANK_VALUE[a])[0] ?? null;
 }
 
 function resourceThresholdRankForSuit(suit: Suit, resource?: ResourceContext): Rank | null {
@@ -185,7 +188,8 @@ function isBusyInActiveThreat(defender: DefenderSeat, cardId: CardId, labels: De
 }
 
 function stopStatusForSuit(suit: Suit, labels: DefenderLabels, ctx: ThreatContext): 'none' | 'single' | 'double' | undefined {
-  const fromCtx = ctx.threatsBySuit[suit]?.stopStatus;
+  const entries = threatsForSuit(ctx, suit);
+  const fromCtx = entries.length === 1 ? entries[0].stopStatus : undefined;
   if (fromCtx) return fromCtx;
   if (!suitHasActiveThreat(suit, ctx)) return undefined;
   const busyE = [...labels.E.busy].some((id) => cardSuit(id) === suit);
@@ -195,22 +199,28 @@ function stopStatusForSuit(suit: Suit, labels: DefenderLabels, ctx: ThreatContex
   return 'none';
 }
 
-function isCoordinatedSuit(defender: DefenderSeat, suit: Suit, labels: DefenderLabels, ctx: ThreatContext): boolean {
-  void defender;
-  return stopStatusForSuit(suit, labels, ctx) === 'double';
+function isCoordinatedGuard(defender: DefenderSeat, cardId: CardId, position: Position, labels: DefenderLabels, ctx: ThreatContext): boolean {
+  const suit = cardSuit(cardId);
+  if (threatsForSuit(ctx, suit).length === 1) return stopStatusForSuit(suit, labels, ctx) === 'double';
+  const guarded = threatsGuardedByCard(ctx, position, defender, cardId);
+  return guarded.length > 0 && guarded.every((threat) => stoppingDefenders(threat, position).length === 2);
 }
 
-function isSoloBusySuit(defender: DefenderSeat, suit: Suit, labels: DefenderLabels, ctx: ThreatContext): boolean {
-  if (stopStatusForSuit(suit, labels, ctx) !== 'single') return false;
-  return [...labels[defender].busy].some((id) => cardSuit(id) === suit);
+function isSoloGuard(defender: DefenderSeat, cardId: CardId, position: Position, labels: DefenderLabels, ctx: ThreatContext): boolean {
+  const suit = cardSuit(cardId);
+  if (threatsForSuit(ctx, suit).length === 1) return stopStatusForSuit(suit, labels, ctx) === 'single' && labels[defender].busy.has(cardId);
+  return threatsGuardedByCard(ctx, position, defender, cardId).some((threat) => stoppingDefenders(threat, position).length === 1);
 }
 
-function cardBelowThreatRank(cardId: CardId, ctx: ThreatContext): boolean {
+function cardBelowThreatRank(cardId: CardId, ctx: ThreatContext, position: Position, defender: DefenderSeat): boolean {
   const suit = cardSuit(cardId);
   const rank = cardRank(cardId);
+  if (threatsForSuit(ctx, suit).length > 1) {
+    const guarded = threatsGuardedByCard(ctx, position, defender, cardId);
+    return guarded.length > 0 && guarded.every((threat) => RANK_VALUE[rank] < RANK_VALUE[threat.threatRank]);
+  }
   const threatRank = threatRankForSuit(suit, ctx);
-  if (!threatRank) return false;
-  return RANK_VALUE[rank] < RANK_VALUE[threatRank];
+  return !!threatRank && RANK_VALUE[rank] < RANK_VALUE[threatRank];
 }
 
 export function chooseDiscard(
@@ -274,13 +284,11 @@ export function computeDiscardTiers(
   });
   const tier3a = legal.filter((cardId) => {
     if (!isBusyInActiveThreat(defenderHandId, cardId, labels, ctx)) return false;
-    const suit = cardSuit(cardId);
-    return isCoordinatedSuit(defenderHandId, suit, labels, ctx) && cardBelowThreatRank(cardId, ctx);
+    return isCoordinatedGuard(defenderHandId, cardId, position, labels, ctx) && cardBelowThreatRank(cardId, ctx, position, defenderHandId);
   });
   const tier3b = legal.filter((cardId) => {
     if (!isBusyInActiveThreat(defenderHandId, cardId, labels, ctx)) return false;
-    const suit = cardSuit(cardId);
-    return isCoordinatedSuit(defenderHandId, suit, labels, ctx);
+    return isCoordinatedGuard(defenderHandId, cardId, position, labels, ctx);
   });
   const tier3c = legal.filter((cardId) => {
     const suit = cardSuit(cardId);
@@ -290,13 +298,11 @@ export function computeDiscardTiers(
   });
   const tier4a = legal.filter((cardId) => {
     if (!isBusyInActiveThreat(defenderHandId, cardId, labels, ctx)) return false;
-    const suit = cardSuit(cardId);
-    return isSoloBusySuit(defenderHandId, suit, labels, ctx) && cardBelowThreatRank(cardId, ctx);
+    return isSoloGuard(defenderHandId, cardId, position, labels, ctx) && cardBelowThreatRank(cardId, ctx, position, defenderHandId);
   });
   const tier4b = legal.filter((cardId) => {
     if (!isBusyInActiveThreat(defenderHandId, cardId, labels, ctx)) return false;
-    const suit = cardSuit(cardId);
-    return isSoloBusySuit(defenderHandId, suit, labels, ctx);
+    return isSoloGuard(defenderHandId, cardId, position, labels, ctx);
   });
   const tier4c = legal.filter((cardId) => {
     const suit = cardSuit(cardId);
@@ -363,9 +369,9 @@ export function explainTier1Membership(
   const overlap = [...counts.entries()].filter(([, n]) => n > 1).map(([id]) => id);
 
   const activeThreats: Tier1Explain['activeThreats'] = [];
-  for (const suit of SUITS) {
-    const threat = ctx.threatsBySuit[suit];
-    if (!threat || !threat.active) continue;
+  for (const threat of allThreats(ctx)) {
+    const suit = threat.suit;
+    if (!threat.active) continue;
     activeThreats.push({
       suit,
       active: threat.active,

@@ -33,6 +33,12 @@ The automated smoke test reproduced the current candidate's results: stable stru
 
 ## Clash Squeezes candidates
 
+New encapsulations whose goal is **all tricks** include the implied low card opposite every `A/B/C` as a runtime threat by default. For **secondary squeezes**, with a goal below all tricks, onboarding requires an explicit `--companion-threats include` or `--companion-threats omit` decision. The report remains pending without it, even if DDA passes; store the choice as `includeCompanionThreats: true/false` in the catalog entry. If no capital companion occurs, no such decision is needed. Plain capitals give that companion both stoppers; an apostrophe leaves only the explicit threat stopper's partner; a star leaves only the explicit threat stopper. The onboarding Markdown and JSON list these companions for the original and each cook variant. Bindings and double-dummy trick targets are unchanged by these annotations.
+
+All five Clash entries use this rule. Their added threats, in set order, are South ♥2 (`c`), South ♦2 (`c`), North ♥2 (`c`), South ♥2 (`a`, stopped by East), and North ♠2 (`a`, stopped by West). The reviewed all-tricks legacy entry `Wwa, WC > Wc, Ww` also includes North ♥3 (`c`). The owner explicitly retained the original declarations for the two secondary squeezes `WLa, WB > b', W -1` and `WLau, WAuu > b, Wo -1`; both omit North ♥3. Other legacy declarations remain unchanged.
+
+The [capital-companion review](threat_review.md) contains the encapsulation, newspaper diagram, current declarations, initial stopping defenders, and inversion suggestions for the five Clash puzzles and the three relevant encapsulation-authored legacy cases. Regenerate it with `node node_modules/vite-node/vite-node.mjs tools/review-threats.ts > docs/threat_review.md`.
+
 Direct practice link: [Clash Squeezes, Set 5](https://deepsqueeze.ai/practice/?set=5). It opens the first puzzle in the agreed order. Selecting another practice set updates the URL so that set can also be shared.
 
 The owner approved adding all five candidates to **Set 5 — Clash Squeezes**, in the order **3, 4, 5, 2, 1** below. They are now registered with their reviewed standard bindings, and the practice queue preserves that order across sessions. The table retains onboarding candidate order for reference. The generated reports remain historical records of the checks before approval.

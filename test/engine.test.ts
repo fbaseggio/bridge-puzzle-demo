@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
-import { apply, autoplayUntilUserOrEnd, classInfoForCard, init, legalPlays, type CardId, type Problem, type SuccessfulTranscript } from '../src/core';
+import { apply, autoplayUntilUserOrEnd, classInfoForCard, init, legalPlays, type CardId, type Problem, type DecisionRecord, type SuccessfulTranscript } from '../src/core';
 import { chooseDiscard, computeDiscardTiers } from '../src/ai/defenderDiscard';
-import { computeDefenderLabels, initThreatContext, type DefenderLabels } from '../src/ai/threatModel';
+import { computeDefenderLabels, initThreatContext, type Position, type DefenderLabels } from '../src/ai/threatModel';
 import { computeCoverageCandidates, divergenceCandidates, hasUntriedAlternatives, markDecisionCoverage, triedAltKey, type ReplayCoverage } from '../src/demo/playAgain';
 import { p001 } from '../src/puzzles/p001';
 import { p002 } from '../src/puzzles/p002';
@@ -349,6 +349,8 @@ describe('bridge engine v0.1', () => {
       decisions: [
         {
           index: 0,
+          nodeKey: '',
+          invEqIdleClasses: [],
           seat: 'W',
           sig: wAuto.decisionSig ?? '',
           chosenCard,
@@ -501,7 +503,7 @@ describe('bridge engine v0.1', () => {
   });
 
   test('coordinated busy suit feeds tier2 before solo tiers', () => {
-    const position = {
+    const position: Position = {
       hands: {
         N: { S: ['9', '8'], H: [], D: [], C: [] },
         E: { S: ['A', '2'], H: [], D: [], C: [] },
@@ -566,7 +568,7 @@ describe('bridge engine v0.1', () => {
       W: { busy: new Set(['SK']), idle: new Set() }
     };
 
-    const position = {
+    const position: Position = {
       hands: {
         N: { S: [], H: [], D: [], C: [] },
         E: { S: ['Q', '9'], H: ['4'], D: ['7', '4'], C: [] },
@@ -969,6 +971,7 @@ describe('bridge engine v0.1', () => {
     const step = apply(start, { seat: 'S', suit: 'C', rank: 'A' });
     const firstAuto = step.events.find((e) => e.type === 'autoplay' && (e.play.seat === 'E' || e.play.seat === 'W'));
     expect(firstAuto && firstAuto.type === 'autoplay' ? firstAuto.decisionSig : null).toBeTruthy();
+    if (!firstAuto || firstAuto.type !== 'autoplay') throw new Error('Expected defender autoplay');
 
     const transcript: SuccessfulTranscript = {
       problemId: p001.id,
@@ -976,6 +979,8 @@ describe('bridge engine v0.1', () => {
       decisions: [
         {
           index: 0,
+          nodeKey: '',
+          invEqIdleClasses: [],
           seat: firstAuto!.play.seat as 'E' | 'W',
           sig: firstAuto!.decisionSig!,
           chosenCard: `${firstAuto!.play.suit}${firstAuto!.play.rank}` as CardId,
@@ -1005,7 +1010,7 @@ describe('bridge engine v0.1', () => {
     const step = apply(start, { seat: 'S', suit: 'C', rank: 'A' });
     const firstAuto = step.events.find((e) => e.type === 'autoplay' && (e.play.seat === 'E' || e.play.seat === 'W'));
     expect(firstAuto && firstAuto.type === 'autoplay').toBe(true);
-    if (!firstAuto || firstAuto.type !== 'autoplay') return;
+    if (!firstAuto || firstAuto.type !== 'autoplay' || (firstAuto.play.seat !== 'E' && firstAuto.play.seat !== 'W')) throw new Error('Expected defender autoplay');
 
     const chosenCard = `${firstAuto.play.suit}${firstAuto.play.rank}` as CardId;
     const bucketCards = firstAuto.bucketCards ? [...firstAuto.bucketCards] : [chosenCard];
@@ -1031,6 +1036,8 @@ describe('bridge engine v0.1', () => {
       decisions: [
         {
           index: 0,
+          nodeKey: '',
+          invEqIdleClasses: [],
           seat: firstAuto.play.seat,
           sig: firstAuto.decisionSig ?? '',
           chosenCard,
@@ -1069,6 +1076,8 @@ describe('bridge engine v0.1', () => {
       decisions: [
         {
           index: 0,
+          nodeKey: '',
+          invEqIdleClasses: [],
           seat: 'E',
           sig: 'sig-0',
           chosenCard: 'SQ',
@@ -1119,6 +1128,8 @@ describe('bridge engine v0.1', () => {
       decisions: [
         {
           index: 0,
+          nodeKey: '',
+          invEqIdleClasses: [],
           seat: 'W',
           sig: 'sig-0',
           chosenCard: 'D7',
@@ -1131,6 +1142,8 @@ describe('bridge engine v0.1', () => {
         },
         {
           index: 6,
+          nodeKey: '',
+          invEqIdleClasses: [],
           seat: 'E',
           sig: 'sig-6',
           chosenCard: 'C4',
@@ -1157,12 +1170,12 @@ describe('bridge engine v0.1', () => {
     expect(candidates.map((c) => c.index)).toEqual([0]);
   });
 
-  test('p004 replay forcing busy:H at idx0 yields CA-heart branch', () => {
+  test.each(['busy:H', 'missing-class'])('p004 replay handles forced class %s at idx0', (forcedClassId) => {
     const initial = init(p004);
     const baselineStep = apply(initial, { seat: 'S', suit: 'C', rank: 'A' });
     const firstAuto = baselineStep.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
     expect(firstAuto && firstAuto.type === 'autoplay').toBe(true);
-    if (!firstAuto || firstAuto.type !== 'autoplay') return;
+    if (!firstAuto || firstAuto.type !== 'autoplay' || (firstAuto.play.seat !== 'E' && firstAuto.play.seat !== 'W')) throw new Error('Expected defender autoplay');
 
     const chosenCard = `${firstAuto.play.suit}${firstAuto.play.rank}` as CardId;
     const chosenClassId = classInfoForCard(initial, 'W', chosenCard).classId;
@@ -1172,6 +1185,8 @@ describe('bridge engine v0.1', () => {
       decisions: [
         {
           index: 0,
+          nodeKey: '',
+          invEqIdleClasses: [],
           seat: 'W',
           sig: firstAuto.decisionSig ?? '',
           chosenCard,
@@ -1193,13 +1208,22 @@ describe('bridge engine v0.1', () => {
       cursor: 0,
       divergenceIndex: 0,
       forcedCard: null,
-      forcedClassId: 'busy:H'
+      forcedClassId
     };
     const replayStep = apply(replayed, { seat: 'S', suit: 'C', rank: 'A' });
     const replayAuto = replayStep.events.find((e) => e.type === 'autoplay' && e.play.seat === 'W');
     expect(replayAuto && replayAuto.type === 'autoplay').toBe(true);
-    if (!replayAuto || replayAuto.type !== 'autoplay') return;
-    expect(replayAuto.play.suit).toBe('H');
+    if (!replayAuto || replayAuto.type !== 'autoplay') throw new Error('Expected defender autoplay');
+    if (forcedClassId === 'busy:H') {
+      expect(replayAuto.play.suit).toBe('H');
+      expect(replayAuto.replay?.action).toBe('forced');
+    } else {
+      expect(replayAuto.play).toEqual(firstAuto.play);
+      expect(replayAuto.replay).toMatchObject({ action: 'disabled', reason: 'class-not-legal', forcedClassId });
+      expect(replayStep.state.replay.enabled).toBe(false);
+      expect(replayStep.state.replay.cursor).toBe(0);
+      expect(replayStep.events.some((event) => event.type === 'illegal')).toBe(false);
+    }
   });
 
   test('coverage bookkeeping terminates after all (idx, choiceKey) pairs are tried', () => {
@@ -1208,8 +1232,10 @@ describe('bridge engine v0.1', () => {
       recordedRemainingByIdx: new Map(),
       representativeByIdx: new Map()
     };
-    const rec0 = {
+    const rec0: DecisionRecord = {
       index: 0,
+      nodeKey: '',
+      invEqIdleClasses: [],
       seat: 'W',
       sig: 'sig-0',
       chosenCard: 'D7' as CardId,
@@ -1220,8 +1246,10 @@ describe('bridge engine v0.1', () => {
       sameBucketAlternativeClassIds: ['busy:H'],
       representativeCardByClass: { 'busy:D': 'D7' as CardId, 'busy:H': 'HK' as CardId }
     };
-    const rec6 = {
+    const rec6: DecisionRecord = {
       index: 6,
+      nodeKey: '',
+      invEqIdleClasses: [],
       seat: 'E',
       sig: 'sig-6',
       chosenCard: 'C4' as CardId,
@@ -1255,6 +1283,8 @@ describe('bridge engine v0.1', () => {
     };
     markDecisionCoverage(coverage, {
       index: 0,
+      nodeKey: '',
+      invEqIdleClasses: [],
       seat: 'W',
       sig: 'sig-0',
       chosenCard: 'D7',
@@ -1267,6 +1297,8 @@ describe('bridge engine v0.1', () => {
     });
     markDecisionCoverage(coverage, {
       index: 6,
+      nodeKey: '',
+      invEqIdleClasses: [],
       seat: 'E',
       sig: 'sig-6',
       chosenCard: 'C4',

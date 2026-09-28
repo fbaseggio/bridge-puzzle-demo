@@ -1,3 +1,4 @@
+import { parseCardId } from '../../src/ai/threatModel';
 import { describe, expect, it } from 'vitest';
 import { apply, init, legalPlays } from '../../src/core';
 import { evaluatePolicy } from '../../src/ai/evaluatePolicy';
@@ -61,7 +62,7 @@ describe('multi-EW defender policy arbitration', () => {
     for (const cardId of seq) {
       const legal = legalPlays(state).map((play) => `${play.suit}${play.rank}`);
       expect(legal).toContain(cardId);
-      const play = { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const;
+      const play = { seat: state.turn, ...parseCardId(cardId) } as const;
       state = apply(state, play).state;
     }
 
@@ -76,7 +77,7 @@ describe('multi-EW defender policy arbitration', () => {
     for (const cardId of seq) {
       const legal = legalPlays(state).map((play) => `${play.suit}${play.rank}`);
       expect(legal).toContain(cardId);
-      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+      state = apply(state, { seat: state.turn, ...parseCardId(cardId) } as const).state;
     }
 
     expect(state.turn).toBe('N');
@@ -90,7 +91,7 @@ describe('multi-EW defender policy arbitration', () => {
     let state = init(sureTricksDemo);
     const seq = ['CT', 'CA', 'CQ'];
     for (const cardId of seq) {
-      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+      state = apply(state, { seat: state.turn, ...parseCardId(cardId) } as const).state;
     }
 
     const result = apply(state, { seat: 'S', suit: 'C', rank: 'K' });
@@ -107,11 +108,11 @@ describe('multi-EW defender policy arbitration', () => {
   });
 
   it('demotes plays that resolve an ambiguous designated threat into uniform promotion', () => {
-    const problem = { ...sureTricksDemo, userControls: ['N', 'E', 'S', 'W'] as const };
+    const problem: typeof sureTricksDemo = { ...sureTricksDemo, userControls: ['N', 'E', 'S', 'W'] };
     let state = init(problem);
     const seq = ['CT', 'H9', 'CA', 'C4', 'CQ', 'C3', 'CK', 'HK', 'CJ'];
     for (const cardId of seq) {
-      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+      state = apply(state, { seat: state.turn, ...parseCardId(cardId) } as const).state;
     }
 
     expect(state.turn).toBe('W');
@@ -139,11 +140,11 @@ describe('multi-EW defender policy arbitration', () => {
   });
 
   it('eliminates variants by follow-suit legality when a defender discards', () => {
-    const problem = { ...sureTricksDemo, userControls: ['N', 'E', 'S', 'W'] as const };
+    const problem: typeof sureTricksDemo = { ...sureTricksDemo, userControls: ['N', 'E', 'S', 'W'] };
     let state = init(problem);
     const seq = ['CT', 'H9', 'CA', 'C2', 'CQ', 'C3', 'CK', 'SK', 'CJ', 'HK', 'ST', 'C4', 'S2', 'SQ', 'SA'];
     for (const cardId of seq) {
-      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+      state = apply(state, { seat: state.turn, ...parseCardId(cardId) } as const).state;
     }
 
     expect(state.turn).toBe('E');
@@ -156,11 +157,11 @@ describe('multi-EW defender policy arbitration', () => {
   });
 
   it('looks ahead through forced trick resolution when scoring ambiguous-to-uniform promotions', () => {
-    const problem = { ...sureTricksDemo, userControls: ['N', 'E', 'S', 'W'] as const };
+    const problem: typeof sureTricksDemo = { ...sureTricksDemo, userControls: ['N', 'E', 'S', 'W'] };
     let state = init(problem);
     const seq = ['CT', 'H9', 'CA', 'C2', 'CQ', 'C3', 'CK', 'SK', 'CJ', 'HK', 'ST', 'C4', 'S2', 'SQ', 'SA'];
     for (const cardId of seq) {
-      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+      state = apply(state, { seat: state.turn, ...parseCardId(cardId) } as const).state;
     }
 
     const result = evaluatePolicy({
@@ -187,7 +188,7 @@ describe('multi-EW defender policy arbitration', () => {
     let state = init(sureTricksDemo);
     const seq = ['CT', 'CA', 'HA', 'S2', 'CQ', 'CK', 'CJ'];
     for (const cardId of seq) {
-      state = apply(state, { seat: state.turn, suit: cardId[0], rank: cardId.slice(1) } as const).state;
+      state = apply(state, { seat: state.turn, ...parseCardId(cardId) } as const).state;
     }
 
     expect(state.ewVariantState?.activeVariantIds).toEqual(['a']);
