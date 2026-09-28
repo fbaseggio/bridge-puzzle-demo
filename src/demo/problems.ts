@@ -58,7 +58,7 @@ import {
 import { ifYouSeeAGoodPlayFullDeal } from '../puzzles/if_you_see_a_good_play';
 import { forBarryFullDeal } from '../puzzles/for_barry_full_deal';
 import { whichSqueeze1 } from '../puzzles/which_squeeze_1';
-import { listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } from '../encapsulation/workbenchProblems';
+import { buildEncapsulationWorkbenchProblem, listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } from '../encapsulation/workbenchProblems';
 
 export type DemoProblem = {
   id: string;
@@ -109,8 +109,25 @@ export function resolveDemoProblem(entry: DemoProblem, variantId?: string | null
   return loaded;
 }
 
+// Standard practice deals can be reconstructed outside their practice session.
+// Keep the instance ID so the binding, policy seed, and history replay agree.
+export function findDemoProblem(problemId: string): DemoProblem | undefined {
+  const registered = demoProblems.find((problem) => problem.id === problemId);
+  if (registered) return registered;
+  if (!problemId.endsWith('__standard')) return undefined;
+  const baseId = problemId.slice(0, -'__standard'.length);
+  const entry = listEncapsulationWorkbenchEntries().find((candidate) => candidate.id === baseId);
+  if (!entry) return undefined;
+  return {
+    id: problemId,
+    label: `${entry.name} [standard]`,
+    loadProblem: () => buildEncapsulationWorkbenchProblem(entry, { bindingMode: 'standard', problemId }),
+    practiceEligible: false
+  };
+}
+
 export function resolveDemoProblemDdsRequirement(problemId: string): 'optional' | 'required' {
-  const entry = demoProblems.find((problem) => problem.id === problemId);
+  const entry = findDemoProblem(problemId);
   return entry?.ddsRequirement ?? 'optional';
 }
 

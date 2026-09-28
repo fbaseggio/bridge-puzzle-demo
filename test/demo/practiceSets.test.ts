@@ -1,8 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { listEncapsulationWorkbenchEntries } from '../../src/encapsulation/workbenchProblems';
 import { buildPracticeQueue, practiceSetFromSearch, PRACTICE_SET_OPTIONS } from '../../src/demo/practiceSets';
+import { demoProblems, findDemoProblem, resolveDemoProblem } from '../../src/demo/problems';
 
 describe('practice set queue builder', () => {
+  it('resolves standard practice pop-outs with the same complete deal and policy seed', () => {
+    for (const practice of buildPracticeQueue('set5')) {
+      const url = new URL(`https://deepsqueeze.ai/practice/?set=5&mode=analysis&problem=${practice.id}`);
+      const entry = findDemoProblem(url.searchParams.get('problem')!);
+      expect(entry, practice.id).toBeDefined();
+      expect(resolveDemoProblem(entry!)).toEqual(practice.problem);
+      expect(entry!.label).toContain('[standard]');
+    }
+    expect(findDemoProblem(demoProblems[0].id)).toBe(demoProblems[0]);
+    expect(findDemoProblem('missing__standard')).toBeUndefined();
+    // A random deal needs its concrete binding/seed; never substitute a standard deal.
+    expect(findDemoProblem('encap_clash_wla_gt_wa_lc_ww__random')).toBeUndefined();
+  });
+
   it('resolves shareable set links and defaults safely for missing or unknown sets', () => {
     for (const { id } of PRACTICE_SET_OPTIONS) {
       expect(practiceSetFromSearch(`?set=${id.slice(3)}`)).toBe(id);

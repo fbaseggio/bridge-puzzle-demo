@@ -40,7 +40,7 @@ import {
 } from '../ai/threatModel';
 import { formatAfterPlayBlock, formatAfterTrickBlock, formatDiscardDecisionBlock, formatInitBlock } from '../ai/threatModelVerbose';
 import { computeCoverageCandidates, markDecisionCoverage, type ReplayCoverage } from './playAgain';
-import { demoProblems, normalizeDemoProblemVariantId, resolveDemoProblem, resolveDemoProblemDdsRequirement } from './problems';
+import { demoProblems, findDemoProblem, normalizeDemoProblemVariantId, resolveDemoProblem, resolveDemoProblemDdsRequirement } from './problems';
 import { buildPracticeQueue, practiceSetFromSearch, PRACTICE_SET_OPTIONS, type PracticeSetId } from './practiceSets';
 import {
   buildCardStatusSnapshot,
@@ -464,12 +464,12 @@ const REQUIRED_DDS_RETRY_DELAY_MS = 250;
 const initialProblemIdFromUrl: string = (() => {
   if (initialWidgetSnapshotForRestore) {
     const snapshotProblemId = initialWidgetSnapshotForRestore.problem.problemId;
-    if (demoProblems.some((problem) => problem.id === snapshotProblemId)) return snapshotProblemId;
+    if (findDemoProblem(snapshotProblemId)) return snapshotProblemId;
   }
   if (typeof window === 'undefined') return demoProblems[0].id;
   const requested = new URLSearchParams(window.location.search).get('problem');
   if (!requested) return demoProblems[0].id;
-  return demoProblems.some((p) => p.id === requested) ? requested : demoProblems[0].id;
+  return findDemoProblem(requested) ? requested : demoProblems[0].id;
 })();
 const initialVariantIdFromUrl: string | null = (() => {
   if (initialWidgetSnapshotForRestore) {
@@ -1090,13 +1090,13 @@ function advanceArticleScriptToNextPauseOrEnd(): void {
 function resolveProblemById(problemId: string, variantId?: string | null): ProblemWithThreats {
   const override = practiceProblemOverrides.get(problemId);
   if (override) return override;
-  const entry = demoProblems.find((p) => p.id === problemId) ?? demoProblems[0];
+  const entry = findDemoProblem(problemId) ?? demoProblems[0];
   return resolveDemoProblem(entry, variantId) as ProblemWithThreats;
 }
 
 function resolveProblemVariantId(problemId: string, variantId?: string | null): string | null {
   if (!variantId?.trim()) return null;
-  const entry = demoProblems.find((p) => p.id === problemId);
+  const entry = findDemoProblem(problemId);
   if (!entry) return null;
   return normalizeDemoProblemVariantId(entry, variantId);
 }
@@ -1699,14 +1699,14 @@ function variantLabelPrefix(variantId: string): string {
 }
 
 function currentEntryIsDraft(problemId = currentProblemId): boolean {
-  const entry = demoProblems.find((problem) => problem.id === problemId);
+  const entry = findDemoProblem(problemId);
   return entry?.puzzleModeId === 'draft';
 }
 
 function currentPuzzleModeId(problemId = currentProblemId): PuzzleModeId {
   if (articleScriptModeEnabled() && problemId === currentProblemId) return 'scripted';
   if (widgetUiMode === 'sd-puzzle') return 'single-dummy';
-  const entry = demoProblems.find((problem) => problem.id === problemId);
+  const entry = findDemoProblem(problemId);
   if (entry?.variants && entry.variants.length > 0) return 'multi-ew';
   if (entry?.puzzleModeId === 'draft') return 'standard';
   if (entry?.puzzleModeId) return entry.puzzleModeId;
@@ -5250,7 +5250,7 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   westInitialContentWidth = null;
   nsInitialFitWidth = null;
   diagramRowHeightPx = null;
-  const entry = demoProblems.find((p) => p.id === problemId);
+  const entry = findDemoProblem(problemId);
   if (!entry && !practiceProblemOverrides.has(problemId)) return;
   currentProblemVariantId = practiceProblemOverrides.has(problemId) ? null : resolveProblemVariantId(problemId, variantId);
   currentProblem = resolveProblemById(problemId, currentProblemVariantId);
@@ -6871,6 +6871,8 @@ function renderControlsBanner(): HTMLElement {
   puzzleLabel.textContent = 'Puzzle: ';
   const puzzleSelect = document.createElement('select');
   const puzzleOptions = [...demoProblems].sort((a, b) => Number(!!a.experimental) - Number(!!b.experimental));
+  const currentEntry = findDemoProblem(currentProblemId);
+  if (currentEntry && !puzzleOptions.some((entry) => entry.id === currentEntry.id)) puzzleOptions.push(currentEntry);
   for (const p of puzzleOptions) {
     const opt = document.createElement('option');
     opt.value = p.id;
@@ -6884,7 +6886,6 @@ function renderControlsBanner(): HTMLElement {
   puzzleLabel.appendChild(puzzleSelect);
   row.appendChild(puzzleLabel);
 
-  const currentEntry = demoProblems.find((p) => p.id === currentProblemId);
   if (currentEntry?.variants && currentEntry.variants.length > 0) {
     const variantLabel = document.createElement('label');
     variantLabel.textContent = 'Version: ';
