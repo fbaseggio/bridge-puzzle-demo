@@ -135,7 +135,7 @@ function computeSpecifiedCounts(parsed: ParsedEncapsulation): { specifiedNorth: 
   for (const s of parsed.suits) {
     for (let i = 0; i < s.pattern.length; i += 1) {
       const ch = s.pattern[i] as string;
-      if (ch === "'") continue;
+      if (ch === "'" || ch === '*') continue;
       if (ch === '0') continue;
       if (ch === 'o' || ch === 'u') continue;
       if (ch === 'm') {
@@ -169,7 +169,7 @@ function fillIdleCards(
   const threatSuits = new Set(parsed.suits.filter((s) => /[abcfgABCFGi]/.test(s.pattern)).map((s) => s.suit));
   const disallowedIdleSuits = new Set(parsed.suits.filter((s) => !s.allowIdleFill).map((s) => s.suit));
   for (const s of parsed.suits) {
-    if (s.pattern.includes("g'") || s.pattern.includes("G'")) disallowedIdleSuits.add(s.suit);
+    if (/[gGAB]'/.test(s.pattern)) disallowedIdleSuits.add(s.suit);
   }
   const isIdleAllowed = (suit: Suit): boolean => !disallowedIdleSuits.has(suit);
 
@@ -270,12 +270,16 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
       let token = suitRec.pattern[tokenIndex] as string;
       if (token === "'") continue;
       if (token === '0') continue;
-      let gPrime = false;
-      if ((token === 'g' || token === 'G') && suitRec.pattern[tokenIndex + 1] === "'") {
-        gPrime = true;
+      let primed = false;
+      let starred = false;
+      if (['g', 'G', 'A', 'B'].includes(token) && suitRec.pattern[tokenIndex + 1] === "'") {
+        primed = true;
+        tokenIndex += 1;
+      } else if ((token === 'A' || token === 'B') && suitRec.pattern[tokenIndex + 1] === '*') {
+        starred = true;
         tokenIndex += 1;
       }
-      const tokenLabel = gPrime ? `${token}'` : token;
+      const tokenLabel = primed ? `${token}'` : starred ? `${token}*` : token;
       if (token === 'w') {
         const idx = nextSymbolIndex('w');
         addCard(hands, suitState, cardBindings, bindingIndex, primary, suit, nextHigh(suit, suitState), {
@@ -370,7 +374,7 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
       const threatLen = linksSeen + 1;
       const threatIndex = nextSymbolIndex(tokenLabel);
 
-      if (isUpper) {
+      if (isUpper && !starred) {
         addCard(hands, suitState, cardBindings, bindingIndex, primary, suit, nextLow(suit, suitState), {
             symbol: tokenLabel,
             index: threatIndex,
@@ -391,7 +395,7 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
           note: 'stop1'
         });
 
-        const outNeed = lower === 'g' ? (gPrime ? Math.max(0, threatLen - 1) : threatLen) : 0;
+        const outNeed = lower === 'g' ? (primed ? Math.max(0, threatLen - 1) : threatLen) : 0;
         if (outNeed > 0) {
           suitState.get(suit)?.threatSuitsByStopper[out].add(suit);
           addCard(hands, suitState, cardBindings, bindingIndex, out, suit, nextHigh(suit, suitState), {
@@ -425,7 +429,8 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
         if (stoppers.length === 1) {
           const stopper = stoppers[0];
           suitState.get(suit)?.threatSuitsByStopper[stopper].add(suit);
-          for (let i = 0; i < threatLen; i += 1) {
+          const stopperLength = primed ? threatLen - 1 : threatLen;
+          for (let i = 0; i < stopperLength; i += 1) {
             addCard(hands, suitState, cardBindings, bindingIndex, stopper, suit, nextHigh(suit, suitState), {
               symbol: tokenLabel,
               index: threatIndex,
@@ -447,6 +452,27 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
           }
         }
         threatRank = nextHigh(suit, suitState);
+        if (starred) {
+          // Reserve the companion above the remaining low-rank pool. Explicit
+          // and automatically filled secondary idles can then stay below it.
+          addCard(hands, suitState, cardBindings, bindingIndex, primary, suit, nextHigh(suit, suitState), {
+            symbol: tokenLabel,
+            index: threatIndex,
+            role: 'structural',
+            note: 'low'
+          });
+        } else if (isUpper && (lower === 'a' || lower === 'b')) {
+          // The other defender covers the primary low, but not the opposite threat.
+          const otherDefender = stoppers[0] === 'E' ? 'W' : 'E';
+          for (let i = 0; i < threatLen; i += 1) {
+            addCard(hands, suitState, cardBindings, bindingIndex, otherDefender, suit, nextHigh(suit, suitState), {
+              symbol: tokenLabel,
+              index: threatIndex,
+              role: 'stopper',
+              note: `companionStop${i + 1}`
+            });
+          }
+        }
       }
 
       addCard(hands, suitState, cardBindings, bindingIndex, owner, suit, threatRank, {
@@ -455,7 +481,7 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
         role: 'structural'
       });
       threatCards.push({
-        symbol: tokenLabel as 'a' | 'b' | 'c' | 'f' | 'g' | "g'" | 'A' | 'B' | 'C' | 'F' | 'G' | "G'",
+        symbol: tokenLabel as BoundThreatCard['symbol'],
         suit,
         seat: owner,
         rank: threatRank,
@@ -482,13 +508,9 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
   const counts = computeSpecifiedCounts(parsed);
   const defaultHandSize = Math.max(counts.specifiedNorth, counts.specifiedSouth);
 
-  const target = Math.max(
-    defaultHandSize,
-    totalCards(hands, 'N'),
-    totalCards(hands, 'S'),
-    totalCards(hands, 'E'),
-    totalCards(hands, 'W')
-  );
+  // N/S structure fixes the target. Excess defender cards remain visible as
+  // negative idle requirements instead of enlarging the other three hands.
+  const target = defaultHandSize;
 
   const preCompletionHands = cloneHands(hands);
   const preCompletionTotals: Record<Side, number> = {
@@ -498,10 +520,10 @@ function bindParsed(parsed: ParsedEncapsulation): BoundEncapsulation {
     W: totalCards(preCompletionHands, 'W')
   };
   const idleCardsNeededByHand: Record<Side, number> = {
-    N: Math.max(0, target - preCompletionTotals.N),
-    E: Math.max(0, target - preCompletionTotals.E),
-    S: Math.max(0, target - preCompletionTotals.S),
-    W: Math.max(0, target - preCompletionTotals.W)
+    N: target - preCompletionTotals.N,
+    E: target - preCompletionTotals.E,
+    S: target - preCompletionTotals.S,
+    W: target - preCompletionTotals.W
   };
 
   fillIdleCards(hands, parsed, suitState, target, cardBindings, bindingIndex);

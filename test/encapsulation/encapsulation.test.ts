@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bindStandard, computeSpecifiedCardCounts, parseEncapsulation } from '../../src/encapsulation';
+import { bindStandard, computeSpecifiedCardCounts, parseEncapsulation, renderDiagram } from '../../src/encapsulation';
 
 describe('encapsulation parser', () => {
   it('normalizes commas and spaces and maps suits in standard order', () => {
@@ -64,7 +64,34 @@ describe('specified counts and default hand size', () => {
 
     const bound = bindStandard('Wa, a > w');
     expect(bound.metadata.defaultHandSize).toBe(3);
-    expect(bound.metadata.finalHandSize).toBeGreaterThanOrEqual(3);
+    expect(bound.metadata.finalHandSize).toBe(3);
+  });
+
+  it.each([
+    { input: 'Wf > wLF', oversized: 'W' as const, otherDefender: 'E' as const },
+    { input: 'wLF > Wf', oversized: 'E' as const, otherDefender: 'W' as const }
+  ])('reports $oversized overflow without expanding the four-card target: $input', ({ input, oversized, otherDefender }) => {
+    const bound = bindStandard(input);
+    expect(bound.metadata.specifiedNorth).toBe(4);
+    expect(bound.metadata.specifiedSouth).toBe(4);
+    expect(bound.metadata.finalHandSize).toBe(4);
+    expect(bound.metadata.idleCardsNeededByHand).toEqual({ N: 0, S: 0, [oversized]: -1, [otherDefender]: 4 });
+    for (const seat of ['N', 'E', 'S', 'W'] as const) {
+      const count = Object.values(bound.hands[seat]).reduce((sum, ranks) => sum + ranks.length, 0);
+      expect(count, seat).toBe(seat === oversized ? 5 : 4);
+    }
+    for (const suit of ['S', 'H', 'D', 'C'] as const) {
+      expect(new Set(bound.hands[oversized][suit])).toEqual(new Set(bound.metadata.preCompletionHands[oversized][suit]));
+    }
+    expect(bound.cardBindings.filter((card) => card.role === 'idleFill').every((card) => card.hand === otherDefender)).toBe(true);
+    expect(renderDiagram(bound)).toContain(`${oversized}=-1`);
+  });
+
+  it('counts explicit opponent cards as a possible deficit rather than increasing the target', () => {
+    const bound = bindStandard('Waou >');
+    expect(bound.metadata.finalHandSize).toBe(2);
+    expect(bound.metadata.idleCardsNeededByHand).toEqual({ N: 0, E: 1, S: 1, W: -1 });
+    expect(bound.hands.W.S).toEqual(['K', 'Q', '4']);
   });
 });
 

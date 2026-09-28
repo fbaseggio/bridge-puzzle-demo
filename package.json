@@ -16,7 +16,8 @@
     "dd:verify-all": "python3 tools/dd_maintenance.py verify",
     "dd:verify-runtime": "python3 tools/dd_maintenance.py verify --runtime-only",
     "dd:profile-p007": "python3 tools/dd_maintenance.py verify --runtime-only --problem-id p007 --profile",
-    "encap:harness": "vite-node src/encapsulation/harness.ts"
+    "encap:harness": "vite-node src/encapsulation/harness.ts",
+    "puzzle:onboard": "vite-node tools/onboard-puzzle.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

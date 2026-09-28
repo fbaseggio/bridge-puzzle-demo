@@ -4,6 +4,18 @@ import { init } from '../../src/core';
 import { listEncapsulationWorkbenchEntries, loadEncapsulationWorkbenchProblem } from '../../src/encapsulation/workbenchProblems';
 
 describe('encapsulation workbench adapter', () => {
+  it('keeps every registered encapsulation within the N/S-derived hand size', () => {
+    for (const entry of listEncapsulationWorkbenchEntries()) {
+      const bound = bindStandard(entry.encapsulation);
+      for (const seat of ['N', 'E', 'S', 'W'] as const) {
+        expect(bound.metadata.idleCardsNeededByHand[seat], `${entry.id}: ${seat}`).toBeGreaterThanOrEqual(0);
+        const count = Object.values(bound.hands[seat]).reduce((sum, ranks) => sum + ranks.length, 0);
+        expect(count, `${entry.id}: ${seat}`).toBe(bound.metadata.finalHandSize);
+      }
+      expect(() => init(loadEncapsulationWorkbenchProblem(entry.id)), entry.id).not.toThrow();
+    }
+  });
+
   it("maps goal using finalHandSize + goalOffset for WLa, WB > b', W -1", () => {
     const bound = bindStandard("WLa, WB > b', W -1");
     const problem = loadEncapsulationWorkbenchProblem('encap_wla_wb_gt_b_w');

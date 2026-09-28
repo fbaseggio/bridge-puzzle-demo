@@ -8,6 +8,7 @@ export type EncapsulationWorkbenchEntry = {
   name: string;
   encapsulation: string;
   bindingMode?: 'standard' | 'random';
+  source?: Problem['source'];
 };
 
 const ENCAPSULATION_WORKBENCH_ENTRIES: EncapsulationWorkbenchEntry[] = [
@@ -21,7 +22,7 @@ const ENCAPSULATION_WORKBENCH_ENTRIES: EncapsulationWorkbenchEntry[] = [
   { id: 'encap_a_wc_gt_a_w', name: 'Encap: a, Wc > a, w', encapsulation: 'a, Wc > a, w' },
   { id: 'encap_wa_ww_gt_wlc_wc', name: 'Encap: wa, WW > WLc, Wc', encapsulation: 'wa, WW > WLc, Wc' },
   { id: 'encap_wa_wb_gt_wc_ww', name: 'Encap: Wa, Wb > Wc, Ww', encapsulation: 'Wa, Wb > Wc, Ww' },
-  { id: 'encap_wlau_waouou_gt_b_wo', name: 'Encap: WLau, WAouou > b, Wo', encapsulation: 'WLau, WAouou > b, Wo' },
+  { id: 'encap_wlau_waouou_gt_b_wo', name: 'Encap: WLau, WAuu > b, Wo -1', encapsulation: 'WLau, WAuu > b, Wo -1' },
   { id: 'encap_wg_a_gt_wc_ww', name: "Encap: Wg', c > wc, WW", encapsulation: "Wg', c > wc, WW" },
   { id: 'encap_wwa_ww_gt_wc_wc', name: 'Encap: Wwa, WW > Wc, Wc', encapsulation: 'Wwa, WW > Wc, Wc' },
   { id: 'encap_wa_ww_gt_wlc_wc_b', name: 'Encap: wa, WW > WLc, Wc', encapsulation: 'wa, WW > WLc, Wc' },
@@ -34,7 +35,12 @@ const ENCAPSULATION_WORKBENCH_ENTRIES: EncapsulationWorkbenchEntry[] = [
   { id: 'encap_a_wlc_gt_wlc_ww', name: 'Encap: a, WLc > WLc, Ww', encapsulation: 'a, WLc > WLc, Ww' },
   { id: 'encap_wwa_wc_gt_wc_ww', name: 'Encap: Wwa, WC > Wc, Ww', encapsulation: 'Wwa, WC > Wc, Ww' },
   { id: 'encap_c_wg_gt_wa_ww', name: 'Encap: c, Wg > wa, WW', encapsulation: 'c, Wg > wa, WW' },
-  { id: 'encap_wlg_ww_gt_a_c', name: 'Encap: WLg, WW > a, c', encapsulation: 'WLg, WW > a, c' }
+  { id: 'encap_wlg_ww_gt_a_c', name: 'Encap: WLg, WW > a, c', encapsulation: 'WLg, WW > a, c' },
+  { id: 'encap_clash_wla_gt_wa_lc_ww', name: 'Encap: wLa > wA, Lc, WW', encapsulation: 'wLa > wA, Lc, WW' },
+  { id: 'encap_moon_double_clash_3', name: 'Encap: Wa, Lc > wA, Ww', encapsulation: 'Wa, Lc > wA, Ww', source: { title: 'Moon Double Clash 3' } },
+  { id: 'encap_moon_double_clash_5', name: 'Encap: WLa, wB > wc, WL', encapsulation: 'WLa, wB > wc, WL', source: { title: 'Moon Double Clash 5' } },
+  { id: 'encap_moon_double_clash_7', name: "Encap: [schd] wa, Ww > wA', Wci", encapsulation: "[schd] wa, Ww > wA', Wci", source: { title: 'Moon Double Clash 7' } },
+  { id: 'encap_moon_hex_clash_2', name: 'Type R Clash-B', encapsulation: "[schd] wA' Ww > WLc, c", source: { title: 'Moon hex clash 2' } }
 ];
 
 const ENC_WORKBENCH_BY_ID = new Map(ENCAPSULATION_WORKBENCH_ENTRIES.map((entry) => [entry.id, entry] as const));
@@ -86,6 +92,7 @@ export function buildEncapsulationWorkbenchProblem(
 
   return {
     id: problemId,
+    source: entry.source,
     contract: { strain: 'NT' },
     leader,
     userControls: ['N', 'S'],

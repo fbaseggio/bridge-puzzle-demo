@@ -2,7 +2,7 @@ import type { Problem } from '../core';
 import { buildEncapsulationWorkbenchProblem, listEncapsulationWorkbenchEntries } from '../encapsulation/workbenchProblems';
 import { demoProblems, resolveDemoProblem } from './problems';
 
-export type PracticeSetId = 'set1' | 'set2' | 'set3' | 'set4';
+export type PracticeSetId = 'set1' | 'set2' | 'set3' | 'set4' | 'set5';
 
 export type PracticeQueueEntry = {
   id: string;
@@ -15,7 +15,8 @@ export const PRACTICE_SET_OPTIONS: Array<{ id: PracticeSetId; label: string }> =
   { id: 'set1', label: 'Set 1 — Current Puzzles' },
   { id: 'set2', label: 'Set 2 — Encapsulation Bindings' },
   { id: 'set3', label: 'Set 3 — Double Squeezes' },
-  { id: 'set4', label: 'Set 4 — Compound Squeezes' }
+  { id: 'set4', label: 'Set 4 — Compound Squeezes' },
+  { id: 'set5', label: 'Set 5 — Clash Squeezes' }
 ];
 
 function createSeededRng(seed: number): () => number {
@@ -136,7 +137,33 @@ function buildSet4Entries(): PracticeQueueEntry[] {
   return entries;
 }
 
+// Owner-selected sequence: onboarding candidates 3, 4, 5, 2, 1.
+const CLASH_SQUEEZE_ENCAP_IDS = [
+  'encap_clash_wla_gt_wa_lc_ww',
+  'encap_moon_double_clash_3',
+  'encap_moon_double_clash_5',
+  'encap_moon_double_clash_7',
+  'encap_moon_hex_clash_2'
+];
+
+function buildSet5Entries(): PracticeQueueEntry[] {
+  const byId = new Map(listEncapsulationWorkbenchEntries().map((entry) => [entry.id, entry]));
+  return CLASH_SQUEEZE_ENCAP_IDS.map((id) => {
+    const entry = byId.get(id);
+    if (!entry) throw new Error(`Missing Clash Squeezes entry '${id}'`);
+    const standardId = `${entry.id}__standard`;
+    return {
+      id: standardId,
+      label: entry.name,
+      problem: buildEncapsulationWorkbenchProblem(entry, { bindingMode: 'standard', problemId: standardId }),
+      source: 'encapsulation-standard'
+    };
+  });
+}
+
 export function buildPracticeQueue(setId: PracticeSetId, options?: { seed?: number }): PracticeQueueEntry[] {
+  // This set has an explicitly requested teaching order, preserved every session.
+  if (setId === 'set5') return buildSet5Entries();
   const seed = options?.seed ?? ((Date.now() ^ 0x9e3779b9) >>> 0);
   const rng = createSeededRng(seed);
   const base =

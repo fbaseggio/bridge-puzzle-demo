@@ -1,8 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import { listEncapsulationWorkbenchEntries } from '../../src/encapsulation/workbenchProblems';
-import { buildPracticeQueue } from '../../src/demo/practiceSets';
+import { buildPracticeQueue, PRACTICE_SET_OPTIONS } from '../../src/demo/practiceSets';
 
 describe('practice set queue builder', () => {
+  it('offers Clash Squeezes in the reviewed 3, 4, 5, 2, 1 order across sessions', () => {
+    expect(PRACTICE_SET_OPTIONS).toContainEqual({ id: 'set5', label: 'Set 5 — Clash Squeezes' });
+    const expectedIds = [
+      'encap_clash_wla_gt_wa_lc_ww', 'encap_moon_double_clash_3', 'encap_moon_double_clash_5',
+      'encap_moon_double_clash_7', 'encap_moon_hex_clash_2'
+    ];
+    const registry = new Map(listEncapsulationWorkbenchEntries().map((entry) => [entry.id, entry]));
+    expect(expectedIds.map((id) => registry.get(id)?.encapsulation)).toEqual([
+      'wLa > wA, Lc, WW', 'Wa, Lc > wA, Ww', 'WLa, wB > wc, WL',
+      "[schd] wa, Ww > wA', Wci", "[schd] wA' Ww > WLc, c"
+    ]);
+    for (const seed of [1, 42, 999]) {
+      const queue = buildPracticeQueue('set5', { seed });
+      expect(queue.map((entry) => entry.id)).toEqual(expectedIds.map((id) => `${id}__standard`));
+      expect(queue.map((entry) => entry.problem.goal.n)).toEqual([7, 6, 7, 6, 6]);
+      expect(queue.map((entry) => entry.problem.source?.title)).toEqual([
+        undefined, 'Moon Double Clash 3', 'Moon Double Clash 5', 'Moon Double Clash 7', 'Moon hex clash 2'
+      ]);
+      expect(queue[4].label).toBe('Type R Clash-B');
+      expect(queue.every((entry) => entry.source === 'encapsulation-standard' && entry.problem.leader === 'S' && entry.problem.contract.strain === 'NT')).toBe(true);
+    }
+  });
+
   it('builds non-empty set1 queue', () => {
     const queue = buildPracticeQueue('set1', { seed: 1 });
     expect(queue.length).toBeGreaterThan(0);

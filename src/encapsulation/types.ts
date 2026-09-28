@@ -48,9 +48,11 @@ export type BindMetadata = {
   specifiedNorth: number;
   specifiedSouth: number;
   defaultHandSize: number;
+  /** N/S-derived completion target; a structurally oversized hand may exceed it. */
   finalHandSize: number;
   preCompletionHands: FourHands;
   preCompletionTotals: Record<Side, number>;
+  /** Signed target minus pre-completion count; negative means an oversized hand. */
   idleCardsNeededByHand: Record<Side, number>;
 };
 
@@ -64,7 +66,7 @@ export type BoundEncapsulation = {
 };
 
 export type BoundThreatCard = {
-  symbol: 'a' | 'b' | 'c' | 'f' | 'g' | "g'" | 'A' | 'B' | 'C' | 'F' | 'G' | "G'";
+  symbol: 'a' | 'b' | 'c' | 'f' | 'g' | "g'" | 'A' | "A'" | 'A*' | 'B' | "B'" | 'B*' | 'C' | 'F' | 'G' | "G'";
   suit: Suit;
   seat: 'N' | 'S';
   rank: string;

@@ -170,8 +170,8 @@ This outbound/return terminology is normative and replaces drift-prone direction
 
 Supported symbols in this draft:
 
-- `w`, `W`, `l`, `L`
-- `a`, `A`, `b`, `B`, `c`, `C`
+- `w`, `W`, `L`
+- `a`, `A`, `A'`, `A*`, `b`, `B`, `B'`, `B*`, `c`, `C`
 - `i`
 - `o`, `u`
 - `0` (suit-slot placeholder)
@@ -183,13 +183,13 @@ Supported symbols in this draft:
 - `L`: winner in opposite hand + structural low companion in primary hand.
 - `L` denotes a link structure between NS hands.
 - `w`: winner in primary hand without opposite structural-low companion.
-- `l`: rare/degenerate opposite-hand winner without the corresponding structural-low companion.
+- `l`: undefined; no meaning is currently assigned. Do not use it in authored encapsulations or authoritative examples.
 
 #### Spec
 `W/L` are paired NS structure operators; they are not isolated card declarations.
 
 #### Current implementation note
-Lowercase `l` is implemented but uncommon and less central in current practical inversion behavior.
+Legacy code still accepts lowercase `l`, but its behavior is inconsistent: the forward binder creates a primary-hand low, while inversion can emit it for an opposite-hand winner without a primary-hand low. Neither behavior defines its meaning. Removing or otherwise handling these legacy paths remains an implementation follow-up.
 
 ### 6.2 Threat symbols
 
@@ -200,40 +200,39 @@ Lowercase threat symbols (threat in primary hand):
 - `b`: stopped by **outbound opponent**
 - `c`: stopped by both opponents
 
-Uppercase threat symbols mirror this directionality with threat card in opposite NS hand and low companion in primary:
+Uppercase threats belong to the opposite NS hand and include a low companion in the primary hand. Stopper direction is relative to the **threat owner**, not the primary hand:
 
-- `A`: opposite-hand threat, stopped by return opponent
-- `B`: opposite-hand threat, stopped by outbound opponent
-- `C`: opposite-hand threat, stopped by both
+- `A`: opposite-hand threat, stopped by its return opponent.
+- `B`: opposite-hand threat, stopped by its outbound opponent.
+- `C`: opposite-hand threat, stopped by both opponents.
 
-#### Spec
-Stopper logic requires strictly higher cards than the threat, plus required backing length (defined in standard binding section).
+For `A/B`, the other defender has full required length and can beat the primary hand's highest remaining card after the preceding links. One higher card with enough backing length suffices; every backing card need not be higher. This defender does not stop the opposite-hand threat. The relevant primary card can be higher than the low card assigned as the capital's companion: labeling it `i` does not remove its rank from consideration.
 
-#### Spec
-`a`/`b`/`c` describe stopper responsibility; `o`/`u` describe residual opponent-card presence.
+`A'` and `B'` shorten the **designated threat stopper** by one card; the other defender retains full length. The apostrophe does not change threat ownership or stopper direction. `C` is unchanged.
 
-#### Worked example (clarifying uppercase stopper side)
-Given:
+`A*` and `B*` retain the designated stopper's full length but say the **secondary defender does not stop** the relevant primary card. They bind no secondary-defender cards. Any such cards must come from explicit `o/u` or automatic idle completion. Non-stopping can result from inadequate length or inadequate rank: after a winner, a singleton 8, 9, or T cannot stop a remaining 7. Combining `*` and `'` on the same capital is not allowed yet.
+
+#### Worked examples
+
+North-primary standard bindings (spades only, before idle completion):
 
 ```text
-WB =
+           WA =                       WA' =
+           North                      North
+           ♠ A 3                      ♠ A 3
+
+West                 East  West                 East
+♠ T 9                ♠ K Q ♠ J T                ♠ K
+
+           South                      South
+           ♠ J 2                      ♠ Q 2
 ```
 
-Interpretation:
-- suit is North-primary (left side under current `[ns]` orientation),
-- `W` binds primary winner + opposite low,
-- `B` places the threat in opposite hand with primary low companion,
-- stopper side for `B` is **outbound opponent relative to primary**.
+`WB` and `WB'` exchange East and West in these examples. The standard rank allocator uses consecutive available ranks, so shortening the stopper promotes the threat from J to Q; the relevant rank relationships remain the same.
 
-Under North-primary, outbound is East, so East receives the stopper holding.
+`wA/wA'` have the same defender obligations, but `w` supplies no low companion in the opposite hand. Idle completion may subsequently add one for an unprimed suit.
 
-Example standard-bound shape:
-- `N: ♠A3`
-- `S: ♠J2`
-- `E: ♠KQ`  (stoppers for `B`)
-- `W: ...` (non-stopper remainder / idle fill)
-
-This example is included because readers often assume uppercase stopper assignment is relative to threat owner; current spec defines it relative to primary orientation.
+`o/u` remain residual-card directives relative to the **primary hand**. For example, in `WLau, WAuu > b, Wo -1`, `A` supplies West's two companion-stopping cards and `uu` adds two cards to East. The problem has six-card hands and a five-trick goal.
 
 ### 6.3 Idle/structural NS card
 
@@ -286,9 +285,11 @@ means one fewer than all remaining tricks.
 ### 7.2 No-idle suit marker (`'`)
 
 #### Spec
-Apostrophe `'` on a suit string disables **idle-fill insertion** into that suit.
+A trailing apostrophe on a suit string disables **idle-fill insertion** into that suit, except when it forms one of the compound tokens `A'`, `B'`, `g'`, or `G'`. Lowercase `a'` and `b'` keep the ordinary suit-level meaning.
 
 It does **not** block structurally required cards in that suit.
+
+The compound tokens also prevent automatic idle filling throughout their suit, to preserve the shortened defender holding. Explicitly authored residual cards remain allowed. A compound token may appear before more tokens, as in `WA'uu`; a separate final apostrophe can still mark the suit, as in `WA''`.
 
 Example:
 
@@ -296,6 +297,10 @@ Example:
 b'
 WLa'
 ```
+
+### 7.3 Secondary non-stopping marker (`*`)
+
+`*` is a token suffix only for `A/B`, as in `WA*im`. It is not a suit-level no-idle marker. `A'*`, `A*'`, `B'*`, and `B*'` are rejected; richer combinations remain undefined. Ordinary no-idle markers on later tokens retain their meaning, as in `WA*o'`.
 
 ### Current implementation note
 `0` is currently parsed as empty suit with idle-fill disallowed for that slot.
@@ -310,7 +315,7 @@ Standard binding converts parsed encapsulation into concrete four-hand cards det
 High-level order:
 
 1. assign suit slots from header/default order,
-2. bind winner/link structure (`w/W/l/L`),
+2. bind winner/link structure (`w/W/L`),
 3. bind threats (`a/b/c/A/B/C`) using winner-count-based backing requirements,
 4. apply tier-2 opponent residuals (`o/u`, right-to-left within suit),
 5. determine final hand size,
@@ -329,15 +334,20 @@ Each suit has independent rank pools:
 ### 8.2 Winner count and threat backing
 
 #### Spec
-Let winner count in a suit be count of already-bound winner/link letters (`w/W/l/L`) that contribute backing before a threat.
+Let winner count in a suit be count of already-bound winner/link letters (`w/W/L`) that contribute backing before a threat.
 
 Threat stopper length requirement = `winnerCount + 1`.
 
-- `a` / `A`: return opponent receives required stopper length
-- `b` / `B`: outbound opponent receives required stopper length
-- `c` / `C`: both opponents each receive required stopper length
+- `a` / `A`: the threat owner's return opponent receives required stopper length.
+- `b` / `B`: the threat owner's outbound opponent receives required stopper length.
+- `c` / `C`: both opponents each receive required stopper length.
+- `A'` / `B'`: the designated stopper receives `winnerCount` cards (one fewer).
 
-Stoppers must be strictly higher than the threat card.
+Standard binding assigns the designated stopper's cards strictly above the threat. For `A/B/A'/B'`, it then assigns the other defender `winnerCount + 1` cards below the threat and above the primary companion. These are structural cards, not idle residuals.
+
+For `A*/B*`, the designated stopper keeps full length and the secondary defender receives no structural cards. Bind the primary companion immediately below the threat in the high-rank pool, reserving the lower ranks for remaining cards. For example, `WA*` structurally gives North A-T, South J-2, East K-Q, and West no cards. Explicit or automatically filled secondary cards can then occupy lower ranks without creating a stop. A fixed companion rank such as 7 is not required. Unlike primed tokens, a star does not prohibit idle filling in its suit.
+
+With no preceding links, a primed designated stopper receives zero cards. Such a degenerate binding cannot preserve the direction encoded by `A'/B'` on inversion; the notation introduces no additional winner backing requirement.
 
 ### 8.3 `W/L` structural pairing
 
@@ -370,10 +380,14 @@ Idle-fill must not add cards into suit slots marked `'`.
 ### 8.7 Final hand size
 
 #### Spec
-Final hand size is computed after structural binding and used for:
+The target hand size is the larger of the specified North and South card counts. Defender guard requirements and explicit `o/u` cards do not increase it. This target is used for:
 
 - idle fill target
 - default goal (before goal offset)
+
+For each hand, `idleCardsNeededByHand = target - preCompletionTotals`. This count is signed: a negative value reports more structurally bound cards than the target permits. Keep those cards for inspection; do not trim them or enlarge other hands to hide the excess. Only hands below the target receive idle fill.
+
+For example, `Wf > wLF` has a four-card target, but the current structural binder gives West five cards. Report West's idle requirement as `-1`. The result is a diagnostic binding with unequal hand sizes, not a completed playable deal. `finalHandSize` in binding metadata denotes the target even in this case.
 
 ### Current implementation note
 Idle-fill priorities are deterministic in current code but still considered implementation policy, not fully frozen normative policy.
@@ -420,7 +434,7 @@ Single-suit inversion should follow a winner-first / structural-low-first outlin
 
 1. identify probable winners,
 2. prune winner set appropriately,
-3. bind `w/W/l/L`,
+3. bind `w/W/L`,
 4. lock structural lows implied by `W/L`,
 5. only remaining unbound NS cards are threat candidates,
 6. bind threat symbols (`a/b/c/...`) from stopper/backing behavior,
@@ -430,6 +444,26 @@ Ambiguity should be surfaced, not silently hidden.
 
 #### Spec
 Cards bound as structural lows for `W/L` must not be reinterpreted as threats.
+
+### Current implementation note: capital threat coverage
+
+Inversion consumes both defender roles for unstarred `A/B`, rather than emitting the secondary's cards as `o/u`. It recognizes `A'/B'` when the designated stopper has exactly one fewer card, still has a higher card than the threat, and the secondary has full coverage. It preserves an opposite threat during winner/low pairing when the remaining cards fit this structure.
+
+Secondary coverage requires sufficient length and at least one card above the **highest unbound primary card after the links**, not merely above the lowest card used as the capital's companion. If the designated stopper has full length but secondary coverage is absent, emit `A*/B*` and leave all secondary cards as explicit `o/u` residuals. Never emit combined prime/star modifiers.
+
+The five reviewed catalog suits now invert as follows:
+
+| Problem suit | Primary | Encapsulation |
+| --- | --- | --- |
+| `double_dummy_01:C` | South | `WB*imuuuuu` |
+| `ruff_or_sluff_03:C` | North | `WLA*oouu` |
+| `ruff_or_sluff_10:D` | North | `WA*imouuuu` |
+| `ruff_or_sluff_11:D` | North | `A*iu` |
+| `for_barry_full_deal:S` | South | `WB*imooouu` |
+
+These are regression-tested through binding and inversion. All non-draft catalog suits must again invert without unresolved placeholders.
+
+Notation such as `{b/A}` for independent opposite-hand structures remains future work; it is not accepted by the parser.
 
 ### 10.2 `threatCardIds` tie-break
 
@@ -556,8 +590,9 @@ Example of mixed winner/link/threat/residual structure in fixed slot order.
    - Winner-first outline is specified, but full language-neutral algorithm remains incomplete.
    - Current code still includes targeted regression refinements.
 
-2. **`l` semantics stability**
-   - Supported, but less central and less tested than `W/L`.
+2. **Undefined lowercase `l`**
+   - No meaning is assigned. Existing parser, binder, and inversion handling is legacy behavior, not an authoritative definition.
+   - Reconcile these code paths with the undefined status before treating `l` as supported notation.
 
 3. **Uppercase threat inversion canonicalization**
    - Binding is supported; inversion canonical choice remains under-specified.

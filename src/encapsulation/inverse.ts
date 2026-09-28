@@ -307,9 +307,13 @@ function simulatePattern(pattern: string, primary: 'N' | 'S', residualOpposite =
       add(opposite, nextLow());
       continue;
     }
-    let gPrime = false;
-    if ((token === 'g' || token === 'G') && pattern[index + 1] === "'") {
-      gPrime = true;
+    let primed = false;
+    let starred = false;
+    if (['g', 'G', 'A', 'B'].includes(token) && pattern[index + 1] === "'") {
+      primed = true;
+      index += 1;
+    } else if ((token === 'A' || token === 'B') && pattern[index + 1] === '*') {
+      starred = true;
       index += 1;
     }
     const lower = token.toLowerCase();
@@ -317,12 +321,12 @@ function simulatePattern(pattern: string, primary: 'N' | 'S', residualOpposite =
       const isUpper = token === token.toUpperCase();
       const owner: 'N' | 'S' = isUpper ? opposite : primary;
       const stopperSize = linksSeen + 1;
-      if (isUpper) add(primary, nextLow());
+      if (isUpper && !starred) add(primary, nextLow());
       if (lower === 'f' || lower === 'g') {
         const ret = returnStopper(owner);
         const out = outgoingStopper(owner);
         let outNeed = 0;
-        if (lower === 'g') outNeed = gPrime ? Math.max(0, stopperSize - 1) : stopperSize;
+        if (lower === 'g') outNeed = primed ? Math.max(0, stopperSize - 1) : stopperSize;
 
         // Keep simulation sequencing aligned with binder:
         // ret stop1, out stop1 (for g/g'), owner threat, then remaining low stop fillers.
@@ -335,7 +339,17 @@ function simulatePattern(pattern: string, primary: 'N' | 'S', residualOpposite =
       } else {
         const stoppers = stopperSeatsForToken(owner, primary, lower, isUpper);
         if (stoppers.length === 1) {
-          for (let i = 0; i < stopperSize; i += 1) add(stoppers[0], nextHigh());
+          for (let i = 0; i < stopperSize - (primed ? 1 : 0); i += 1) add(stoppers[0], nextHigh());
+          if (isUpper) {
+            add(owner, nextHigh());
+            if (starred) {
+              add(primary, nextHigh());
+              continue;
+            }
+            const otherDefender = stoppers[0] === 'E' ? 'W' : 'E';
+            for (let i = 0; i < stopperSize; i += 1) add(otherDefender, nextHigh());
+            continue;
+          }
         } else {
           for (let i = 0; i < stopperSize * 2; i += 1) add(stoppers[i % 2], nextHigh());
         }
@@ -439,11 +453,11 @@ function generateCandidatesForPrimary(ranks: SeatRanks, primary: 'N' | 'S'): Arr
 function canonicalForm(candidate: string): string {
   const count = (re: RegExp): number => (candidate.match(re) ?? []).length;
   return `${'W'.repeat(count(/W/g))}${'w'.repeat(count(/w/g))}${'L'.repeat(count(/L/g))}${'l'.repeat(count(/l/g))}${'A'.repeat(
-    count(/A/g)
-  )}${'B'.repeat(count(/B/g))}${'C'.repeat(count(/C/g))}${'F'.repeat(count(/F/g))}${'G'.repeat(count(/G/g))}${"G'".repeat(
+    count(/A(?!['*])/g)
+  )}${"A'".repeat(count(/A'/g))}${'A*'.repeat(count(/A\*/g))}${'B'.repeat(count(/B(?!['*])/g))}${"B'".repeat(count(/B'/g))}${'B*'.repeat(count(/B\*/g))}${'C'.repeat(count(/C/g))}${'F'.repeat(count(/F/g))}${'G'.repeat(count(/G(?!')/g))}${"G'".repeat(
     count(/G'/g)
   )}${'a'.repeat(count(/a/g))}${'b'.repeat(count(/b/g))}${'c'.repeat(count(/c/g))}${'f'.repeat(count(/f/g))}${'g'.repeat(
-    count(/g/g)
+    count(/g(?!')/g)
   )}${"g'".repeat(count(/g'/g))}${'i'.repeat(count(/i/g))}${'m'.repeat(count(/m/g))}${'o'.repeat(count(/o/g))}${'u'.repeat(
     count(/u/g)
   )}`;
@@ -592,6 +606,37 @@ function defenderStops(
   return unbound.some((rank) => rankIdx(rank) < rankIdx(threatRank));
 }
 
+// Recognize the two defender roles of an opposite-hand A/B threat.
+function oppositeGuardShape(
+  ranks: SeatRanks,
+  bound: Set<string>,
+  owner: 'N' | 'S',
+  threatRank: string,
+  primaryRoundRank: string,
+  stopperSize: number
+): { symbol: 'A' | 'B'; primed: boolean; starred: boolean; stopper: 'E' | 'W'; other: 'E' | 'W'; companionStops: string[] } | null {
+  if (rankIdx(primaryRoundRank) <= rankIdx(threatRank)) return null;
+  for (const symbol of ['A', 'B'] as const) {
+    const stopper = symbol === 'A' ? returnStopper(owner) : outgoingStopper(owner);
+    const other = stopper === 'E' ? 'W' : 'E';
+    const stopperCards = ranks[stopper].filter((rank) => !bound.has(cardKey(stopper, rank)));
+    const otherCards = ranks[other].filter((rank) => !bound.has(cardKey(other, rank)));
+    if (!stopperCards.some((rank) => rankIdx(rank) < rankIdx(threatRank))) continue;
+    // Check the primary's highest remaining card after the links, not the
+    // lowest card chosen to label the capital's companion. Residual i cards
+    // can still be higher than that companion and affect stopping power.
+    const secondaryStops = otherCards.length >= stopperSize &&
+      otherCards.some((rank) => rankIdx(rank) < rankIdx(primaryRoundRank));
+    if (otherCards.length >= stopperSize && otherCards.some((rank) => rankIdx(rank) < rankIdx(threatRank))) continue;
+    const primed = stopperCards.length === stopperSize - 1;
+    if (!primed && stopperCards.length < stopperSize) continue;
+    const starred = !secondaryStops;
+    if (primed && starred) continue; // Combined modifiers are not defined yet.
+    return { symbol, primed, starred, stopper, other, companionStops: starred ? [] : otherCards.slice(0, stopperSize) };
+  }
+  return null;
+}
+
 function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): ProceduralCandidate | null {
   const opposite: 'N' | 'S' = primary === 'N' ? 'S' : 'N';
   const overSeat: 'E' | 'W' = primary === 'N' ? 'W' : 'E';
@@ -611,7 +656,11 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
   let gCount = 0;
   let gPrimeCount = 0;
   let ACount = 0;
+  let APrimeCount = 0;
+  let AStarCount = 0;
   let BCount = 0;
+  let BPrimeCount = 0;
+  let BStarCount = 0;
   let CCount = 0;
   let FCount = 0;
   let GCount = 0;
@@ -653,7 +702,16 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
         .filter((next) => next.seat === opposite && !bound.has(cardKey(next.seat, next.rank)))
         .map((next) => cardKey(next.seat, next.rank));
       const lowOpp = lowestUnboundFromSeat(opposite, ranks, bound);
-      if (lowOpp && !pendingOppositeWinnerKeys.includes(cardKey(opposite, lowOpp))) {
+      const primaryRoundRank = ranks[primary].find((rank) => rank !== card.rank && !bound.has(cardKey(primary, rank)));
+      // A lone opposite threat must not be consumed as this winner's low when
+      // the remaining cards explicitly fit A/B (including the primed forms).
+      const oppositeShape = lowOpp && primaryRoundRank ? oppositeGuardShape(
+        ranks, bound, opposite, lowOpp, primaryRoundRank, linksSeen + 1
+      ) : null;
+      const preserveOppositeThreat = oppositeShape && ranks[oppositeShape.stopper]
+        .filter((rank) => !bound.has(cardKey(oppositeShape.stopper, rank)))
+        .every((rank) => rankIdx(rank) < rankIdx(lowOpp!));
+      if (lowOpp && !pendingOppositeWinnerKeys.includes(cardKey(opposite, lowOpp)) && !preserveOppositeThreat) {
         WCount += 1;
         linkTokenSequence.push('W');
         bindCard(card.seat, card.rank, `W${WCount}`);
@@ -848,25 +906,35 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
         break;
       }
 
-      const stopsBySeat: Record<'E' | 'W', boolean> = {
-        [overSeat]: overStops,
-        [underSeat]: underStops
-      };
-      ownerOverSeat = threatSeat === 'N' ? 'W' : 'E';
-      ownerUnderSeat = threatSeat === 'N' ? 'E' : 'W';
-      ownerOverStops = stopsBySeat[ownerOverSeat];
-      ownerUnderStops = stopsBySeat[ownerUnderSeat];
+      ownerOverSeat = retSeat;
+      ownerUnderSeat = outSeat;
+      ownerOverStops = retStops;
+      ownerUnderStops = outStops;
 
+      const lowPrimary = lowestUnboundFromSeat(primary, ranks, bound);
+      const primaryRoundRank = ranks[primary].find((rank) => !bound.has(cardKey(primary, rank)));
+      const shape = primaryRoundRank ? oppositeGuardShape(ranks, bound, owner, threatRank, primaryRoundRank, stopperSize) : null;
       let upperLabel = '';
       if (ownerOverStops && ownerUnderStops) {
         CCount += 1;
         upperLabel = `C${CCount}`;
-      } else if (ownerOverStops) {
-        ACount += 1;
-        upperLabel = `A${ACount}`;
-      } else if (ownerUnderStops) {
-        BCount += 1;
-        upperLabel = `B${BCount}`;
+      } else if (shape && lowPrimary) {
+        // A/B also describe the other defender's full-length coverage of the
+        // primary companion. A prime shortens only the designated stopper.
+        const { symbol, primed, starred, stopper, other, companionStops } = shape;
+        let label: string;
+        if (symbol === 'A') label = primed ? `A'${++APrimeCount}` : starred ? `A*${++AStarCount}` : `A${++ACount}`;
+        else label = primed ? `B'${++BPrimeCount}` : starred ? `B*${++BStarCount}` : `B${++BCount}`;
+        bindCard(threatSeat, threatRank, label);
+        bindCard(primary, lowPrimary, `${label}-low`);
+        addStopperLabels(stopper, stopperSize - (primed ? 1 : 0), label);
+        for (const [index, rank] of companionStops.entries()) {
+          bindCard(other, rank, `${label}-companionStop${index + 1}`);
+        }
+        break;
+      } else if (ownerOverStops || ownerUnderStops) {
+        // Do not silently claim A/B for a holding their binding cannot express.
+        return null;
       } else {
         // Unstoppable opposite-side candidate is effectively an additional link.
         if (linksSeen < n) {
@@ -908,10 +976,6 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
         if (ownerOverStops && ownerUnderStops) {
           if (ownerOverSeat) addStopperLabels(ownerOverSeat, stopperSize, `C${CCount}`);
           if (ownerUnderSeat) addStopperLabels(ownerUnderSeat, stopperSize, `C${CCount}`);
-        } else if (ownerOverStops) {
-          if (ownerOverSeat) addStopperLabels(ownerOverSeat, stopperSize, `A${ACount}`);
-        } else if (ownerUnderStops) {
-          if (ownerUnderSeat) addStopperLabels(ownerUnderSeat, stopperSize, `B${BCount}`);
         }
       }
       break;
@@ -960,7 +1024,7 @@ function deriveProceduralCandidate(ranks: SeatRanks, primary: 'N' | 'S'): Proced
 
   const text = `${linkTokenSequence.join('')}${'A'.repeat(
     ACount
-  )}${'B'.repeat(BCount)}${'C'.repeat(CCount)}${'F'.repeat(FCount)}${'G'.repeat(GCount)}${"G'".repeat(
+  )}${"A'".repeat(APrimeCount)}${'A*'.repeat(AStarCount)}${'B'.repeat(BCount)}${"B'".repeat(BPrimeCount)}${'B*'.repeat(BStarCount)}${'C'.repeat(CCount)}${'F'.repeat(FCount)}${'G'.repeat(GCount)}${"G'".repeat(
     GPrimeCount
   )}${'a'.repeat(aCount)}${'b'.repeat(bCount)}${'c'.repeat(cCount)}${'f'.repeat(fCount)}${'g'.repeat(gCount)}${"g'".repeat(
     gPrimeCount

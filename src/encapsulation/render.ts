@@ -13,6 +13,9 @@ export function renderDiagram(binding: BoundEncapsulation): string {
     `Encapsulation: ${binding.parsed.source}`,
     `Lead: ${binding.lead}`,
     `HandSize: ${binding.metadata.finalHandSize}`,
+    ...(Object.values(binding.metadata.idleCardsNeededByHand).some((count) => count < 0)
+      ? [`Idle cards needed: ${(['N', 'E', 'S', 'W'] as const).map((seat) => `${seat}=${binding.metadata.idleCardsNeededByHand[seat]}`).join(' ')}`]
+      : []),
     handLine(binding.hands, 'N'),
     handLine(binding.hands, 'E'),
     handLine(binding.hands, 'S'),

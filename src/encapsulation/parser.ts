@@ -47,6 +47,9 @@ function extractGoalOffset(part: string): { suitsPart: string; goalOffset: numbe
 function parseSuitPattern(rawPattern: string): { pattern: string; allowIdleFill: boolean } {
   const trimmed = rawPattern.trim();
   if (!trimmed) throw new Error('Empty suit pattern is not allowed');
+  if (/[AB](?:'\*|\*')/.test(trimmed)) {
+    throw new Error("A/B cannot combine '*' with an apostrophe");
+  }
   if (trimmed === '0') {
     return { pattern: '', allowIdleFill: false };
   }
@@ -59,8 +62,8 @@ function parseSuitPattern(rawPattern: string): { pattern: string; allowIdleFill:
       continue;
     }
     const prev = i > 0 ? trimmed[i - 1] : '';
-    // g' / G' token suffix
-    if (prev === 'g' || prev === 'G') {
+    // Compound threat token suffix, distinct from suit-level no-idle.
+    if (prev === 'g' || prev === 'G' || prev === 'A' || prev === 'B') {
       pattern += ch;
       continue;
     }
@@ -98,9 +101,13 @@ function extractHeader(source: string): { body: string; suitOrder: Suit[]; expli
 function assertTokens(pattern: string): void {
   for (let i = 0; i < pattern.length; i += 1) {
     const ch = pattern[i] as string;
+    if (ch === '*') {
+      if (pattern[i - 1] === 'A' || pattern[i - 1] === 'B') continue;
+      throw new Error("The '*' suffix is only supported on A/B");
+    }
     if (ch === "'") {
       const prev = i > 0 ? pattern[i - 1] : '';
-      if (prev === 'g' || prev === 'G') continue;
+      if (prev === 'g' || prev === 'G' || prev === 'A' || prev === 'B') continue;
       throw new Error(`Invalid token '${ch}' in suit pattern '${pattern}'`);
     }
     if (!VALID_TOKENS.has(ch as EncapsulationToken)) {
