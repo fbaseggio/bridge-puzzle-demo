@@ -1,22 +1,23 @@
 {
-  "sourceBaseCommit": "56e5026",
-  "liveBaseCommit": "8e2e1575a174b56e976036305199d34e820b3c4a",
+  "sourceBaseCommit": "56e502629fd1a8f29faa644f385a47293169e848",
+  "liveBaseCommit": "34e609464755e87668d450d6237bd162cd3add22",
   "builtAt": "2026-10-02",
+  "feature": "LIN/PBN and embedded-card link import",
   "buildCommand": "vite build --config consumers/movie/vite.config.ts --base /movie/",
   "delivery": "Standalone Movie build copied into public/movie; existing GitHub Pages workflow copies public assets into the production site.",
   "files": {
-    "assets/articleScriptRuntime-Db8g0956.js": "c84e4920076a4c738582a82a7ab6c7f958578c2da9154a5097754c1aef2e2ee1",
-    "assets/engine-DOoPJPY8.js": "c803e61b2a3ac14ec178ee0496e631d81923202ea11780dd60c080d82b720d34",
-    "assets/main-CJWlv_Bz.js": "38e63b5a01eb94de2559e4d5de1269e1f754d3fb5f98cfac9d89f489b69c14cf",
+    "assets/articleScriptRuntime-CtZVsHqU.js": "5a7d020e06de1aa21bb3df6b7631d605895b1ff5b0c605950a0d0a3d0c49a009",
+    "assets/engine-V58Gowr5.js": "eeeb2a6dc20ee94544ff4e2b9b24cd710118099afadc209c6e0e48091d2d3ad7",
+    "assets/main-BcFqC1tE.js": "6ea585865aa53d6d00e178cefa9a06d46dab9c759d3da84ac27a640d1e513b84",
     "assets/main-Dcw7Z2pl.css": "11cf5f96e728b971da4fdaa17077fe59892fe4394ee128c4f00227f8dcfac3f8",
-    "assets/movie-Bxwj-88m.js": "b0e2a78aecb80d7895d1c600a0954308409f08c8902b28bdcaa0de5107b7aeb8",
+    "assets/movie-DbEF2ump.js": "bb27f32bb24a4f1d233afb507282fb38c2e03cff47fd5bd0d8790c2c6944beca",
     "assets/movie-DkDMkw3V.css": "5aafd51f83a49d0c4d96a45d7f60bfdaf94d24f2b1b7d9ab2d0a8d36639d6c1a",
-    "assets/playback-BhEa-vDY.js": "611351d57c2ec21c6834f7b82c4b482824d1f253bc56af3d9d73dee289789869",
-    "assets/widget-DLhX_xCT.js": "8e13fa7666ac0e3fe38863b516569c038caa0cd64318665f330c1ea94d96e330",
+    "assets/playback-B7-ifvwU.js": "817fe6fb4bc4f1a55e4625297d6152c985e217bc5f65d45724fae084fdeb8483",
+    "assets/widget-CV0R8Sao.js": "327d2c026594c91880b4b297ec522b48335f438dc8d83329a761b3344c712c40",
     "dds/README.md": "b365ed3a20c09665dd6f7c28b0dc912a75bf73efbbb439749082809a9b001080",
     "dds/dds.js": "7be0ef4ab6be13c388113f9db19333d1af682f2d6e989e6c2d692591623e774e",
     "dds/out.js": "092901270107e44a531e6b7e01256f26bfe51f919e1c58dceb9d2d5ec76d97f7",
-    "index.html": "93372919490bc6bfca1d583747a3d46c44dd2b9ed1b119b594b43f96dcb08634",
-    "widget.html": "72380b1d5fb218b424c837d9685b6c8e4aac186ade39b0ac1065f5d737aaa7c0"
+    "index.html": "07db8cd075e9615e28b770b2140255248cfa0723bd2c18c15c0574bae25df0fb",
+    "widget.html": "d26ca9ba353f6b200f70abca079293fde2b91eb86236152bb5b2f38cdb3e641c"
   }
 }
