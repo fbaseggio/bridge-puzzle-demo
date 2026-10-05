@@ -1,0 +1,19 @@
+/* Shared footer and supporting pages; all selectors stay scoped. */
+.ds-site-footer { box-sizing: border-box; max-width: 1040px; margin: 40px auto 0; padding: 22px 24px 30px; border-top: 1px solid #cdd6d0; color: #52665d; font: 14px/1.6 system-ui, sans-serif; }
+.ds-site-footer nav { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0 0 10px; }
+.ds-site-footer a { color: #285f4d; text-decoration: underline; text-underline-offset: 3px; }
+.ds-site-footer a:focus-visible, .ds-info a:focus-visible { outline: 3px solid #7d9f8e; outline-offset: 4px; }
+.ds-site-footer p { margin: 0; max-width: none; font: inherit; text-align: left; }
+.ds-info { margin: 0; color: #253d36; background: #f6f5ef; font: 17px/1.7 system-ui, sans-serif; }
+.ds-info * { box-sizing: border-box; }
+.ds-info header, .ds-info main { max-width: 760px; margin: auto; padding: 28px 24px; }
+.ds-info header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
+.ds-info header nav { display: flex; flex-wrap: wrap; gap: 18px; font-size: 15px; }
+.ds-info a { color: #236a55; text-underline-offset: 3px; }
+.ds-info .ds-brand { color: #253d36; font-size: 21px; font-weight: 750; text-decoration: none; }
+.ds-info h1 { font: 500 clamp(36px, 6vw, 52px)/1.2 Georgia, serif; margin: 10px 0 28px; }
+.ds-info h2 { font-size: 21px; line-height: 1.4; margin-top: 30px; }
+.ds-info p { margin: 0 0 20px; }
+.ds-info .ds-updated { color: #617268; font-size: 14px; margin-top: 30px; }
+.ds-info .ds-site-footer { max-width: 760px; }
+@media (max-width: 500px) { .ds-site-footer { margin-top: 24px; padding: 20px 18px; } .ds-info header, .ds-info main { padding: 22px 18px; } }
