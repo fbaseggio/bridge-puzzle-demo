@@ -13,4 +13,11 @@
     if (link.getAttribute('href') === location.pathname) link.setAttribute('aria-current', 'page');
   }
   document.body.append(footer);
+  const pavIndexLinks = document.querySelectorAll('[data-pav-index]');
+  if (pavIndexLinks.length) fetch('/site/features.json').then(response => {
+    if (!response.ok) throw Error('Feature configuration unavailable');
+    return response.json();
+  }).then(features => {
+    for (const element of pavIndexLinks) element.hidden = features.pavIndex !== true;
+  }).catch(() => { /* Index links remain hidden when configuration is unavailable. */ });
 })();
