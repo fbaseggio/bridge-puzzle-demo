@@ -1,1 +1,0 @@
-const U={UU:"Simple squeeze",UUU:"Triple squeeze","U~UU":"Progressive squeeze",U2UU:"Progressive squeeze","U²UU":"Progressive squeeze",UVW:"Double squeeze",UWW:"Compound squeeze",UVWW:"Saturated squeeze"};function u(e){const s=U[e];return s?`${e} — ${s}`:e}export{u as g};
