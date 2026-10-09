@@ -1,0 +1,20 @@
+.post-squeezes header,.post-squeezes main,.post-squeezes .ds-site-footer{max-width:1180px}
+.post-squeezes main{padding-top:12px}.intro{max-width:760px}.intro p{font-size:17px;line-height:1.7}
+.post-squeezes .eyebrow{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:#68766c;margin-bottom:14px}
+.post-squeezes h1{margin-bottom:24px}.post-squeezes code{font:500 .94em ui-monospace,SFMono-Regular,Consolas,monospace}
+.collection-summary{border-top:1px solid #ccd5ce;border-bottom:1px solid #ccd5ce;padding:13px 0;margin:32px 0 34px;font-size:14px;color:#52665d}.collection-summary span{padding:0 12px}
+.family{margin:0 0 38px;scroll-margin-top:24px}.post-squeezes .family h2{display:flex;align-items:center;gap:13px;margin:0 0 15px;font-size:19px}
+.family-number{display:inline-grid;place-items:center;min-width:32px;height:32px;border-radius:50%;background:#dde7dd;color:#285440;font:600 15px system-ui,sans-serif}
+.deals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start}
+.deal{margin:0;padding:15px 15px 12px;background:#fffef9;border:1px solid #d9ded5;border-radius:7px;min-width:0}
+.deal figcaption{min-height:52px}.caption-label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:#6d796f;margin-bottom:4px}
+.deal figcaption code{display:block;font-size:13px;white-space:normal;line-height:1.5}
+.diagram{display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:auto auto auto;gap:6px 1px;margin:10px 0 15px;line-height:1.15}
+.hand{min-width:0}.hand-n{grid-column:2/4;grid-row:1}.hand-w{grid-column:1/3;grid-row:2;width:50%}.hand-e{grid-column:3;grid-row:2}.hand-s{grid-column:2/4;grid-row:3}
+.seat{font:600 10px/1.4 system-ui,sans-serif;color:#6a786f;letter-spacing:.02em;margin:0 0 2px}
+.holding{display:flex;gap:5px;min-height:19px;white-space:nowrap;font:16px/1.2 Georgia,'Times New Roman',serif}
+.suit{width:12px;flex:none}.suit-h,.suit-d{color:#a24741}.suit-s,.suit-c{color:#223b39}.ranks{color:#203b33}
+.table-center{grid-column:2;grid-row:2;align-self:center;text-align:center;font:10px/1.6 system-ui,sans-serif;color:#6a786f}.table-center strong{font-size:10px;color:#3d574a;font-weight:600;white-space:nowrap}
+.deal-bottom{display:flex;gap:8px;justify-content:space-between;align-items:center;border-top:1px solid #e7e9e1;padding-top:9px;font-size:11px;line-height:1.5}.deal-bottom span{color:#758074;font-size:10px}.deal-bottom a{white-space:nowrap}
+@media(max-width:1000px){.deals{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.deals{grid-template-columns:minmax(0,1fr)}.deal{max-width:420px;width:100%;margin:auto}.family{margin-bottom:32px}.collection-summary{font-size:12px}.collection-summary span{padding:0 5px}.post-squeezes .family h2{font-size:16px}.diagram{max-width:310px;margin-left:auto;margin-right:auto}.holding{font-size:18px;min-height:22px}}

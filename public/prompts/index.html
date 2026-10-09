@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prompts · DeepSqueeze</title>
+<link rel="stylesheet" href="/site/site.css">
+<link rel="stylesheet" href="/prompts/prompts.css">
+<script defer src="/site/footer.js"></script>
+<script defer src="/prompts/prompts.js"></script>
+</head><body class="ds-info">
+<header><a class="ds-brand" href="/">DeepSqueeze</a><nav aria-label="Explore"><a href="/movie/">Movie</a><a href="/catalog/">Catalog</a></nav></header>
+<main><h1>Prompts</h1>
+<section aria-labelledby="photo-title">
+<h2 id="photo-title">Photo to hand diagram</h2>
+<p>Turn a photo or screenshot of four bridge hands into an interactive DeepSqueeze Movie. Use an AI assistant you already have access to.</p>
+<ol class="prompt-steps">
+<li>Choose a website below. ChatGPT opens with the prompt filled in; for Gemini, paste the copied prompt.</li>
+<li>Attach your photo there, then send the prompt. You’ll get a best-effort link, with any uncertainty noted.</li>
+<li>Open the returned Movie link and check the hands. The diagram’s pencil lets you correct them.</li>
+</ol>
+<div class="prompt-actions" aria-label="Choose an assistant">
+<a id="chatgpt" class="prompt-action primary" href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer">Open ChatGPT ↗</a>
+<a id="gemini" class="prompt-action" href="https://gemini.google.com/app" target="_blank" rel="noopener noreferrer">Copy &amp; open Gemini ↗</a>
+<button id="copy-prompt" type="button" class="prompt-action">Copy prompt</button>
+</div>
+<p class="prompt-help">Using another assistant? Copy the prompt and paste it there with your photo. Links open a new tab; you may need to sign in.</p>
+<p id="copy-status" class="prompt-status" role="status" aria-live="polite"></p>
+<details id="prompt-details"><summary>View or edit the prompt</summary>
+<label for="photo-prompt">Photo to Movie prompt</label>
+<textarea id="photo-prompt" rows="17" spellcheck="false">Read the bridge hand diagram in the photo I attach and create a clickable DeepSqueeze Movie link. If I have not attached a photo yet, ask for it and wait.
+
+Transcribe the four hands exactly. Identify North, South, East and West from the labels or compass layout. Show the recognized hands in a compact four-hand diagram, plus each hand's card count. Use T for ten. Do not solve the deal or invent an encapsulation.
+
+Always provide a usable best-effort Movie link after seeing the photo, even when some information is uncertain. Do not withhold the link while asking questions. Use the most likely reading for unclear ranks, suits or seats, and list each uncertainty after the link. Keep confidently read cards unchanged. If a hand or holding is wholly unreadable, use provisional cards only as needed to make the link load, and explicitly identify those substitutions as placeholders, not recovered cards. Distinguish an unreadable holding from a known void. I can correct the diagram with Movie's pencil or refine it with you in another turn.
+
+Check for duplicate cards and more than 13 cards per hand, resolving uncertain readings first and describing any corrections. Movie needs 1 to 13 cards in every hand. Endings may have unequal hand sizes; do not pad them just to make counts match. If a partial trick is pictured, use the cards still held as an editable starting position, omit table cards from the hands, and explain that the in-progress trick is not represented.
+
+Build the link using this exact format:
+https://deepsqueeze.ai/movie/?nsew=NORTH;SOUTH;EAST;WEST
+Replace each hand with four comma-separated holdings in SPADES,HEARTS,DIAMONDS,CLUBS order. Use ranks AKQJT98765432, highest first, and - for a void. No spaces or suit symbols in the URL. Crucially, the hand order is N/S/E/W, not N/E/S/W. Keep commas and semicolons readable.
+
+Example of the FORMAT ONLY (do not substitute these cards for my photo):
+North: S AJ, H K, D -, C -
+South: S 2, H 2, D A, C -
+East: S T, H Q, D K, C -
+West: S KQ, H A, D -, C -
+https://deepsqueeze.ai/movie/?nsew=AJ,K,-,-;2,2,A,-;T,Q,K,-;KQ,A,-,-
+
+Settings:
+- Append &amp;lead=N, S, E or W when the starting leader is known, and &amp;trumps=NT, S, H, D or C when the strain is known. Otherwise omit the setting and say that Movie defaults to West leading for four 13-card hands, South for an ending, and notrump.
+- For four 13-card hands with a stated contract AND declarer, use &amp;a=-LEVELSTRAINDECLARER, with strain n/s/h/d/c and declarer n/e/s/w. Example: &amp;a=-4hs means 4 hearts by South, with West leading; &amp;a=-3ne means 3NT by East, with South leading. This setting overrides lead and trumps. If a separately specified non-opening leader conflicts, preserve that leader with lead/trumps, omit a, and explain that the original contract was not encoded. Doubling and vulnerability are not represented.
+- For an ending (at least one hand has fewer than 13 cards), if the stated objective is N/S taking a specific number of the remaining tricks, use &amp;a=-GOALSTRAINLEADER. Example: &amp;a=-4nn means four tricks for N/S, notrump, North leading. The number is actual tricks, not a contract level. If the objective is unstated, omit a; Movie then aims to take the remaining tricks for N/S. Do not convert an original full-deal contract into an ending goal without knowing how many tricks have already been won. For an E/W ending goal, omit a and explain that Movie has not encoded that objective; do not relabel it as an N/S goal.
+- Do not add a play sequence or any other URL parameters.
+
+Return a Markdown link labeled "Open this position in DeepSqueeze Movie" even if the transcription is uncertain. After it, briefly state any uncertain readings or provisional substitutions, and the leader, strain and goal/contract, distinguishing visible information from defaults. Remind me that I can edit the cards with the diagram’s upper-right pencil or ask you for a corrected link.</textarea>
+</details>
+<noscript><p>JavaScript is disabled. Select and copy the prompt above, then open your chosen assistant and paste it with your photo.</p></noscript>
+<p class="prompt-help privacy-note">Your photo goes to the assistant you choose; it is not uploaded to DeepSqueeze. Card recognition can make mistakes, so check the resulting diagram.</p>
+</section>
+</main></body></html>

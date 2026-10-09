@@ -1,0 +1,17 @@
+.ds-info main { padding-top:8px; }
+.ds-info h1 { margin-bottom:24px; }
+.prompt-steps { padding-left:25px; margin:22px 0; }
+.prompt-steps li { padding-left:4px; margin:10px 0; }
+.prompt-actions { display:flex; flex-wrap:wrap; gap:10px; margin:25px 0 12px; }
+.ds-info .prompt-action { font:600 15px/1.4 system-ui,sans-serif; text-decoration:none; color:#285f4d; border:1px solid #aebdb5; border-radius:7px; padding:11px 15px; background:#fff; cursor:pointer; }
+.ds-info .prompt-action.primary { background:#285f4d; color:white; border-color:#285f4d; }
+.prompt-action:hover { filter:brightness(.96); }
+.prompt-action:focus-visible,textarea:focus-visible { outline:3px solid #7d9f8e; outline-offset:3px; }
+.ds-info .prompt-help { color:#52665d; font-size:14px; }
+.ds-info .prompt-status { font-size:14px; min-height:1.7em; margin-bottom:10px; }
+details { background:#fff; border:1px solid #cdd6d0; border-radius:8px; padding:14px 16px; }
+summary { cursor:pointer; font-size:16px; font-weight:600; }
+details label { display:block; margin:15px 0 7px; font-size:14px; }
+textarea { display:block; width:100%; resize:vertical; padding:12px; border:1px solid #aebdb5; border-radius:5px; background:#fffefa; color:#253d36; font:14px/1.55 ui-monospace,monospace; }
+.privacy-note { margin-top:22px !important; }
+@media(max-width:480px){.prompt-actions {flex-direction:column;} .prompt-action {text-align:center;} textarea {font-size:16px;} }
