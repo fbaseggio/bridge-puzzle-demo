@@ -2,6 +2,7 @@ import type { CardId, Rank, Seat, State, Suit } from './types';
 
 const RANK_ORDER: Rank[] = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
 const SEATS: Seat[] = ['N', 'E', 'S', 'W'];
+type EquivalencePosition = Pick<State, 'hands' | 'trick'>;
 
 function rankIndex(rank: Rank): number {
   return RANK_ORDER.indexOf(rank);
@@ -18,18 +19,21 @@ function intermediateRanks(high: Rank, low: Rank): Rank[] {
   return RANK_ORDER.slice(hi + 1, lo);
 }
 
-function isGapAbsentFromOthers(state: State, seat: Seat, suit: Suit, high: Rank, low: Rank): boolean {
+function isGapAbsentFromOthers(state: EquivalencePosition, seat: Seat, suit: Suit, high: Rank, low: Rank): boolean {
   const mids = intermediateRanks(high, low);
   if (mids.length === 0) return true;
   const others = SEATS.filter((s) => s !== seat);
-  return mids.every((r) => others.every((s) => !state.hands[s][suit].includes(r)));
+  // Cards already on this trick still distinguish ranks that can beat them
+  // from ranks that cannot. Only completed tricks leave the outstanding set.
+  return mids.every((r) => others.every((s) => !state.hands[s][suit].includes(r))
+    && !state.trick.some((play) => play.suit === suit && play.rank === r));
 }
 
 function areConsecutive(a: Rank, b: Rank): boolean {
   return Math.abs(rankIndex(a) - rankIndex(b)) === 1;
 }
 
-export function getSuitEquivalenceClasses(state: State, seat: Seat, suit: Suit): Rank[][] {
+export function getSuitEquivalenceClasses(state: EquivalencePosition, seat: Seat, suit: Suit): Rank[][] {
   const held = [...state.hands[seat][suit]].sort((a, b) => rankIndex(a) - rankIndex(b));
   if (held.length === 0) return [];
   const classes: Rank[][] = [[held[0]]];
@@ -61,7 +65,7 @@ export function representativeForMembers(suit: Suit, members: Rank[]): CardId {
   return cardId(suit, lowest);
 }
 
-export function classInfoForCard(state: State, seat: Seat, card: CardId): { classId: string; representative: CardId; members: CardId[] } {
+export function classInfoForCard(state: EquivalencePosition, seat: Seat, card: CardId): { classId: string; representative: CardId; members: CardId[] } {
   const suit = card[0] as Suit;
   const rank = card.slice(1) as Rank;
   const classes = getSuitEquivalenceClasses(state, seat, suit);

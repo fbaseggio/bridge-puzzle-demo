@@ -94,6 +94,7 @@ type HandDiagramNavigationDeps = {
   startPlayAgain: (mode: 'manual') => void;
   endPracticeRun: () => void;
   attemptClaim: () => void;
+  hostClaimEnabled?: boolean;
   hintsEnabled: boolean;
   requestHint: () => void;
   currentProblemId: string;
@@ -109,9 +110,13 @@ type HandDiagramNavigationDeps = {
   resolveExplicitBranchAdvanceAction: (args: { unresolvedOptionCount: number; followPromptActive: boolean }) => 'prompt' | 'choose' | 'choose-single' | 'none';
   openWidgetSnapshotExportPanel: () => void;
   secondaryActionRow: HandDiagramSecondaryActionRow | null;
+  hidePopOut?: boolean;
+  onNextDeal?: () => void;
+  positionComplete?: boolean;
 };
 
 function currentTurnPrompt(view: State, deps: HandDiagramNavigationDeps): string {
+  if (deps.positionComplete) return 'All cards played.';
   return deps.withHintPrompt(`${deps.seatName[view.turn]} to play.`, view);
 }
 
@@ -169,6 +174,10 @@ function renderOutcomeModule(args: {
           ? 'warn'
           : 'neutral';
   outcome.className = `outcome-module ${outcomeTone}`;
+  if (deps.positionComplete) {
+    outcome.textContent = 'All cards played.';
+    return outcome;
+  }
   const canonicalStatus = canonicalRunStatusText(runStatus);
   const terminalCanonical = runStatus === 'success' || runStatus === 'failure';
 
@@ -803,7 +812,7 @@ function renderTransportRow(args: {
       forwardBtn.classList.add('is-disabled');
       forwardBtn.setAttribute('aria-disabled', 'true');
     } else {
-      forwardBtn.disabled = forwardDisabled;
+      forwardBtn.disabled = forwardDisabled || deps.positionComplete === true;
     }
     forwardBtn.onclick = () => {
       dismissTransientWidgetOutcome(currentViewState());
@@ -838,6 +847,13 @@ function renderTransportRow(args: {
       if (practiceAdvanceTransport && !practiceAdvanceEnabled) return;
       advanceWidgetToNextPauseBoundary();
     };
+    if (deps.positionComplete) jumpBtn.disabled = true;
+    if (deps.onNextDeal) {
+      jumpBtn.title = 'Next random squeeze';
+      jumpBtn.setAttribute('aria-label', 'Next random squeeze');
+      jumpBtn.disabled = false;
+      jumpBtn.onclick = deps.onNextDeal;
+    }
     transport.appendChild(jumpBtn);
   }
 
@@ -860,15 +876,19 @@ function renderTransportRow(args: {
     endBtn.onclick = () => endPracticeRun();
     transport.appendChild(endBtn);
 
+  }
+  if (practicePuzzleMode || deps.hostClaimEnabled) {
     const claimBtn = document.createElement('button');
     claimBtn.type = 'button';
     claimBtn.textContent = 'Claim';
     claimBtn.title = 'Claim remaining tricks';
     claimBtn.setAttribute('aria-label', 'Claim remaining tricks');
     claimBtn.classList.add('claim-btn');
+    claimBtn.disabled = deps.state.phase === 'end';
     claimBtn.onclick = () => attemptClaim();
     transport.appendChild(claimBtn);
-  } else if (hintsEnabled) {
+  }
+  if (!practicePuzzleMode && hintsEnabled) {
     const hintBtn = document.createElement('button');
     hintBtn.type = 'button';
     if (isWidgetShellMode) {
@@ -877,6 +897,7 @@ function renderTransportRow(args: {
       hintBtn.textContent = 'Hint';
     }
     hintBtn.title = 'Hint';
+    if (deps.positionComplete) hintBtn.disabled = true;
     hintBtn.setAttribute('aria-label', 'Hint');
     if (isWidgetShellMode) hintBtn.classList.add('icon-btn');
     hintBtn.onclick = (event) => {
@@ -889,7 +910,7 @@ function renderTransportRow(args: {
   }
 
   if (isWidgetShellMode && typeof window !== 'undefined') {
-    if (!practicePuzzleMode) {
+    if (!practicePuzzleMode && !deps.hidePopOut) {
       const pop = document.createElement('a');
       const u = new URL(window.location.href);
       u.searchParams.set('mode', 'analysis');

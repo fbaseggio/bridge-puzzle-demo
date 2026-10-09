@@ -2,12 +2,12 @@ import { allThreats, stoppingDefenders, cloneThreatContext as copyThreatContext 
 import './style.css';
 
 import {
-  apply,
+  apply as coreApply,
   classInfoForCard,
   CompositeSemanticReducer,
   getSuitEquivalenceClasses,
   InMemorySemanticEventCollector,
-  init,
+  init as coreInit,
   legalPlays,
   autoplayUntilUserOrEnd,
   RawSemanticReducer,
@@ -26,7 +26,7 @@ import {
   type Suit
 } from '../core';
 import { computeDiscardTiers, getIdleThreatThresholdRank } from '../ai/defenderDiscard';
-import { ensureDdsRuntime, getDdsRuntimeStatus, queryDdsNextPlays, warmDdsRuntime } from '../ai/ddsBrowser';
+import { ensureDdsRuntime as defaultEnsureDdsRuntime, getDdsRuntimeStatus as defaultGetDdsRuntimeStatus, queryDdsNextPlays as defaultQueryDdsNextPlays, warmDdsRuntime as defaultWarmDdsRuntime } from '../ai/ddsBrowser';
 import { buildDdsScoreByCard } from '../ai/ddsCardScores';
 import { evaluatePolicy } from '../ai/evaluatePolicy';
 import {
@@ -83,7 +83,7 @@ import {
 } from './articleScripts';
 import {
   defaultArticleScriptHistory,
-  replayArticleHistory,
+  replayArticleHistory as defaultReplayArticleHistory,
   type ArticleScriptStateId
 } from './articleScriptRuntime';
 import {
@@ -172,6 +172,20 @@ import {
 import { shouldRenderForWidgetTransportOutcome } from './widgetTransportRenderScheduling';
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 import { waitForRequiredDdsReady, type DdsAvailabilityPhase } from './ddsAvailabilityGate';
+import { readWidgetHost } from './widgetHost';
+import { defenderPreference } from './defenderPreference';
+import { readSitePreferences, updateSitePreferences, watchSitePreferences, type SitePreferences } from './sitePreferences';
+import { CardMotionTiming } from './cardMotionTiming';
+import { lowestEquivalentPlay, singletonOrEqualsPlay } from './forcedAutoplay';
+
+const widgetHost = readWidgetHost();
+const ensureDdsRuntime = widgetHost?.dds?.ensure ?? defaultEnsureDdsRuntime;
+const getDdsRuntimeStatus = widgetHost?.dds?.status ?? defaultGetDdsRuntimeStatus;
+const queryDdsNextPlays = widgetHost?.dds?.query ?? defaultQueryDdsNextPlays;
+const warmDdsRuntime = widgetHost?.dds ? () => { void ensureDdsRuntime(); } : defaultWarmDdsRuntime;
+const replayArticleHistory = widgetHost?.replayHistory ?? defaultReplayArticleHistory;
+const apply = widgetHost?.engine?.apply ?? coreApply;
+const init = widgetHost?.engine?.init ?? coreInit;
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -387,6 +401,7 @@ const initialWidgetSnapshotForRestore: WidgetStateSnapshotV1 | null =
     ? initialWidgetSnapshotFromHash
     : null;
 const displayMode: DisplayMode = (() => {
+  if (widgetHost) return 'widget';
   if (typeof window === 'undefined') return 'analysis';
   if (initialWidgetSnapshotForRestore) return 'widget';
   const params = new URLSearchParams(window.location.search);
@@ -398,6 +413,12 @@ const displayMode: DisplayMode = (() => {
   }
   return 'analysis';
 })();
+const sitePreferencesEnabled = widgetHost?.inheritSitePreferences === true || (!widgetHost && (() => {
+  const path = window.location.pathname.toLowerCase();
+  return path === '/practice' || path.startsWith('/practice/')
+    || path === '/workbench' || path.startsWith('/workbench/');
+})());
+const initialSitePreferences = sitePreferencesEnabled ? await readSitePreferences() : undefined;
 const widgetUiMode: WidgetUiMode = (() => {
   if (initialWidgetSnapshotForRestore) return initialWidgetSnapshotForRestore.initialConfig.widgetUiMode;
   if (typeof window === 'undefined') return 'default';
@@ -424,6 +445,7 @@ const compactWidgetLayout = displayMode !== 'analysis';
 const isWidgetShellMode = displayMode !== 'analysis';
 
 const maxSuitLineLen = Math.max(
+  ...(widgetHost ? seatOrder.flatMap(seat => suitOrder.map(suit => widgetHost.problem.hands[seat][suit].length)) : []),
   ...demoProblems.flatMap((entry) => {
     const problem = entry.problem;
     if (!problem) return [];
@@ -463,6 +485,7 @@ const REQUIRED_DDS_MAX_ATTEMPTS = 4;
 const REQUIRED_DDS_MAX_WAIT_MS = 2500;
 const REQUIRED_DDS_RETRY_DELAY_MS = 250;
 const initialProblemIdFromUrl: string = (() => {
+  if (widgetHost) return widgetHost.problem.id;
   if (initialWidgetSnapshotForRestore) {
     const snapshotProblemId = initialWidgetSnapshotForRestore.problem.problemId;
     if (findDemoProblem(snapshotProblemId)) return snapshotProblemId;
@@ -527,7 +550,7 @@ const initialArticleCheckpointIdFromUrl: string | null = (() => {
   const raw = new URLSearchParams(window.location.search).get('checkpoint');
   return raw?.trim() ? raw.trim() : null;
 })();
-const initialArticleScriptSpec = resolveArticleScript(initialArticleScriptIdFromUrl);
+const initialArticleScriptSpec = widgetHost?.articleScript ?? resolveArticleScript(initialArticleScriptIdFromUrl);
 const readingWidgetEmbedHeightMessageType = 'ds-widget-reading-height';
 let lastReportedReadingWidgetEmbedHeight: number | null = null;
 const initialArticleCursor = (() => {
@@ -869,7 +892,8 @@ function syncCompanionNarrativeForCursor(cursor: number, options: { restoreFutur
 }
 
 function currentWidgetCompanionPanelState(): WidgetCompanionPanelState {
-  return articleScriptCoordinator.currentWidgetCompanionPanelState();
+  const panel = articleScriptCoordinator.currentWidgetCompanionPanelState();
+  return widgetHost?.hideCompanionPanel ? { ...panel, enabled: false } : panel;
 }
 
 function resetWidgetReadingControlsReveal(): void {
@@ -1089,6 +1113,7 @@ function advanceArticleScriptToNextPauseOrEnd(): void {
 }
 
 function resolveProblemById(problemId: string, variantId?: string | null): ProblemWithThreats {
+  if (widgetHost?.problem.id === problemId) return widgetHost.problem;
   const override = practiceProblemOverrides.get(problemId);
   if (override) return override;
   const entry = findDemoProblem(problemId) ?? demoProblems[0];
@@ -1107,6 +1132,7 @@ function versionUnknownModeEnabled(): boolean {
 }
 
 function currentProblemDdsRequirement(): 'optional' | 'required' {
+  if (widgetHost?.dds) return 'required';
   return resolveDemoProblemDdsRequirement(currentProblemId);
 }
 
@@ -1136,6 +1162,7 @@ function syncRequiredDdsAvailabilityFromRuntime(): void {
 function requiredDdsStatusMessage(): string | null {
   if (!currentProblemRequiresDds()) return null;
   if (requiredDdsAvailabilityPhase === 'blocked') {
+    if (widgetHost?.dds?.unavailableMessage) return widgetHost.dds.unavailableMessage();
     return requiredDdsBlockedMessage ?? 'DDS unavailable. This puzzle requires DDS-backed analysis.';
   }
   if (requiredDdsAvailabilityPhase === 'retrying') {
@@ -1276,14 +1303,17 @@ let showSemanticReducer = false;
 let expandedLogFamilies = new Set<LogChannelFamilyId>(['core', 'diagnostics', 'admin']);
 let enabledLogChannels = new Set<LogChannelId>(['play', 'threat', 'dds', 'variants', 'replay']);
 let teachingMode = true;
-let autoplaySingletons = displayMode !== 'widget';
+let autoplaySingletons = displayMode !== 'widget' || widgetHost?.practice === true;
 let autoplayEw = true;
+let siteTableColor: SitePreferences['tableColor'] = 'default';
+let siteDiagramZoom = 100;
+let siteCardAnimation: SitePreferences['animation'] = 'instant';
 let unknownModeVariantReplayData: Map<string, UnknownModeVariantReplay> | null = null;
 let westInitialContentWidth: number | null = null;
 let nsInitialFitWidth: number | null = null;
 let diagramRowHeightPx: number | null = null;
 let assistLevelByMode: Record<PuzzleModeId, AssistLevelId> = {
-  standard: displayMode === 'practice' ? 'puzzle' : 'solution',
+  standard: displayMode === 'practice' || widgetHost?.practice ? 'puzzle' : 'solution',
   'single-dummy': 'sd',
   'multi-ew': 'puzzle',
   scripted: 'puzzle',
@@ -1303,6 +1333,7 @@ let articleScriptState: ArticleScriptCoordinatorState | null =
     : null;
 const handDiagramSession = createHandDiagramSession();
 const articleScriptCoordinator = createArticleScriptCoordinator({
+  replayHistory: replayArticleHistory,
   getDisplayMode: () => displayMode,
   getCurrentProblem: () => currentProblem,
   getCurrentProblemId: () => currentProblemId,
@@ -1342,6 +1373,25 @@ if (displayMode === 'widget' && (widgetUiMode === 'dd-puzzle' || widgetUiMode ==
 }
 applyWidgetProblemDefaults();
 applyCurrentAssistLevelToControls();
+if (widgetHost?.exploration) {
+  autoplaySingletons = false;
+  autoplayEw = false;
+  alwaysHint = false;
+  cardColoringEnabled = false;
+  narrate = false;
+  alertMistakes = false;
+  alertMistakesTouchedByUser = true;
+  hideEastWest = false;
+  assistLevelByMode.standard = 'puzzle';
+}
+if (initialSitePreferences) {
+  autoplaySingletons = initialSitePreferences.autoplaySingletons;
+  autoplayEw = initialSitePreferences.autoplayEw;
+  alwaysHint = initialSitePreferences.alwaysHint;
+  siteTableColor = initialSitePreferences.tableColor;
+  siteDiagramZoom = initialSitePreferences.zoom;
+  siteCardAnimation = initialSitePreferences.animation;
+}
 if (articleScriptModeEnabled()) {
   autoplaySingletons = false;
   autoplayEw = false;
@@ -1750,6 +1800,7 @@ function shouldShowEquivalentUnderlinesCurrentSurface(): boolean {
 }
 
 function applyCurrentAssistLevelToControls(problemId = currentProblemId): void {
+  if (widgetHost?.exploration) return;
   const puzzleMode = currentPuzzleModeId(problemId);
   const level = currentAssistLevel(problemId);
   const preset = ASSIST_CONTROL_PRESETS[puzzleMode][level];
@@ -1872,6 +1923,147 @@ function toggleSettingsPanel(context: SettingsPanelContext): void {
   render();
 }
 
+function persistSitePreference(patch: Partial<SitePreferences>): void {
+  if (!sitePreferencesEnabled) return;
+  void updateSitePreferences(patch);
+}
+
+type PendingCardMotion = {
+  seat: Seat;
+  cardId: CardId;
+  autoplay: boolean;
+  source: { xRatio: number; yRatio: number };
+};
+
+let pendingCardMotions: PendingCardMotion[] = [];
+let cardMotionBatch: { view: State; motions: PendingCardMotion[]; timing: CardMotionTiming } | undefined;
+let cardMotionCompletionTimer: ReturnType<typeof setTimeout> | undefined;
+
+function visiblePlayEvents(events: readonly EngineEvent[]): { play: Play; autoplay: boolean }[] {
+  const completeIndex = events.findIndex(event => event.type === 'trickComplete');
+  const visible = completeIndex >= 0 ? events.slice(0, completeIndex + 1) : events;
+  return visible.flatMap(event => event.type === 'played' || event.type === 'autoplay'
+    ? [{ play: event.play, autoplay: event.type === 'autoplay' }] : []);
+}
+
+function stageCardMotions(events: readonly EngineEvent[]): void {
+  pendingCardMotions = [];
+  if (!sitePreferencesEnabled) return;
+  clearSingletonAutoplayTimer();
+  for (const { play, autoplay } of visiblePlayEvents(events)) {
+    const cardId = toCardId(play.suit, play.rank) as CardId;
+    const source = document.querySelector<HTMLElement>(`.rank-text[data-seat="${play.seat}"][data-card-id="${cardId}"] .rank`)
+      ?? document.querySelector<HTMLElement>(`.rank-text[data-seat="${play.seat}"][data-card-id="${cardId}"]`);
+    const canvas = source?.closest<HTMLElement>('.table-canvas');
+    if (!source || !canvas) continue;
+    const rect = source.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+    if (!canvasRect.width || !canvasRect.height) continue;
+    pendingCardMotions.push({
+      seat: play.seat,
+      cardId,
+      autoplay,
+      // Rendering replaces the canvas, and Movie may scale the replacement.
+      // Retain the source point in canvas coordinates so source and destination
+      // can be reconstructed in the same post-render coordinate space.
+      source: {
+        xRatio: (rect.left + rect.width / 2 - canvasRect.left) / canvasRect.width,
+        yRatio: (rect.top + rect.height / 2 - canvasRect.top) / canvasRect.height
+      }
+    });
+  }
+}
+
+function playPendingCardMotions(): void {
+  if (cardMotionBatch?.view !== currentViewState() || pendingCardMotions.length) {
+    clearTimeout(cardMotionCompletionTimer);
+    cardMotionBatch = undefined;
+  }
+  if (pendingCardMotions.length) {
+    const motions = pendingCardMotions;
+    pendingCardMotions = [];
+    const instant = siteCardAnimation === 'instant' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const duration = instant ? 0 : siteCardAnimation === 'annoyingly-slow' ? 3000 : siteCardAnimation === 'slow' ? 440 : 210;
+    cardMotionBatch = {
+      view: currentViewState(), motions,
+      timing: new CardMotionTiming(performance.now(), duration, motions.map(motion => motion.autoplay))
+    };
+    const batch = cardMotionBatch;
+    // Hint calculation and singleton autoplay must wait for the visible play.
+    // Subsequent redraws reuse this deadline; they neither skip nor restart it.
+    cardMotionCompletionTimer = setTimeout(() => {
+      if (cardMotionBatch === batch) render();
+    }, batch.timing.remaining(performance.now()) + 20);
+  }
+  const batch = cardMotionBatch;
+  if (!batch) return;
+  const { motions, timing } = batch;
+  const elapsed = timing.elapsed(performance.now());
+  const canvas = root.querySelector<HTMLElement>('.table-canvas');
+  if (!canvas) return;
+  const canvasRect = canvas.getBoundingClientRect();
+  if (!canvasRect.width || !canvasRect.height) return;
+  // translate() uses the canvas's unscaled CSS coordinates, while its rect is
+  // measured after a Movie zoom transform. Divide visual distances by scale.
+  const scaleX = canvas.offsetWidth ? canvasRect.width / canvas.offsetWidth : 1;
+  const scaleY = canvas.offsetHeight ? canvasRect.height / canvas.offsetHeight : 1;
+  motions.forEach((motion, index) => {
+    if (elapsed >= timing.starts[index] + timing.duration) return;
+    const destination = root.querySelector<HTMLElement>(`.trick-slot[data-seat="${motion.seat}"] .card-rank`);
+    if (!destination) return;
+    const destinationRect = destination.getBoundingClientRect();
+    if (!destinationRect.width || !destinationRect.height) return;
+    const sourceX = canvasRect.left + motion.source.xRatio * canvasRect.width;
+    const sourceY = canvasRect.top + motion.source.yRatio * canvasRect.height;
+    const dx = (sourceX - (destinationRect.left + destinationRect.width / 2)) / scaleX;
+    const dy = (sourceY - (destinationRect.top + destinationRect.height / 2)) / scaleY;
+    destination.classList.add('card-rank-in-flight');
+    const animation = destination.animate(timing.duration ? [
+      { transform: `translate(${dx}px, ${dy}px)` },
+      { transform: 'translate(0, 0)' }
+    ] : [{ opacity: 0 }, { opacity: 1 }], {
+      duration: timing.duration, delay: timing.starts[index], easing: 'linear', fill: 'both'
+    });
+    animation.currentTime = elapsed;
+    const suit = destination.parentElement?.querySelector<HTMLElement>('.card-suit');
+    if (suit && elapsed < timing.starts[index]) {
+      const reveal = suit.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 0, delay: timing.starts[index], fill: 'both' });
+      reveal.currentTime = elapsed;
+    }
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      destination.classList.remove('card-rank-in-flight');
+    };
+    void animation.finished.catch(() => undefined).finally(cleanup);
+  });
+}
+
+function autoplayPresentationDelay(legacyDelay: number): number {
+  if (!sitePreferencesEnabled) return legacyDelay;
+  return cardMotionBatch?.view === currentViewState()
+    ? cardMotionBatch.timing.autoplayDelay(performance.now()) : 300;
+}
+
+function applyLiveSitePreferences(preferences: SitePreferences): void {
+  if (!sitePreferencesEnabled) return;
+  alwaysHint = preferences.alwaysHint;
+  autoplaySingletons = preferences.autoplaySingletons;
+  autoplayEw = preferences.autoplayEw;
+  siteTableColor = preferences.tableColor;
+  siteDiagramZoom = preferences.zoom;
+  siteCardAnimation = preferences.animation;
+  if (articleScriptModeEnabled()) {
+    autoplaySingletons = false;
+    autoplayEw = false;
+  }
+  if (!alwaysHint) clearHint();
+  syncConfiguredUserControls();
+  syncSingletonAutoplay();
+  render();
+}
+
 function ensureSettingsOutsideDismiss(): void {
   if (settingsPanelSession.outsideDismissBound || typeof document === 'undefined') return;
   settingsPanelSession.outsideDismissBound = true;
@@ -1934,13 +2126,14 @@ function renderSettingsToggles(context: SettingsPanelContext): HTMLElement {
       }
       syncAssistLevelFromControls();
       render();
-    })
+    }, { disabled: widgetHost?.exploration })
   );
   assistGroup.appendChild(
     renderSettingsToggle('Always hint', alwaysHint, (checked) => {
       alwaysHint = checked;
       if (!checked) clearHint();
       syncAssistLevelFromControls();
+      persistSitePreference({ alwaysHint });
       render();
     })
   );
@@ -1954,7 +2147,7 @@ function renderSettingsToggles(context: SettingsPanelContext): HTMLElement {
       }
       syncAssistLevelFromControls();
       render();
-    })
+    }, { disabled: widgetHost?.exploration })
   );
   body.appendChild(assistGroup);
 
@@ -1973,9 +2166,10 @@ function renderSettingsToggles(context: SettingsPanelContext): HTMLElement {
     );
   }
   otherGroup.appendChild(
-    renderSettingsToggle('Autoplay singletons', autoplaySingletons, (checked) => {
+    renderSettingsToggle('Autoplay singletons / equals', autoplaySingletons, (checked) => {
       autoplaySingletons = checked;
       syncSingletonAutoplay();
+      persistSitePreference({ autoplaySingletons });
       render();
     })
   );
@@ -1987,8 +2181,9 @@ function renderSettingsToggles(context: SettingsPanelContext): HTMLElement {
         advanceAutoplayFromCurrentState();
       }
       syncSingletonAutoplay();
+      persistSitePreference({ autoplayEw });
       render();
-    })
+    }, { disabled: widgetHost?.exploration && (!widgetHost.explorationAutoplay || articleScriptModeEnabled()) })
   );
   body.appendChild(otherGroup);
 
@@ -2017,7 +2212,7 @@ function renderSettingsButton(context: SettingsPanelContext): HTMLElement {
     const panel = document.createElement('section');
     panel.className = `advanced-panel settings-panel settings-primary-panel settings-panel-${context}`;
 
-    panel.appendChild(renderAssistLevelControl(context));
+    if (!widgetHost?.exploration) panel.appendChild(renderAssistLevelControl(context));
     const moreBtn = document.createElement('button');
     moreBtn.type = 'button';
     moreBtn.className = 'settings-more-row';
@@ -2352,6 +2547,7 @@ function summarizeDdsScores(rawPlays: Array<{ suit: string; rank: string; score?
 }
 
 function recordDdsFailure(diag: DdsFailureDiagnostics): void {
+  widgetHost?.dds?.failure(diag.reason, diag.detail);
   const parts = [
     `action=${diag.action}`,
     `reason=${diag.reason}`,
@@ -2399,10 +2595,22 @@ function filteredLogLines(lines: string[]): string[] {
 
 function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameters<typeof apply>[2]>['autoplayBackstop'] {
   return ({ state: liveState, legalPlays, autoChoice }) => {
-    if (!browserDdsBackstopEnabled || !autoChoice.play) return null;
+    if (!autoChoice.play) return null;
     if (liveState.turn !== 'E' && liveState.turn !== 'W') return null;
+    if (!browserDdsBackstopEnabled) {
+      return { play: lowestEquivalentPlay(liveState, autoChoice.play, legalPlays) };
+    }
     const legalCandidates = legalPlays.map((p) => toCardId(p.suit, p.rank) as CardId);
     const policyChoice = toCardId(autoChoice.play.suit, autoChoice.play.rank) as CardId;
+    const fallback = (reason: 'runtime-unavailable' | 'no-safe-match') => {
+      const play = lowestEquivalentPlay(liveState, autoChoice.play!, legalPlays);
+      const finalChoice = toCardId(play.suit, play.rank) as CardId;
+      playedCardIds.push(finalChoice);
+      return { play, trace: {
+        source: 'browser-dds' as const, legalCandidates, policyChoice,
+        safeCandidates: [], finalChoice, overridden: finalChoice !== policyChoice, reason
+      } };
+    };
     const dds = queryDdsNextPlays({
       openingLeader: currentProblem.leader,
       initialHands: currentProblem.hands,
@@ -2451,19 +2659,7 @@ function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameter
           reason: `DDS-required autoplay refused (${dds.reason}${dds.detail ? `: ${dds.detail}` : ''})`
         };
       }
-      playedCardIds.push(policyChoice);
-      return {
-        play: autoChoice.play,
-        trace: {
-          source: 'browser-dds',
-          legalCandidates,
-          policyChoice,
-          safeCandidates: [],
-          finalChoice: policyChoice,
-          overridden: false,
-          reason: 'runtime-unavailable'
-        }
-      };
+      return fallback('runtime-unavailable');
     }
 
     const scoreByCard = buildDdsScoreByCard(dds.result.plays);
@@ -2488,19 +2684,7 @@ function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameter
           reason: 'DDS-required autoplay refused (no usable legal-card mapping)'
         };
       }
-      playedCardIds.push(policyChoice);
-      return {
-        play: autoChoice.play,
-        trace: {
-          source: 'browser-dds',
-          legalCandidates,
-          policyChoice,
-          safeCandidates: [],
-          finalChoice: policyChoice,
-          overridden: false,
-          reason: 'no-safe-match'
-        }
-      };
+      return fallback('no-safe-match');
     }
 
     const maxScore = Math.max(...scoredLegal.map((card) => scoreByCard.get(card) ?? Number.NEGATIVE_INFINITY));
@@ -2524,22 +2708,14 @@ function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameter
           reason: 'DDS-required autoplay refused (zero safe candidates)'
         };
       }
-      playedCardIds.push(policyChoice);
-      return {
-        play: autoChoice.play,
-        trace: {
-          source: 'browser-dds',
-          legalCandidates,
-          policyChoice,
-          safeCandidates: [],
-          finalChoice: policyChoice,
-          overridden: false,
-          reason: 'no-safe-match'
-        }
-      };
+      return fallback('no-safe-match');
     }
-    const finalChoice = safeCandidates.includes(policyChoice) ? policyChoice : safeCandidates[0];
-    const finalPlay = legalPlays.find((p) => (toCardId(p.suit, p.rank) as CardId) === finalChoice) ?? autoChoice.play;
+    const preferredCandidates = defenderPreference(liveState, safeCandidates, widgetHost?.preferDefenderCards);
+    const preferredChoice = preferredCandidates.includes(policyChoice) ? policyChoice : preferredCandidates[0];
+    const preferredPlay = legalPlays.find((p) => (toCardId(p.suit, p.rank) as CardId) === preferredChoice) ?? autoChoice.play;
+    const safePlays = legalPlays.filter(play => safeCandidates.includes(toCardId(play.suit, play.rank) as CardId));
+    const finalPlay = lowestEquivalentPlay(liveState, preferredPlay, safePlays);
+    const finalChoice = toCardId(finalPlay.suit, finalPlay.rank) as CardId;
     playedCardIds.push(finalChoice);
     return {
       play: finalPlay,
@@ -2853,6 +3029,7 @@ function advanceOneWidgetCard(): boolean {
     }
     const before = state;
     const result = applyWidgetScriptedOpeningStep({ state, play, eventCollector: semanticCollector });
+    stageCardMotions(result.events);
     state = result.state;
     ddsPlayHistory.push(`${play.suit}${play.rank}`);
     collectTeachingRecolorEventsForTurn(before, result.events);
@@ -3089,7 +3266,11 @@ function requestHint(): void {
 
 function syncAlwaysHint(): void {
   if (!alwaysHint) return;
-  if (!requireDdsReadyForAction('hint')) return;
+  if (pendingCardMotions.length || (cardMotionBatch?.view === currentViewState()
+    && cardMotionBatch.timing.remaining(performance.now()) > 0)) return;
+  // Automatic hints must not start a DDS load from its own progress render.
+  // Startup/manual requests own loading; wait for their runtime to be ready.
+  if (currentProblemRequiresDds() && getDdsRuntimeStatus() !== 'ready') return;
   const noPlayYet = ddsPlayHistory.length === 0 && state.trick.length === 0 && !trickFrozen;
   if (noPlayYet) return;
   const key = hintPositionKey();
@@ -3448,6 +3629,18 @@ function countReachableUserWinnerCards(s: State): number {
 }
 
 function attemptClaim(): void {
+  if (widgetHost?.evaluateClaim) {
+    if (state.phase === 'end') return;
+    clearHint();
+    clearWidgetMessage();
+    const result = widgetHost.evaluateClaim(state);
+    if (result.accepted) {
+      state.phase = 'end';
+      runStatus = 'success';
+    } else setMessage(handDiagramSession, result.message);
+    render();
+    return;
+  }
   if (!practiceSession || !shouldScorePracticeProfile(currentPracticeInteractionProfile())) return;
   clearHint();
   clearWidgetMessage();
@@ -5033,7 +5226,7 @@ function syncSingletonAutoplay(): void {
           clearSingletonAutoplayTimer();
           const moved = advanceOneWidgetCard();
           if (!moved) render();
-        }, 150);
+        }, autoplayPresentationDelay(150));
       }
       return;
     }
@@ -5049,13 +5242,12 @@ function syncSingletonAutoplay(): void {
     return;
   }
 
-  const legal = legalPlays(state).filter((p) => p.seat === state.turn);
-  if (legal.length !== 1) {
+  const onlyPlay = singletonOrEqualsPlay(state);
+  if (!onlyPlay) {
     clearSingletonAutoplayTimer();
     return;
   }
 
-  const onlyPlay = legal[0];
   const key = stateSingletonKey(state, onlyPlay);
   if (singletonAutoplayTimer && singletonAutoplayKey === key) return;
 
@@ -5071,22 +5263,22 @@ function syncSingletonAutoplay(): void {
       clearSingletonAutoplayTimer();
       return;
     }
-    const liveLegal = legalPlays(state).filter((p) => p.seat === state.turn);
-    if (liveLegal.length !== 1) {
+    const livePlay = singletonOrEqualsPlay(state);
+    if (!livePlay) {
       clearSingletonAutoplayTimer();
       return;
     }
-    const livePlay = liveLegal[0];
     if (stateSingletonKey(state, livePlay) !== key) {
       clearSingletonAutoplayTimer();
       return;
     }
     clearSingletonAutoplayTimer();
     runTurn(livePlay);
-  }, 500);
+  }, autoplayPresentationDelay(500));
 }
 
 function refreshThreatModel(problemId: string, clearLogs: boolean): void {
+  if (widgetHost?.exploration) return;
   if (clearLogs) logs = [];
   if (clearLogs) {
     semanticCollector.clear();
@@ -5150,6 +5342,7 @@ function advanceAutoplayFromCurrentState(): void {
     eventCollector: semanticCollector,
     autoplayBackstop: buildBrowserDdsBackstop(ddsHistoryForTurn)
   });
+  stageCardMotions(result.events);
   state = result.state;
   syncConfiguredUserControls();
   threatCtx = (state.threat as ThreatContext | null) ?? null;
@@ -5402,6 +5595,7 @@ function runTurn(play: Play): void {
     manualDecision,
     autoplayBackstop: buildBrowserDdsBackstop(backstopHistoryForTurn)
   });
+  stageCardMotions(result.events);
   state = result.state;
   if (variantDdErrorById) {
     const errorVariants = Object.entries(variantDdErrorById)
@@ -5924,6 +6118,8 @@ function renderSuitRow(
         const rankBtn = document.createElement('button');
         rankBtn.type = 'button';
         rankBtn.className = 'rank-text legal';
+        rankBtn.dataset.seat = seat;
+        rankBtn.dataset.cardId = cardId;
         if (hintBestSet.has(cardId)) rankBtn.classList.add('hint-best');
         if (scriptedChoiceSet.has(cardId)) rankBtn.classList.add('script-choice');
         if (scriptedChoiceCompletedSet.has(cardId)) rankBtn.classList.add('script-choice-complete');
@@ -5938,6 +6134,8 @@ function renderSuitRow(
       } else {
         const rankEl = document.createElement('span');
         rankEl.className = 'rank-text muted';
+        rankEl.dataset.seat = seat;
+        rankEl.dataset.cardId = cardId;
         if (scriptedChoiceSet.has(cardId)) rankEl.classList.add('script-choice');
         if (scriptedChoiceCompletedSet.has(cardId)) rankEl.classList.add('script-choice-complete');
         if (scriptedNextSet.has(cardId)) rankEl.classList.add('script-next');
@@ -6159,7 +6357,7 @@ function renderBoardMeta(view: State): HTMLElement {
     .filter((seat) => seat === 'N' || seat === 'S')
     .map((seat) => suitOrder.reduce((sum, suit) => sum + currentProblem.hands[seat][suit].length, 0))
     .reduce((max, count) => Math.max(max, count), 0);
-  const showContractLine = view.goal.type === 'minTricks' && initialTricksInDeal === 13;
+  const showContractLine = !widgetHost?.exploration && view.goal.type === 'minTricks' && initialTricksInDeal === 13;
 
   if (showContractLine) {
     const contractLine = document.createElement('div');
@@ -6194,7 +6392,7 @@ function renderBoardMeta(view: State): HTMLElement {
     } else {
       goalLine.textContent = `Goal: ${formatGoal(view)}`;
     }
-    meta.appendChild(goalLine);
+    if (!widgetHost?.exploration) meta.appendChild(goalLine);
   }
 
   const tricksLine = document.createElement('div');
@@ -6721,6 +6919,7 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
   for (const seat of seatOrder) {
     const slot = document.createElement('div');
     slot.className = `trick-slot slot-${seat}`;
+    slot.dataset.seat = seat;
     const play = bySeat.get(seat);
     if (play) {
       if (resolvedWinner === seat) slot.classList.add('resolved-winner');
@@ -7576,6 +7775,14 @@ function render(): void {
   root.classList.toggle('mode-practice', displayMode === 'practice');
   root.classList.toggle('with-companion-panel', widgetCompanionPanelVisible);
   root.classList.toggle('with-companion-panel-split', widgetCompanionPanelSplit);
+  root.classList.toggle('ds-table-very-light', sitePreferencesEnabled && siteTableColor === 'very-light');
+  root.classList.toggle('ds-table-light', sitePreferencesEnabled && siteTableColor === 'light');
+  root.classList.toggle('ds-table-medium', sitePreferencesEnabled && siteTableColor === 'medium');
+  if (sitePreferencesEnabled && !widgetHost?.externalDiagramZoom) {
+    root.style.setProperty('--ds-diagram-scale', String(siteDiagramZoom / 100));
+  } else {
+    root.style.removeProperty('--ds-diagram-scale');
+  }
   if (typeof document !== 'undefined') {
     document.documentElement.classList.toggle('mode-widget', isWidgetShellMode);
     document.documentElement.classList.toggle('mode-analysis', displayMode === 'analysis');
@@ -7615,7 +7822,7 @@ function render(): void {
     displayMode,
     showGuides,
     practiceSession,
-    inevitableFailureAlert,
+    inevitableFailureAlert: widgetHost?.dds && getDdsRuntimeStatus() !== 'ready' ? false : inevitableFailureAlert,
     runStatus,
     pendingArticleScriptChoice,
     currentArticleScriptChoicePresentation,
@@ -7690,7 +7897,11 @@ function render(): void {
     currentArticleScriptReplayCard,
     resolveExplicitBranchAdvanceAction,
     openWidgetSnapshotExportPanel: () => openWidgetSnapshotExportPanel({ attemptCopy: false }),
-    secondaryActionRow: currentWidgetSecondaryActionRow()
+    secondaryActionRow: currentWidgetSecondaryActionRow(),
+    hidePopOut: Boolean(widgetHost),
+    onNextDeal: widgetHost?.onNextDeal,
+    hostClaimEnabled: Boolean(widgetHost?.evaluateClaim),
+    positionComplete: Boolean(widgetHost?.exploration && state.phase === 'end')
   };
   const navigationArea = renderHandDiagramNavigationArea(view, handDiagramNavigationDeps);
   if (displayMode === 'practice' || displayMode === 'analysis') {
@@ -7758,6 +7969,14 @@ function render(): void {
   }
   applyInlineSettingsPlacement();
   renderingNow = false;
+  if (widgetHost?.onPracticeSettingsChange) widgetHost.onPracticeSettingsChange({
+    assist: assistLevelByMode.standard as 'puzzle'|'light'|'guided'|'solution',
+    autoplaySingletons, autoplayEw, hideEastWest, cardColoring:cardColoringEnabled,
+    alwaysHint, narrate, alertMistakes, showGuides
+  });
+  widgetHost?.onRender?.(state, trickFrozen);
+  // Host layout/zoom and synchronous analysis finish before starting the clock.
+  playPendingCardMotions();
   syncSingletonAutoplay();
   syncAlwaysHint();
 }
@@ -8051,6 +8270,15 @@ function resetCurrentArticleScriptToBeginning(): void {
 
 if (practiceSession) beginPracticeRun('puzzle-solving');
 refreshThreatModel(currentProblemId, false);
+if (widgetHost?.practice && widgetHost.practiceSettings) {
+  const saved = widgetHost.practiceSettings;
+  assistLevelByMode.standard = saved.assist;
+  autoplaySingletons = saved.autoplaySingletons; autoplayEw = saved.autoplayEw;
+  hideEastWest = saved.hideEastWest; cardColoringEnabled = saved.cardColoring;
+  alwaysHint = saved.alwaysHint; narrate = saved.narrate;
+  alertMistakes = saved.alertMistakes; alertMistakesTouchedByUser = true;
+  showGuides = saved.showGuides;
+}
 if (articleScriptModeEnabled()) {
   autoplaySingletons = false;
   autoplayEw = false;
@@ -8059,9 +8287,28 @@ if (articleScriptModeEnabled()) {
 if (initialWidgetSnapshotForRestore) {
   applyInitialWidgetSnapshotRestore(initialWidgetSnapshotForRestore);
 }
+if (sitePreferencesEnabled) watchSitePreferences(applyLiveSitePreferences);
 ensureReadingInteractionTracking();
 ensureWidgetSnapshotDebugShortcut();
 replayInitialUserHistoryIfPresent();
+widgetHost?.dds?.controlsReady?.(async () => {
+  // Reload analysis only; the deal, play history and frozen trick stay intact.
+  clearSingletonAutoplayTimer();
+  hintRequestSeq += 1;
+  activeHint = null;
+  activeHintKey = null;
+  hintLoading = false;
+  ddsLoadingForHint = false;
+  await requiredDdsAvailabilityPromise;
+  requiredDdsAvailabilityPhase = 'retrying';
+  requiredDdsBlockedMessage = null;
+  render();
+  const ready = await widgetHost.dds!.retry();
+  requiredDdsAvailabilityPhase = ready ? 'ready' : 'blocked';
+  requiredDdsLastHintFailureReason = null;
+  render();
+  return ready;
+});
 warmDdsRuntime();
 syncRequiredDdsAvailabilityFromRuntime();
 if (currentProblemRequiresDds()) void ensureRequiredDdsAvailability('startup');

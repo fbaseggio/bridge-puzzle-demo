@@ -178,6 +178,7 @@ html.mode-widget {
   display: block;
   width: fit-content;
   align-self: start;
+  zoom: var(--ds-diagram-scale, 1);
 }
 
 .mode-analysis .table-host {
@@ -729,6 +730,18 @@ html.mode-widget {
 .table-canvas {
   display: block;
   margin: 0 auto;
+}
+
+.ds-table-very-light .trick-table {
+  background: #d7e8d1;
+}
+
+.ds-table-light .trick-table {
+  background: #c7dec5;
+}
+
+.ds-table-medium .trick-table {
+  background: #b6d4b7;
 }
 
 .table-canvas {
@@ -1343,6 +1356,14 @@ html.mode-widget {
   /* Apply Inter to played-card ranks for consistent unslashed zero in 10. */
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
   font-variant-numeric: tabular-nums;
+}
+
+.card-rank-in-flight {
+  position: relative;
+  z-index: 10000;
+  pointer-events: none;
+  will-change: transform;
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.55);
 }
 
 .rank {

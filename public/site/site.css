@@ -17,3 +17,36 @@
 .ds-info .ds-updated { color: #617268; font-size: 14px; margin-top: 30px; }
 .ds-info .ds-site-footer { max-width: 760px; }
 @media (max-width: 500px) { .ds-site-footer { margin-top: 24px; padding: 20px 18px; } .ds-info header, .ds-info main { padding: 22px 18px; } }
+
+/* Optional full-page preferences. Embedded widgets never mount this surface. */
+.ds-preferences { position: relative; flex: 0 0 auto; margin-left: auto; border: 0 !important; background: transparent !important; color: #253d36; font: 14px/1.4 system-ui, sans-serif; }
+.ds-preferences > summary { display: grid; place-items: center; width: 34px; height: 34px; margin: 0; padding: 0 !important; border: 1px solid #c7d2c9; border-radius: 7px; background: #fffefa; cursor: pointer; list-style: none; }
+.ds-preferences > summary::-webkit-details-marker { display: none; }
+.ds-preferences > summary:hover { background: #edf2eb; }
+.ds-preferences > summary:focus-visible { outline: 3px solid #b28432; outline-offset: 3px; }
+.ds-menu-icon { display: grid; gap: 3px; width: 16px; }
+.ds-menu-icon span { display: block; height: 1.5px; border-radius: 2px; background: currentColor; }
+.ds-preferences-panel { position: absolute; z-index: 1000; top: calc(100% + 9px); right: 0; width: min(330px, calc(100vw - 28px)); max-height: calc(100vh - 70px); overflow: auto; padding: 16px; border: 1px solid #c7d2c9; border-radius: 10px; background: #fffefa; box-shadow: 0 10px 30px #203b3428; text-align: left; }
+.ds-preferences-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.ds-preferences-heading strong { font-size: 17px; }
+.ds-preferences-heading span { color: #6d7d73; font-size: 11px; }
+.ds-preferences form { margin: 0; padding: 0; }
+.ds-preferences fieldset { min-width: 0; margin: 0 0 13px; padding: 0; border: 0; }
+.ds-preferences legend, .ds-preferences label { display: block; margin: 0 0 7px; color: #40594f; font: 600 12px/1.45 system-ui, sans-serif; }
+.ds-preferences .ds-check { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 400; }
+.ds-preferences input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: #28594d; }
+.ds-preferences select { display: block; width: 100%; margin: 5px 0 13px; padding: 7px 8px; border: 1px solid #cbd5cc; border-radius: 5px; background: #fff; color: #29433c; font: 13px system-ui, sans-serif; }
+.ds-zoom-setting { display: flex; align-items: center; gap: 10px; margin-top: 5px; }
+.ds-zoom-setting input { flex: 1; min-width: 0; accent-color: #28594d; }
+.ds-zoom-setting output { min-width: 4ch; color: #40594f; font-variant-numeric: tabular-nums; text-align: right; }
+.ds-range-setting { display: flex; align-items: center; gap: 10px; margin-top: 5px; }
+.ds-range-setting input { flex: 1; min-width: 0; accent-color: #28594d; }
+.ds-range-setting output { min-width: 5.5em; color: #40594f; font-weight: 500; text-align: right; }
+.ds-range-labels { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 0 0 13px; color: #6d7d73; font: 9px/1.2 system-ui, sans-serif; text-align: center; }
+.ds-range-labels span:first-child { text-align: left; }
+.ds-range-labels span:last-child { text-align: right; }
+.ds-preferences-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 15px; padding-top: 13px; border-top: 1px solid #e0e5df; }
+.ds-preferences-actions button { margin: 0; padding: 6px 9px; border: 1px solid #c7d2c9; border-radius: 6px; background: #fff; color: #294d44; font: 12px system-ui, sans-serif; cursor: pointer; }
+.ds-preferences-actions button:hover { background: #edf2eb; }
+.ds-preferences-actions [role="status"] { color: #6d7d73; font-size: 10px; text-align: right; }
+@media (max-width: 500px) { .ds-preferences-panel { position: fixed; top: 58px; right: 14px; left: 14px; width: auto; } }

@@ -1,5 +1,5 @@
 import { allThreats, threatsForSuit } from './threatModel';
-import type { EwVariantState, Hand, Play, Policy, Rank, RngState, Seat, State, Suit } from '../core';
+import type { EwVariantState, Hand, Play, Policy, Rank, RngState, Seat, Suit } from '../core';
 import { computeDiscardTiers, type DiscardTiers, getIdleThreatThresholdRank } from './defenderDiscard';
 import {
   initClassification,
@@ -253,13 +253,14 @@ function classifyVariantCard(
   card: CardId,
   output: EvaluatePolicyOutput,
   hands: Record<Seat, Hand>,
+  trick: Play[],
   seat: 'E' | 'W',
   demotedCards?: Set<CardId>
 ): VariantCardLabel {
   const legalUniverse = new Set(legalUniverseFromEvaluation(output));
   const playable = new Set(playableCardsFromEvaluation(output));
   const bucket = new Set(output.bucketCards ?? []);
-  const preferred = new Set(preferredCardsForEvaluation(hands, seat, output));
+  const preferred = new Set(preferredCardsForEvaluation(hands, trick, seat, output));
   if (!legalUniverse.has(card)) return 'D';
   if (!playable.has(card)) return 'D';
   if (preferred.has(card)) return demotedCards?.has(card) ? 'C' : 'A';
@@ -493,7 +494,7 @@ function simulateCandidateThroughForcedTrickResolution(
   cardId: CardId
 ): VariantSimulation[] {
   let simulations = evaluations
-    .filter(({ output, worldHands }) => classifyVariantCard(cardId, output, worldHands, seat) !== 'D')
+    .filter(({ output, worldHands }) => classifyVariantCard(cardId, output, worldHands, input.trick, seat) !== 'D')
     .map(({ variant, worldHands, world }) => ({
       variantId: variant.id,
       hands: cloneHands(worldHands),
@@ -532,12 +533,13 @@ function simulateCandidateThroughForcedTrickResolution(
 
 function cardEqualsInLegalUniverse(
   hands: Record<Seat, Hand>,
+  trick: Play[],
   seat: 'E' | 'W',
   cardId: CardId,
   legalUniverse: CardId[]
 ): CardId[] {
   const legalSet = new Set(legalUniverse);
-  const members = classInfoForCard({ hands } as unknown as State, seat, cardId).members
+  const members = classInfoForCard({ hands, trick }, seat, cardId).members
     .filter((member): member is CardId => legalSet.has(member as CardId));
   return members.length > 0 ? members : legalSet.has(cardId) ? [cardId] : [];
 }
@@ -579,7 +581,7 @@ function ambiguousThreatDemotions(
       .filter(({ variant }) => survivingSimulations.some((simulation) => simulation.variantId === variant.id))
       .forEach(({ variant, worldHands, output }) => {
       const legalUniverse = legalUniverseFromEvaluation(output);
-      const equals = cardEqualsInLegalUniverse(worldHands, input.seat, candidate, legalUniverse);
+      const equals = cardEqualsInLegalUniverse(worldHands, input.trick, input.seat, candidate, legalUniverse);
       if (equals.length === 0) return;
       const bucket = demotedByVariant.get(variant.id) ?? new Set<CardId>();
       equals.forEach((equalCard) => bucket.add(equalCard));
@@ -592,13 +594,14 @@ function ambiguousThreatDemotions(
 
 function buildPolicyClassByCard(
   hands: Record<Seat, Hand>,
+  trick: Play[],
   seat: 'E' | 'W',
   chosenBucket: string | undefined,
   bucketCards: CardId[] | undefined
 ): Record<string, string> | undefined {
   if (!bucketCards || bucketCards.length === 0) return undefined;
   const out: Record<string, string> = {};
-  const stateForEq = { hands } as unknown as State;
+  const stateForEq = { hands, trick };
   for (const card of bucketCards) {
     const defaultClass = classInfoForCard(stateForEq, seat, card).classId;
     if (!chosenBucket || !chosenBucket.startsWith('tier')) {
@@ -618,12 +621,13 @@ function buildPolicyClassByCard(
 
 function preferredCardsForEvaluation(
   hands: Record<Seat, Hand>,
+  trick: Play[],
   seat: 'E' | 'W',
   output: EvaluatePolicyOutput
 ): CardId[] {
   if (!output.chosenCardId) return [];
   const legalUniverse = new Set(legalUniverseFromEvaluation(output));
-  const members = classInfoForCard({ hands } as unknown as State, seat, output.chosenCardId).members
+  const members = classInfoForCard({ hands, trick }, seat, output.chosenCardId).members
     .filter((card): card is CardId => legalUniverse.has(card as CardId));
   return members.length > 0 ? members : [output.chosenCardId];
 }
@@ -721,7 +725,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
         filteredCandidates: [...randomCandidates],
         removedAssets
       },
-      policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, bucketCards),
+      policyClassByCard: buildPolicyClassByCard(hands, trick, seat, chosenBucket, bucketCards),
       ddPolicy: ddFiltered.trace,
       ddTrace: buildDdDecisionTrace(legalCardIds, legalCardIds, ddFiltered, chosenCardId),
       rngBefore,
@@ -753,7 +757,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
         filteredCandidates: [...randomCandidates],
         removedAssets
       },
-      policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, bucketCards),
+      policyClassByCard: buildPolicyClassByCard(hands, trick, seat, chosenBucket, bucketCards),
       ddPolicy: ddFiltered.trace,
       ddTrace: buildDdDecisionTrace(legalCardIds, legalCardIds, ddFiltered, chosenCardId),
       rngBefore,
@@ -780,7 +784,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
             chosenCardId,
             chosenBucket,
             bucketCards: [...ddFiltered.candidates],
-            policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+            policyClassByCard: buildPolicyClassByCard(hands, trick, seat, chosenBucket, ddFiltered.candidates),
             ddPolicy: ddFiltered.trace,
             ddTrace: buildDdDecisionTrace(inSuitCardIds, inSuitCardIds, ddFiltered, chosenCardId),
             rngBefore,
@@ -803,7 +807,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
             chosenCardId,
             chosenBucket,
             bucketCards: [...ddOnIdle.candidates],
-            policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddOnIdle.candidates),
+            policyClassByCard: buildPolicyClassByCard(hands, trick, seat, chosenBucket, ddOnIdle.candidates),
             ddPolicy: ddOnIdle.trace,
             ddTrace: buildDdDecisionTrace(inSuitCardIds, idleCards, ddOnIdle, chosenCardId),
             rngBefore,
@@ -824,7 +828,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
             chosenCardId,
             chosenBucket,
             bucketCards: [...ddFiltered.candidates],
-            policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+            policyClassByCard: buildPolicyClassByCard(hands, trick, seat, chosenBucket, ddFiltered.candidates),
             ddPolicy: ddFiltered.trace,
             ddTrace: buildDdDecisionTrace(inSuitCardIds, winningIdle, ddFiltered, chosenCardId),
             rngBefore,
@@ -850,7 +854,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
                 chosenCardId,
                 chosenBucket,
                 bucketCards: [...ddOnBusy.candidates],
-                policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddOnBusy.candidates),
+                policyClassByCard: buildPolicyClassByCard(hands, trick, seat, chosenBucket, ddOnBusy.candidates),
                 ddPolicy: ddOnBusy.trace,
                 ddTrace: buildDdDecisionTrace(inSuitCardIds, busyCards, ddOnBusy, chosenCardId),
                 rngBefore,
@@ -891,7 +895,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
                   chosenCardId,
                   chosenBucket,
                   bucketCards: [...ddFiltered.candidates],
-                  policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, ddFiltered.candidates),
+                  policyClassByCard: buildPolicyClassByCard(hands, trick, seat, chosenBucket, ddFiltered.candidates),
                   ddPolicy: ddFiltered.trace,
                   ddTrace: buildDdDecisionTrace(inSuitCardIds, covering, ddFiltered, chosenCardId),
                   rngBefore,
@@ -931,7 +935,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
           filteredCandidates: [...randomCandidates],
           removedAssets
         },
-        policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, randomCandidates),
+        policyClassByCard: buildPolicyClassByCard(hands, trick, seat, chosenBucket, randomCandidates),
         ddPolicy: ddFiltered.trace,
         ddTrace: buildDdDecisionTrace(inSuitCardIds, randomCandidates, ddFiltered, chosenCardId),
         rngBefore,
@@ -980,7 +984,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
         filteredCandidates: [...randomCandidates],
         removedAssets
       },
-      policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, randomCandidates),
+      policyClassByCard: buildPolicyClassByCard(hands, trick, seat, chosenBucket, randomCandidates),
       ddPolicy: ddFiltered.trace,
       ddTrace: buildDdDecisionTrace(inSuitCardIds, randomCandidates, ddFiltered, chosenCardId),
       rngBefore,
@@ -1011,7 +1015,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
         filteredCandidates: [...randomCandidates],
         removedAssets
       },
-      policyClassByCard: buildPolicyClassByCard(hands, seat, chosenBucket, randomCandidates),
+      policyClassByCard: buildPolicyClassByCard(hands, trick, seat, chosenBucket, randomCandidates),
       ddPolicy: ddFiltered.trace,
       ddTrace: buildDdDecisionTrace(legalCardIds, randomCandidates, ddFiltered, chosenCardId),
       rngBefore,
@@ -1049,7 +1053,7 @@ function evaluatePolicySingleWorld(input: EvaluatePolicyInput): EvaluatePolicyOu
   const removedAssets = ddFiltered.candidates.filter(
     (cardId) => !randomCandidates.includes(cardId) && assets.has(cardId)
   );
-  const policyClassByCard = buildPolicyClassByCard(hands, seat, chosen.name, randomCandidates) ?? {};
+  const policyClassByCard = buildPolicyClassByCard(hands, trick, seat, chosen.name, randomCandidates) ?? {};
   for (const card of [...tiers.tier2a, ...tiers.tier2b]) {
     policyClassByCard[card] = `semiIdle:${card[0]}`;
   }
@@ -1118,13 +1122,13 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
             playable: playableCardsFromEvaluation(output),
             chosenCardId: output.chosenCardId
             ,
-            a: preferredCardsForEvaluation(worldHands, input.seat, output),
-            b: (output.bucketCards ?? []).filter((card) => !preferredCardsForEvaluation(worldHands, input.seat, output).includes(card)),
-            bBuckets: (output.bucketCards ?? []).some((card) => !preferredCardsForEvaluation(worldHands, input.seat, output).includes(card))
+            a: preferredCardsForEvaluation(worldHands, input.trick, input.seat, output),
+            b: (output.bucketCards ?? []).filter((card) => !preferredCardsForEvaluation(worldHands, input.trick, input.seat, output).includes(card)),
+            bBuckets: (output.bucketCards ?? []).some((card) => !preferredCardsForEvaluation(worldHands, input.trick, input.seat, output).includes(card))
               ? [output.chosenBucket ?? '-']
               : [],
             c: playableCardsFromEvaluation(output).filter((card) => {
-              const a = preferredCardsForEvaluation(worldHands, input.seat, output);
+              const a = preferredCardsForEvaluation(worldHands, input.trick, input.seat, output);
               const b = (output.bucketCards ?? []).filter((bucketCard) => !a.includes(bucketCard));
               return !a.includes(card) && !b.includes(card);
             }),
@@ -1174,7 +1178,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
   const candidateCards = [...new Set(playableByVariant.flatMap(({ output }) => legalUniverseFromEvaluation(output)))];
   const cardScores = candidateCards.map((card) => {
     const labels = evaluations.map(({ variant, output, worldHands }) =>
-      classifyVariantCard(card, output, worldHands, input.seat, demotedByVariant.get(variant.id))
+      classifyVariantCard(card, output, worldHands, input.trick, input.seat, demotedByVariant.get(variant.id))
     );
     const dCount = labels.filter((label) => label === 'D').length;
     const cCount = labels.filter((label) => label === 'C').length;
@@ -1215,7 +1219,7 @@ export function evaluatePolicy(input: EvaluatePolicyInput): EvaluatePolicyOutput
       perVariant: evaluations.map(({ variant, output, worldHands }) => {
         const playable = playableCardsFromEvaluation(output);
         const demoted = demotedByVariant.get(variant.id) ?? new Set<CardId>();
-        const preferred = preferredCardsForEvaluation(worldHands, input.seat, output);
+        const preferred = preferredCardsForEvaluation(worldHands, input.trick, input.seat, output);
         const a = preferred.filter((card) => !demoted.has(card));
         const b = (output.bucketCards ?? []).filter((card) => !preferred.includes(card) && !demoted.has(card));
         const c = playable.filter((card) => !a.includes(card) && !b.includes(card));

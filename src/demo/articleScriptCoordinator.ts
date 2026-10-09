@@ -13,7 +13,7 @@ import {
 import {
   defaultArticleScriptHistory,
   matchArticleScriptHistory,
-  replayArticleHistory,
+  replayArticleHistory as defaultReplayArticleHistory,
   type ArticleScriptChoiceSelections,
   type ArticleScriptStateId
 } from './articleScriptRuntime';
@@ -72,7 +72,7 @@ type ArticleScriptDerivedCache = {
   seed: number;
   checkpointId: string | null;
   matchByCursor: Map<number, ReturnType<typeof matchArticleScriptHistory>>;
-  replayByCursor: Map<number, ReturnType<typeof replayArticleHistory>>;
+  replayByCursor: Map<number, ReturnType<typeof defaultReplayArticleHistory>>;
 };
 
 export type AuthoredBranchTreeNode = {
@@ -99,6 +99,7 @@ export type ArticleScriptChoicePresentation = {
 };
 
 export type CreateArticleScriptCoordinatorDeps = {
+  replayHistory?: typeof defaultReplayArticleHistory;
   getDisplayMode: () => DisplayMode;
   getCurrentProblem: () => ProblemWithThreats;
   getCurrentProblemId: () => string;
@@ -127,6 +128,7 @@ function suitStrengthForAdvance(suit: Suit): number {
 }
 
 export function createArticleScriptCoordinator(deps: CreateArticleScriptCoordinatorDeps) {
+  const replayArticleHistory = deps.replayHistory ?? defaultReplayArticleHistory;
   let articleScriptDerivedCache: ArticleScriptDerivedCache | null = null;
   const authoredBranchTreeCache = new Map<string, AuthoredBranchTreeNode | null>();
 

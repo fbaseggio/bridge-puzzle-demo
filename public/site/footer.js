@@ -20,4 +20,14 @@
   }).then(features => {
     for (const element of pavIndexLinks) element.hidden = features.pavIndex !== true;
   }).catch(() => { /* Index links remain hidden when configuration is unavailable. */ });
+
+  // Full pages opt into a shared preferences surface. Embedded diagrams stay
+  // untouched, and dynamic consumer headers are mounted when they appear.
+  import('/site/preferences.js').then(({ mountPreferencesMenu }) => {
+    if (mountPreferencesMenu()) return;
+    const observer = new MutationObserver(() => {
+      if (mountPreferencesMenu()) observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }).catch(() => { /* Supporting navigation must remain usable without preferences. */ });
 })();
