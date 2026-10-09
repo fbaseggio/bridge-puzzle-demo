@@ -43,7 +43,7 @@ export type WidgetHost = {
   evaluateClaim?: (state: State) => WidgetClaimResult;
   practiceSettings?: WidgetPracticeSettings;
   onPracticeSettingsChange?: (settings:WidgetPracticeSettings)=>void;
-  /** Optional consumer preference, called only with DDS-optimal defender cards. */
+  /** Optional consumer preference: DDS-optimal cards when available; legal cards on an optional-DDS fallback. */
   preferDefenderCards?: (state: State, candidates: readonly CardId[]) => readonly CardId[];
   engine?: { init: typeof init; apply: typeof apply };
   articleScript?: ArticleScriptSpec;

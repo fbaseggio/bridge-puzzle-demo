@@ -173,7 +173,7 @@ import { shouldRenderForWidgetTransportOutcome } from './widgetTransportRenderSc
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 import { waitForRequiredDdsReady, type DdsAvailabilityPhase } from './ddsAvailabilityGate';
 import { readWidgetHost } from './widgetHost';
-import { defenderPreference } from './defenderPreference';
+import { defenderPreference, fallbackDefenderPlay } from './defenderPreference';
 import { readSitePreferences, updateSitePreferences, watchSitePreferences, type SitePreferences } from './sitePreferences';
 import { CardMotionTiming } from './cardMotionTiming';
 import { lowestEquivalentPlay, singletonOrEqualsPlay } from './forcedAutoplay';
@@ -2603,7 +2603,7 @@ function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameter
     const legalCandidates = legalPlays.map((p) => toCardId(p.suit, p.rank) as CardId);
     const policyChoice = toCardId(autoChoice.play.suit, autoChoice.play.rank) as CardId;
     const fallback = (reason: 'runtime-unavailable' | 'no-safe-match') => {
-      const play = lowestEquivalentPlay(liveState, autoChoice.play!, legalPlays);
+      const play = fallbackDefenderPlay(liveState, legalPlays, autoChoice.play!, widgetHost?.preferDefenderCards);
       const finalChoice = toCardId(play.suit, play.rank) as CardId;
       playedCardIds.push(finalChoice);
       return { play, trace: {
