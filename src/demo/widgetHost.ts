@@ -6,6 +6,8 @@ import type { DdsQueryInput, DdsQueryResult } from '../ai/ddsBrowser';
 
 /** Opt-in host runtime, used by the local Random experiment. */
 export type WidgetDdsRuntime = {
+  /** Defaults to required for existing hosts; diagnostic adapters can retain optional DDS. */
+  required?: boolean;
   ensure: () => Promise<boolean>;
   status: () => 'idle' | 'loading' | 'ready' | 'failed';
   query: (input: DdsQueryInput) => DdsQueryResult;
@@ -28,7 +30,7 @@ export type WidgetHost = {
   problem: Problem;
   /** Host-owned next-deal action for the double-chevron control. */
   onNextDeal?: () => void;
-  /** Supplying a runtime makes DDS mandatory for assisted play in this host. */
+  /** Supplied runtimes require DDS unless they explicitly set required: false. */
   dds?: WidgetDdsRuntime;
   exploration?: boolean;
   /** Allow optional E/W autoplay while retaining manual exploration defaults. */

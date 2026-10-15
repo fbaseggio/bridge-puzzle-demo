@@ -2,6 +2,7 @@ export type SitePreferences = {
   version: 1;
   alwaysHint: boolean;
   allowMoreAnalysisTime: boolean;
+  showAnalysisLog?: boolean;
   autoplaySingletons: boolean;
   autoplayEw: boolean;
   tableColor: 'default' | 'very-light' | 'light' | 'medium';

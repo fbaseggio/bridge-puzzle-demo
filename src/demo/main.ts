@@ -1132,7 +1132,7 @@ function versionUnknownModeEnabled(): boolean {
 }
 
 function currentProblemDdsRequirement(): 'optional' | 'required' {
-  if (widgetHost?.dds) return 'required';
+  if (widgetHost?.dds) return widgetHost.dds.required === false ? 'optional' : 'required';
   return resolveDemoProblemDdsRequirement(currentProblemId);
 }
 
