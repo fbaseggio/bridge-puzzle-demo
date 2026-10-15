@@ -3,6 +3,7 @@ export const PREFERENCES_KEY = 'deepsqueeze.preferences.v1';
 export const DEFAULT_PREFERENCES = Object.freeze({
   version: 1,
   alwaysHint: false,
+  allowMoreAnalysisTime: false,
   autoplaySingletons: false,
   autoplayEw: false,
   tableColor: 'default',
@@ -29,6 +30,7 @@ export function normalizePreferences(value) {
   const tableColor = source.tableColor === 'light-green' ? 'very-light' : source.tableColor;
   return {
     version: 1,
+    allowMoreAnalysisTime: booleanOrDefault(source.allowMoreAnalysisTime, DEFAULT_PREFERENCES.allowMoreAnalysisTime),
     alwaysHint: booleanOrDefault(source.alwaysHint, DEFAULT_PREFERENCES.alwaysHint),
     autoplaySingletons: booleanOrDefault(source.autoplaySingletons, DEFAULT_PREFERENCES.autoplaySingletons),
     autoplayEw: booleanOrDefault(source.autoplayEw, DEFAULT_PREFERENCES.autoplayEw),
@@ -87,6 +89,7 @@ function preferencesFromForm(form) {
   return normalizePreferences({
     version: 1,
     alwaysHint: data.has('alwaysHint'),
+    allowMoreAnalysisTime: data.has('allowMoreAnalysisTime'),
     autoplaySingletons: data.has('autoplaySingletons'),
     autoplayEw: data.has('autoplayEw'),
     tableColor: TABLE_COLOR_LEVELS[tableColorIndex] ?? DEFAULT_PREFERENCES.tableColor,
@@ -96,6 +99,7 @@ function preferencesFromForm(form) {
 }
 
 function populateForm(form, preferences) {
+  form.elements.allowMoreAnalysisTime.checked = preferences.allowMoreAnalysisTime;
   form.elements.alwaysHint.checked = preferences.alwaysHint;
   form.elements.autoplaySingletons.checked = preferences.autoplaySingletons;
   form.elements.autoplayEw.checked = preferences.autoplayEw;
@@ -120,6 +124,11 @@ export function mountPreferencesMenu() {
     <div class="ds-preferences-panel">
       <div class="ds-preferences-heading"><strong>Preferences</strong><span>Defaults for this browser</span></div>
       <form>
+        <fieldset>
+          <legend>Analysis</legend>
+          <label class="ds-check"><input type="checkbox" name="allowMoreAnalysisTime"> Allow more analysis time</label>
+          <small>For slower computers: allows four times as long for Squeeze Analyzer calculations and DDS loading limits. Applies on the next analysis or load attempt.</small>
+        </fieldset>
         <fieldset>
           <legend>Guidance</legend>
           <label class="ds-check"><input type="checkbox" name="alwaysHint"> Show hints automatically</label>
