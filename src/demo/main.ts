@@ -1,3 +1,4 @@
+import { tableCardUndoCursor, replayBeforeTableCard } from './tableCardUndo';
 import { allThreats, stoppingDefenders, cloneThreatContext as copyThreatContext } from '../ai/threatModel';
 import './style.css';
 
@@ -1271,8 +1272,11 @@ function requireDdsReadyForAction(trigger: RequiredDdsActionTrigger): boolean {
   return false;
 }
 
+let tableUndoPaused = false;
+let tableUndoExploration = false;
+
 function configuredUserControls(base: Seat[] = currentProblem.userControls): Seat[] {
-  if (articleScriptModeEnabled()) return ['N', 'E', 'S', 'W'];
+  if (tableUndoPaused || articleScriptModeEnabled()) return ['N', 'E', 'S', 'W'];
   return autoplayEw ? [...base] : ['N', 'E', 'S', 'W'];
 }
 
@@ -2968,6 +2972,8 @@ function chooseSingleDefenderAdvancePlay(): Play | null {
 }
 
 function advanceOneWidgetCard(): boolean {
+  tableUndoPaused = false;
+  syncConfiguredUserControls();
   if (trickFrozen) {
     unfreezeTrick(true);
   }
@@ -3094,6 +3100,8 @@ function advanceOneWidgetCard(): boolean {
 }
 
 function performWidgetNextTransportAction(options: { renderOnPause?: boolean } = {}): 'advanced' | 'paused' | 'noop' {
+  tableUndoPaused = false;
+  syncConfiguredUserControls();
   const renderOnPause = options.renderOnPause !== false;
   if (articleScriptModeEnabled()) {
     const transportResult = createArticleScriptWidgetTransportDriver().next();
@@ -3108,6 +3116,8 @@ function performWidgetNextTransportAction(options: { renderOnPause?: boolean } =
 }
 
 function advanceWidgetToNextPauseBoundary(): void {
+  tableUndoPaused = false;
+  syncConfiguredUserControls();
   if (articleScriptModeEnabled()) {
     const transportResult = createArticleScriptWidgetTransportDriver().nextPause();
     if (transportResult.outcome !== 'noop') {
@@ -5170,6 +5180,7 @@ function stateSingletonKey(s: State, play: Play): string {
 }
 
 function syncSingletonAutoplay(): void {
+  if (tableUndoPaused) { clearSingletonAutoplayTimer(); return; }
   if (articleScriptModeEnabled()) {
     syncConfiguredUserControls();
     const scriptedChoice = pendingArticleScriptChoice();
@@ -5332,6 +5343,7 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
 }
 
 function advanceAutoplayFromCurrentState(): void {
+  if (tableUndoPaused) return;
   if (!requireDdsReadyForAction('autoplay')) {
     render();
     return;
@@ -5375,6 +5387,8 @@ type ResetGameOptions = {
 };
 
 function resetGame(seed: number, reason: string, options: ResetGameOptions = {}): void {
+  tableUndoExploration = false;
+  tableUndoPaused = false;
   clearSingletonAutoplayTimer();
   clearArticleScriptProblemCompletePromotionState();
   clearPulseTimer();
@@ -5436,6 +5450,8 @@ function resetGame(seed: number, reason: string, options: ResetGameOptions = {})
 }
 
 function selectProblem(problemId: string, variantId?: string | null): void {
+  tableUndoExploration = false;
+  tableUndoPaused = false;
   clearSingletonAutoplayTimer();
   clearArticleScriptProblemCompletePromotionState();
   clearPulseTimer();
@@ -5494,6 +5510,62 @@ function selectProblem(problemId: string, variantId?: string | null): void {
   }
   syncRequiredDdsAvailabilityFromRuntime();
   if (currentProblemRequiresDds()) void ensureRequiredDdsAvailability('startup');
+  render();
+}
+
+function undoTableCard(play: Play): void {
+  const trick = trickFrozen && lastCompletedTrick ? lastCompletedTrick : state.trick;
+  const history = articleScriptState ? articleScriptState.history : ddsPlayHistory as CardId[];
+  const cursor = tableCardUndoCursor(history, trick, play);
+  if (cursor === null) return;
+  const replayed = replayBeforeTableCard(withDdSource(currentProblem), history, cursor, currentSeed, replayArticleHistory);
+  if (!replayed || replayed.state.turn !== play.seat) return;
+
+  tableUndoPaused = true;
+  tableUndoExploration = true;
+  hintRequestSeq += 1;
+  clearSingletonAutoplayTimer();
+  clearTimeout(cardMotionCompletionTimer);
+  pendingCardMotions = [];
+  cardMotionBatch = undefined;
+  clearPulseTimer();
+  pulseUntilByCardKey.clear();
+  clearHint();
+  clearWidgetMessage();
+  clearDdErrorVisual();
+  inevitableFailureAlert = false;
+  incrementPracticeUndoUsage();
+  if (practiceSession) {
+    practiceSession.isTerminal = false;
+    practiceSession.terminalOutcome = null;
+  }
+  if (articleScriptState) {
+    replayArticleScriptToCursor(cursor);
+  } else {
+    state = replayed.state;
+    ddsPlayHistory = [...replayed.playedCardIds];
+    ddsTeachingSummaries = [];
+    resetSemanticStreams();
+    teachingReducer.setTrumpSuit(state.trumpSuit);
+    clearTeachingEvents();
+    clearWidgetNarrationFeed();
+    inversePrimaryBySuit = {};
+    runStatus = 'running';
+    runPlayCounter = cursor;
+    currentRunTranscript = [];
+    currentRunUserPlays = [];
+    currentRunEqTokens = [];
+    userPlayHistory = [];
+    playAgainAvailable = false;
+    replaySuppressedForRun = true;
+    refreshThreatModel(currentProblemId, false);
+  }
+  while (undoStack.length && undoStack[undoStack.length - 1].ddsPlayHistory.length >= cursor) undoStack.pop();
+  deferredLogLines = [];
+  unfreezeTrick(false);
+  syncConfiguredUserControls();
+  state.phase = 'awaitUser';
+  logs = [...logs, `[UNDO] returned to before ${play.seat}:${play.suit}${play.rank}`].slice(-500);
   render();
 }
 
@@ -5560,6 +5632,8 @@ function runTurn(play: Play): void {
     unfreezeTrick(true);
   }
 
+  tableUndoPaused = false;
+  syncConfiguredUserControls();
   const before = state;
   const ddsHistoryForTurn = [...ddsPlayHistory];
   const backstopHistoryForTurn = [...ddsHistoryForTurn, `${play.suit}${play.rank}`];
@@ -5658,7 +5732,8 @@ function runTurn(play: Play): void {
   ddsPlayHistory = ddsHistoryForTurn;
 
   const complete = result.events.find((e) => e.type === 'handComplete');
-  if (complete?.type === 'handComplete' && complete.success) {
+  // Exact-card exploration no longer has a complete policy-decision transcript.
+  if (complete?.type === 'handComplete' && complete.success && !tableUndoExploration) {
     lastSuccessfulTranscript = {
       problemId: currentProblemId,
       seed: currentSeed,
@@ -5915,6 +5990,7 @@ function renderDebugSection(): HTMLElement {
 }
 
 function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
+  tableUndoExploration = false;
   clearSingletonAutoplayTimer();
   clearWidgetNarrationFeed();
   clearHint();
@@ -6933,6 +7009,12 @@ function renderTrickTable(view: State, visuallyHidden = false): HTMLElement {
         rankEl.classList.add('rank');
         applyRankVisual(rankEl, regularDisplay.visual);
       }
+      // Do not inherit the legacy table's dismissal tooltip.
+      text.title = '';
+      text.onclick = (event) => {
+        event.stopPropagation();
+        undoTableCard(play);
+      };
       slot.appendChild(text);
     }
     table.appendChild(slot);
@@ -8251,6 +8333,7 @@ function replayArticleScriptToCursor(cursor: number): void {
 }
 
 function resetToCurrentArticleCheckpoint(): void {
+  tableUndoPaused = false;
   const scriptState = articleScriptCoordinator.getArticleScriptState();
   if (!scriptState) return;
   articleScriptCoordinator.resetToCurrentCheckpoint();
@@ -8260,6 +8343,7 @@ function resetToCurrentArticleCheckpoint(): void {
 }
 
 function resetCurrentArticleScriptToBeginning(): void {
+  tableUndoPaused = false;
   const scriptState = articleScriptCoordinator.getArticleScriptState();
   if (!scriptState) return;
   articleScriptCoordinator.resetToBeginning();
