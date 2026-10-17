@@ -1,4 +1,4 @@
-import { tableCardUndoCursor, replayBeforeTableCard } from './tableCardUndo';
+import { tableCardUndoCursor, replayBeforeTableCard, previousCompletedTrickCursor, replayCompletedTableTrick, retainTableContinuation, nextRecordedTrickCursor } from './tableCardUndo';
 import { allThreats, stoppingDefenders, cloneThreatContext as copyThreatContext } from '../ai/threatModel';
 import './style.css';
 
@@ -1274,6 +1274,7 @@ function requireDdsReadyForAction(trigger: RequiredDdsActionTrigger): boolean {
 
 let tableUndoPaused = false;
 let tableUndoExploration = false;
+let rememberedTableHistory: CardId[] = [];
 
 function configuredUserControls(base: Seat[] = currentProblem.userControls): Seat[] {
   if (tableUndoPaused || articleScriptModeEnabled()) return ['N', 'E', 'S', 'W'];
@@ -5388,6 +5389,7 @@ type ResetGameOptions = {
 
 function resetGame(seed: number, reason: string, options: ResetGameOptions = {}): void {
   tableUndoExploration = false;
+  rememberedTableHistory = [];
   tableUndoPaused = false;
   clearSingletonAutoplayTimer();
   clearArticleScriptProblemCompletePromotionState();
@@ -5451,6 +5453,7 @@ function resetGame(seed: number, reason: string, options: ResetGameOptions = {})
 
 function selectProblem(problemId: string, variantId?: string | null): void {
   tableUndoExploration = false;
+  rememberedTableHistory = [];
   tableUndoPaused = false;
   clearSingletonAutoplayTimer();
   clearArticleScriptProblemCompletePromotionState();
@@ -5518,8 +5521,53 @@ function undoTableCard(play: Play): void {
   const history = articleScriptState ? articleScriptState.history : ddsPlayHistory as CardId[];
   const cursor = tableCardUndoCursor(history, trick, play);
   if (cursor === null) return;
+  restoreTableHistory(cursor, play);
+}
+
+function previousTableTrickCursor(): number | null {
+  const history = articleScriptState ? articleScriptState.history : ddsPlayHistory as CardId[];
+  let cursor = articleScriptState ? articleScriptState.cursor : history.length;
+  // Automatic play can extend beyond the visible frozen table.
+  if (trickFrozen && lastCompletedTrick?.length === 4) {
+    const start = tableCardUndoCursor(history, lastCompletedTrick, lastCompletedTrick[0]);
+    if (start === null) return null;
+    cursor = start + 4;
+  }
+  return previousCompletedTrickCursor(cursor, trickFrozen);
+}
+
+function playedTableHistory(): CardId[] {
+  return articleScriptState
+    ? articleScriptState.history.slice(0, articleScriptState.cursor)
+    : [...ddsPlayHistory] as CardId[];
+}
+
+function nextRememberedTableTrickCursor(): number | null {
+  const played = playedTableHistory();
+  rememberedTableHistory = retainTableContinuation(rememberedTableHistory, played);
+  return nextRecordedTrickCursor(played.length, rememberedTableHistory.length);
+}
+
+function replayNextRememberedTableTrick(): void {
+  const cursor = nextRememberedTableTrickCursor();
+  if (cursor !== null) restoreTableHistory(cursor, undefined, rememberedTableHistory);
+}
+
+function backupPreviousTableTrick(): void {
+  const cursor = previousTableTrickCursor();
+  if (cursor !== null) restoreTableHistory(cursor);
+}
+
+/** Shared rewind cleanup keeps automatic play paused and table-card take-back
+ * available after either kind of navigation. */
+function restoreTableHistory(cursor: number, play?: Play, recorded?: CardId[]): void {
+  const history = recorded ?? (articleScriptState ? articleScriptState.history : ddsPlayHistory as CardId[]);
   const replayed = replayBeforeTableCard(withDdSource(currentProblem), history, cursor, currentSeed, replayArticleHistory);
-  if (!replayed || replayed.state.turn !== play.seat) return;
+  if (!replayed || (play && replayed.state.turn !== play.seat)) return;
+  const showCompleted = !play && cursor > 0 && cursor % 4 === 0;
+  const completed = showCompleted ? replayCompletedTableTrick(withDdSource(currentProblem), history, cursor, currentSeed) : null;
+  if (showCompleted && !completed) return;
+  rememberedTableHistory = retainTableContinuation(rememberedTableHistory, playedTableHistory());
 
   tableUndoPaused = true;
   tableUndoExploration = true;
@@ -5565,7 +5613,15 @@ function undoTableCard(play: Play): void {
   unfreezeTrick(false);
   syncConfiguredUserControls();
   state.phase = 'awaitUser';
-  logs = [...logs, `[UNDO] returned to before ${play.seat}:${play.suit}${play.rank}`].slice(-500);
+  if (completed) {
+    const visible = cloneStateForLog(completed.before);
+    for (const event of completed.events) applyEventToShadow(visible, event);
+    trickFrozen = true;
+    frozenViewState = visible;
+    lastCompletedTrick = completed.trick.map(p => ({...p}));
+    canLeadDismiss = state.trick.length === 0;
+  }
+  logs = [...logs, play ? `[UNDO] returned to before ${play.seat}:${play.suit}${play.rank}` : `[HISTORY] returned to play ${cursor}`].slice(-500);
   render();
 }
 
@@ -5991,6 +6047,7 @@ function renderDebugSection(): HTMLElement {
 
 function startPlayAgain(source: 'manual' | 'autoplay' = 'autoplay'): void {
   tableUndoExploration = false;
+  rememberedTableHistory = [];
   clearSingletonAutoplayTimer();
   clearWidgetNarrationFeed();
   clearHint();
@@ -7949,6 +8006,9 @@ function render(): void {
     currentViewState,
     articleScriptUndoTargetCursor,
     backupLastUserPlay,
+    previousTrick: widgetHost ? backupPreviousTableTrick : undefined,
+    previousTrickAvailable: Boolean(widgetHost && previousTableTrickCursor() !== null),
+    replayNextTrick: widgetHost && nextRememberedTableTrickCursor() !== null ? replayNextRememberedTableTrick : undefined,
     undoStack,
     followCurrentArticleScriptUserTurn,
     legalPlays,

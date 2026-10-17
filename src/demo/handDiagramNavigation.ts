@@ -80,6 +80,9 @@ type HandDiagramNavigationDeps = {
   currentViewState: () => State;
   articleScriptUndoTargetCursor: () => number;
   backupLastUserPlay: () => void;
+  previousTrick?: () => void;
+  previousTrickAvailable?: boolean;
+  replayNextTrick?: () => void;
   undoStack: unknown[];
   followCurrentArticleScriptUserTurn: () => boolean;
   legalPlays: typeof import('../core').legalPlays;
@@ -114,6 +117,29 @@ type HandDiagramNavigationDeps = {
   onNextDeal?: () => void;
   positionComplete?: boolean;
 };
+
+function appendPreviousTrickButton(transport:HTMLElement,deps:HandDiagramNavigationDeps):void {
+  if (!deps.previousTrick) return;
+  const button=document.createElement('button');button.type='button';
+  button.className='icon-btn script-transport-btn previous-trick-btn';
+  button.title='Previous completed trick';button.setAttribute('aria-label','Previous completed trick');
+  const icon=renderLucideIcon('chevrons-right','transport-lucide-icon');
+  icon.style.transform='rotate(180deg)';button.appendChild(icon);
+  button.disabled=!deps.previousTrickAvailable;
+  button.onclick=()=>{deps.dismissTransientWidgetOutcome(deps.currentViewState());deps.previousTrick!();};
+  transport.appendChild(button);
+}
+
+function useRememberedTrick(button: HTMLButtonElement, deps: HandDiagramNavigationDeps): void {
+  if (!deps.replayNextTrick) return;
+  button.disabled = false;
+  button.title = 'Replay next trick';
+  button.setAttribute('aria-label', 'Replay next trick');
+  button.onclick = () => {
+    deps.dismissTransientWidgetOutcome(deps.currentViewState());
+    deps.replayNextTrick!();
+  };
+}
 
 function currentTurnPrompt(view: State, deps: HandDiagramNavigationDeps): string {
   if (deps.positionComplete) return 'All cards played.';
@@ -451,6 +477,7 @@ function renderReadingQuietTransportRow(args: {
     resetGame(currentSeed, 'reset', { preserveReadingReveal: deps.readingRevealEnabled, skipStartupGate: deps.readingRevealEnabled });
   };
   transport.appendChild(restartBtn);
+  appendPreviousTrickButton(transport, deps);
 
   const undoBtn = document.createElement('button');
   undoBtn.type = 'button';
@@ -537,7 +564,8 @@ function renderReadingQuietTransportRow(args: {
     if (practiceAdvanceTransport && !practiceAdvanceEnabled) return;
     advanceWidgetToNextPauseBoundary();
   };
-  transport.appendChild(jumpBtn);
+  useRememberedTrick(jumpBtn, deps);
+    transport.appendChild(jumpBtn);
 
   const toolsBtn = document.createElement('button');
   toolsBtn.type = 'button';
@@ -764,6 +792,7 @@ function renderTransportRow(args: {
     resetGame(currentSeed, 'reset', { preserveReadingReveal: deps.readingRevealEnabled, skipStartupGate: deps.readingRevealEnabled });
   };
   transport.appendChild(restartBtn);
+  appendPreviousTrickButton(transport, deps);
 
   const undoBtn = document.createElement('button');
   undoBtn.type = 'button';
@@ -854,6 +883,7 @@ function renderTransportRow(args: {
       jumpBtn.disabled = false;
       jumpBtn.onclick = deps.onNextDeal;
     }
+    useRememberedTrick(jumpBtn, deps);
     transport.appendChild(jumpBtn);
   }
 
