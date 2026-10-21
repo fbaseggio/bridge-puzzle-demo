@@ -2,6 +2,7 @@ export type SitePreferences = {
   version: 1;
   alwaysHint: boolean;
   allowMoreAnalysisTime: boolean;
+  ddsLoadingAllowance?: 'normal' | 'extended' | 'patient';
   showAnalysisLog?: boolean;
   autoplaySingletons: boolean;
   autoplayEw: boolean;

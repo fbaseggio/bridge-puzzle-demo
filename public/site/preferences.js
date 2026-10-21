@@ -4,6 +4,7 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   version: 1,
   alwaysHint: false,
   allowMoreAnalysisTime: false,
+  ddsLoadingAllowance: 'normal',
   showAnalysisLog: false,
   autoplaySingletons: false,
   autoplayEw: false,
@@ -32,6 +33,7 @@ export function normalizePreferences(value) {
   return {
     version: 1,
     allowMoreAnalysisTime: booleanOrDefault(source.allowMoreAnalysisTime, DEFAULT_PREFERENCES.allowMoreAnalysisTime),
+    ddsLoadingAllowance: ['normal','extended','patient'].includes(source.ddsLoadingAllowance) ? source.ddsLoadingAllowance : (source.allowMoreAnalysisTime === true ? 'extended' : 'normal'),
     showAnalysisLog: booleanOrDefault(source.showAnalysisLog, DEFAULT_PREFERENCES.showAnalysisLog),
     alwaysHint: booleanOrDefault(source.alwaysHint, DEFAULT_PREFERENCES.alwaysHint),
     autoplaySingletons: booleanOrDefault(source.autoplaySingletons, DEFAULT_PREFERENCES.autoplaySingletons),
@@ -92,6 +94,7 @@ function preferencesFromForm(form) {
     version: 1,
     alwaysHint: data.has('alwaysHint'),
     allowMoreAnalysisTime: data.has('allowMoreAnalysisTime'),
+    ddsLoadingAllowance: data.get('ddsLoadingAllowance'),
     showAnalysisLog: data.has('showAnalysisLog'),
     autoplaySingletons: data.has('autoplaySingletons'),
     autoplayEw: data.has('autoplayEw'),
@@ -103,6 +106,7 @@ function preferencesFromForm(form) {
 
 function populateForm(form, preferences) {
   form.elements.allowMoreAnalysisTime.checked = preferences.allowMoreAnalysisTime;
+  form.elements.ddsLoadingAllowance.value = preferences.ddsLoadingAllowance;
   form.elements.showAnalysisLog.checked = preferences.showAnalysisLog;
   form.elements.alwaysHint.checked = preferences.alwaysHint;
   form.elements.autoplaySingletons.checked = preferences.autoplaySingletons;
@@ -131,9 +135,11 @@ export function mountPreferencesMenu() {
         <fieldset>
           <legend>Analysis</legend>
           <label class="ds-check"><input type="checkbox" name="allowMoreAnalysisTime"> Allow more analysis time</label>
-          <small>For slower computers: allows four times as long for Squeeze Analyzer calculations and DDS loading limits. Applies on the next analysis or load attempt.</small>
+          <small>Allows four times as long for analysis calculations. Applies on the next analysis.</small>
+          <label>DDS loading allowance <select name="ddsLoadingAllowance"><option value="normal">Normal — 30 seconds</option><option value="extended">Extended — 2 minutes</option><option value="patient">Patient — 10 minutes</option></select></label>
+          <small>One loading attempt; Cancel and Retry are available in the analysis pane. Applies on the next load.</small>
           <label class="ds-check"><input type="checkbox" name="showAnalysisLog"> Show analysis log</label>
-          <small>Movie, Random and Squeeze Analyzer: activity, copy log and refresh controls.</small>
+          <small>Movie, Random and Squeeze Analyzer: activity, copy log, Cancel and Retry controls.</small>
         </fieldset>
         <fieldset>
           <legend>Guidance</legend>

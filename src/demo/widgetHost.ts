@@ -8,6 +8,9 @@ import type { DdsQueryInput, DdsQueryResult } from '../ai/ddsBrowser';
 export type WidgetDdsRuntime = {
   /** Defaults to required for existing hosts; diagnostic adapters can retain optional DDS. */
   required?: boolean;
+  prepare?: (input:DdsQueryInput)=>Promise<boolean>;
+  has?: (input:DdsQueryInput)=>boolean;
+  cancel?: ()=>void;
   ensure: () => Promise<boolean>;
   status: () => 'idle' | 'loading' | 'ready' | 'failed';
   query: (input: DdsQueryInput) => DdsQueryResult;

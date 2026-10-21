@@ -27,6 +27,7 @@ import {
   type Suit
 } from '../core';
 import { computeDiscardTiers, getIdleThreatThresholdRank } from '../ai/defenderDiscard';
+import type {DdsQueryInput} from '../ai/ddsBrowser';
 import { ensureDdsRuntime as defaultEnsureDdsRuntime, getDdsRuntimeStatus as defaultGetDdsRuntimeStatus, queryDdsNextPlays as defaultQueryDdsNextPlays, warmDdsRuntime as defaultWarmDdsRuntime } from '../ai/ddsBrowser';
 import { buildDdsScoreByCard } from '../ai/ddsCardScores';
 import { evaluatePolicy } from '../ai/evaluatePolicy';
@@ -1277,6 +1278,8 @@ let tableUndoExploration = false;
 let rememberedTableHistory: CardId[] = [];
 
 function configuredUserControls(base: Seat[] = currentProblem.userControls): Seat[] {
+  // Async DDS hosts advance one card at a time, after their worker answer.
+  if (widgetHost?.dds?.prepare) return ['N','E','S','W'];
   if (tableUndoPaused || articleScriptModeEnabled()) return ['N', 'E', 'S', 'W'];
   return autoplayEw ? [...base] : ['N', 'E', 'S', 'W'];
 }
@@ -2967,12 +2970,19 @@ function chooseSingleDefenderAdvancePlay(): Play | null {
     ewVariantState: state.ewVariantState,
     rng: state.rng
   });
+  if (widgetHost?.dds?.prepare) state.rng = { ...evaluated.rngAfter };
   const chosenCardId = evaluated.chosenCardId;
   if (!chosenCardId) return legal[0] ?? null;
-  return legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId) ?? legal[0] ?? null;
+  const selected=legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId) ?? legal[0];
+  if(widgetHost?.dds?.prepare&&selected){
+   const adjusted=buildBrowserDdsBackstop([...ddsPlayHistory])!({state,policy,legalPlays:legal,autoChoice:{play:selected} as any});
+   if(adjusted&&'play' in adjusted)return adjusted.play;
+  }
+  return selected??null;
 }
 
 function advanceOneWidgetCard(): boolean {
+  if(deferWorkerAction(()=>{advanceOneWidgetCard();}))return false;
   tableUndoPaused = false;
   syncConfiguredUserControls();
   if (trickFrozen) {
@@ -3019,7 +3029,7 @@ function advanceOneWidgetCard(): boolean {
   }
 
   syncConfiguredUserControls();
-  const userTurn = state.userControls.includes(state.turn);
+  const userTurn = state.userControls.includes(state.turn) && !(widgetHost?.dds?.prepare && ['E','W'].includes(state.turn));
   const nonScriptForwardMode = resolveWidgetNonScriptForwardMode({
     scriptedOpening: startupOpeningForProblem(currentProblem),
     playedCardIds: ddsPlayHistory,
@@ -3148,6 +3158,7 @@ function encodeUserHistoryForUrl(history: CardId[]): string {
 }
 
 function requestHint(): void {
+  if(deferWorkerAction(requestHint))return;
   if (!hintsEnabled) return;
   hintDiag('requestHint start');
   const reqSeq = ++hintRequestSeq;
@@ -5181,6 +5192,10 @@ function stateSingletonKey(s: State, play: Play): string {
 }
 
 function syncSingletonAutoplay(): void {
+  if(widgetHost?.dds?.prepare&&document.hidden){clearSingletonAutoplayTimer();return;}
+  if(widgetHost?.dds?.prepare&&autoplayEw&&['E','W'].includes(state.turn)&&!articleScriptModeEnabled()){
+   syncWorkerDefenderAutoplay();return;
+  }
   if (tableUndoPaused) { clearSingletonAutoplayTimer(); return; }
   if (articleScriptModeEnabled()) {
     syncConfiguredUserControls();
@@ -5344,6 +5359,7 @@ function refreshThreatModel(problemId: string, clearLogs: boolean): void {
 }
 
 function advanceAutoplayFromCurrentState(): void {
+  if(widgetHost?.dds?.prepare){syncWorkerDefenderAutoplay();return;}
   if (tableUndoPaused) return;
   if (!requireDdsReadyForAction('autoplay')) {
     render();
@@ -5639,7 +5655,38 @@ function backupLastUserPlay(): void {
   render();
 }
 
+function workerDdsInput(): DdsQueryInput {
+ return {openingLeader:currentProblem.leader,initialHands:currentProblem.hands,contract:state.contract,playedCardIds:[...ddsPlayHistory]};
+}
+let workerPreparation: {key:string;promise:Promise<boolean>} | undefined;
+function prepareWorkerPosition():Promise<boolean> {
+ const runtime=widgetHost?.dds,input=workerDdsInput(),key=JSON.stringify(input);
+ if(!runtime?.prepare||runtime.has?.(input))return Promise.resolve(true);
+ if(workerPreparation?.key===key)return workerPreparation.promise;
+ const promise=runtime.ensure().then(ready=>ready?runtime.prepare!(input):false).finally(()=>{if(workerPreparation?.promise===promise)workerPreparation=undefined;});
+ workerPreparation={key,promise};return promise;
+}
+function deferWorkerAction(action:()=>void):boolean {
+ const runtime=widgetHost?.dds;
+ if(!runtime?.prepare||document.hidden||runtime.status()==='failed'||runtime.has?.(workerDdsInput()))return false;
+ const before=state,history=ddsPlayHistory.join(',');
+ void prepareWorkerPosition().then(ready=>{if(ready&&state===before&&ddsPlayHistory.join(',')===history&&!document.hidden)action();});
+ return true;
+}
+function syncWorkerDefenderAutoplay():void {
+ if(!widgetHost?.dds?.prepare||articleScriptModeEnabled()||tableUndoPaused||document.hidden||!autoplayEw||state.phase==='end'||trickFrozen||!['E','W'].includes(state.turn))return;
+ const key='worker:'+ddsPlayHistory.join(',')+':'+state.turn;
+ if(singletonAutoplayTimer&&singletonAutoplayKey===key)return;
+ clearSingletonAutoplayTimer();singletonAutoplayKey=key;
+ singletonAutoplayTimer=setTimeout(()=>{
+  clearSingletonAutoplayTimer();
+  if(tableUndoPaused||document.hidden||!autoplayEw||trickFrozen||state.phase==='end'||key!=='worker:'+ddsPlayHistory.join(',')+':'+state.turn)return;
+  if(deferWorkerAction(()=>{render();}))return;
+  const play=chooseSingleDefenderAdvancePlay();if(play)runTurn(play);
+ },autoplayPresentationDelay(300));
+}
 function runTurn(play: Play): void {
+  if(deferWorkerAction(()=>runTurn(play)))return;
   if (articleScriptModeEnabled() && articleScriptWaitingOnDds()) {
     ensureArticleScriptDdsLoading();
     render();
@@ -8121,6 +8168,9 @@ function render(): void {
   playPendingCardMotions();
   syncSingletonAutoplay();
   syncAlwaysHint();
+  if(widgetHost?.dds?.prepare&&!document.hidden&&state.phase!=='end'&&widgetHost.dds.status()!=='failed'&&!widgetHost.dds.has?.(workerDdsInput())){
+   const before=state;void prepareWorkerPosition().then(ready=>{if(ready&&state===before)render();});
+  }
 }
 
 function replayInitialUserHistoryIfPresent(): void {
@@ -8443,7 +8493,6 @@ widgetHost?.dds?.controlsReady?.(async () => {
   activeHintKey = null;
   hintLoading = false;
   ddsLoadingForHint = false;
-  await requiredDdsAvailabilityPromise;
   requiredDdsAvailabilityPhase = 'retrying';
   requiredDdsBlockedMessage = null;
   render();
@@ -8453,7 +8502,11 @@ widgetHost?.dds?.controlsReady?.(async () => {
   render();
   return ready;
 });
-warmDdsRuntime();
+if(widgetHost?.dds?.prepare){
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)clearSingletonAutoplayTimer();else render();});
+ window.addEventListener('dds-runtime-cancelled',()=>{clearHint();clearSingletonAutoplayTimer();render();});
+}
+if (!widgetHost?.dds?.prepare || !document.hidden) warmDdsRuntime();
 syncRequiredDdsAvailabilityFromRuntime();
 if (currentProblemRequiresDds()) void ensureRequiredDdsAvailability('startup');
 render();
