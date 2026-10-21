@@ -17,20 +17,20 @@ type PreferencesModule = {
   PREFERENCES_KEY: string;
 };
 
-let modulePromise: Promise<PreferencesModule> | undefined;
+// Bundle the existing preference reader so startup never waits for another download.
+// @ts-expect-error The shared website preference module is plain JavaScript.
+import * as preferenceModule from '../../public/site/preferences.js';
+const preferences = preferenceModule as PreferencesModule;
 
-function loadModule(): Promise<PreferencesModule> {
-  const moduleUrl = '/site/preferences.js';
-  modulePromise ??= import(/* @vite-ignore */ moduleUrl) as Promise<PreferencesModule>;
-  return modulePromise;
+export function readInitialSitePreferences(): SitePreferences {
+  return preferences.readPreferences();
 }
-
 export async function readSitePreferences(): Promise<SitePreferences> {
-  return (await loadModule()).readPreferences();
+  return readInitialSitePreferences();
 }
 
 export async function updateSitePreferences(patch: Partial<SitePreferences>): Promise<SitePreferences> {
-  const module = await loadModule();
+  const module = preferences;
   const result = module.writePreferences({ ...module.readPreferences(), ...patch });
   window.dispatchEvent(new CustomEvent('deepsqueeze:preferenceschange', { detail: result.preferences }));
   return result.preferences;
@@ -42,9 +42,7 @@ export function watchSitePreferences(onChange: (preferences: SitePreferences) =>
     if (detail) onChange(detail);
   };
   const storage = (event: StorageEvent) => {
-    void loadModule().then(module => {
-      if (event.key === module.PREFERENCES_KEY) onChange(module.readPreferences());
-    });
+    if (event.key === preferences.PREFERENCES_KEY) onChange(preferences.readPreferences());
   };
   window.addEventListener('deepsqueeze:preferenceschange', custom);
   window.addEventListener('storage', storage);

@@ -176,7 +176,7 @@ import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../e
 import { waitForRequiredDdsReady, type DdsAvailabilityPhase } from './ddsAvailabilityGate';
 import { readWidgetHost } from './widgetHost';
 import { defenderPreference, fallbackDefenderPlay } from './defenderPreference';
-import { readSitePreferences, updateSitePreferences, watchSitePreferences, type SitePreferences } from './sitePreferences';
+import { readInitialSitePreferences, updateSitePreferences, watchSitePreferences, type SitePreferences } from './sitePreferences';
 import { CardMotionTiming } from './cardMotionTiming';
 import { lowestEquivalentPlay, singletonOrEqualsPlay } from './forcedAutoplay';
 
@@ -420,7 +420,7 @@ const sitePreferencesEnabled = widgetHost?.inheritSitePreferences === true || (!
   return path === '/practice' || path.startsWith('/practice/')
     || path === '/workbench' || path.startsWith('/workbench/');
 })());
-const initialSitePreferences = sitePreferencesEnabled ? await readSitePreferences() : undefined;
+const initialSitePreferences = sitePreferencesEnabled ? readInitialSitePreferences() : undefined;
 const widgetUiMode: WidgetUiMode = (() => {
   if (initialWidgetSnapshotForRestore) return initialWidgetSnapshotForRestore.initialConfig.widgetUiMode;
   if (typeof window === 'undefined') return 'default';
@@ -5668,9 +5668,9 @@ function prepareWorkerPosition():Promise<boolean> {
 }
 function deferWorkerAction(action:()=>void):boolean {
  const runtime=widgetHost?.dds;
- if(!runtime?.prepare||document.hidden||runtime.status()==='failed'||runtime.has?.(workerDdsInput()))return false;
+ if(!runtime?.prepare||document.hidden||runtime.status()!=='ready'||runtime.has?.(workerDdsInput()))return false;
  const before=state,history=ddsPlayHistory.join(',');
- void prepareWorkerPosition().then(ready=>{if(ready&&state===before&&ddsPlayHistory.join(',')===history&&!document.hidden)action();});
+ void prepareWorkerPosition().then(()=>{if(state===before&&ddsPlayHistory.join(',')===history&&!document.hidden)action();});
  return true;
 }
 function syncWorkerDefenderAutoplay():void {
@@ -8506,7 +8506,8 @@ if(widgetHost?.dds?.prepare){
  document.addEventListener('visibilitychange',()=>{if(document.hidden)clearSingletonAutoplayTimer();else render();});
  window.addEventListener('dds-runtime-cancelled',()=>{clearHint();clearSingletonAutoplayTimer();render();});
 }
-if (!widgetHost?.dds?.prepare || !document.hidden) warmDdsRuntime();
 syncRequiredDdsAvailabilityFromRuntime();
 if (currentProblemRequiresDds()) void ensureRequiredDdsAvailability('startup');
 render();
+// Let the first diagram paint before background DDS work begins.
+setTimeout(() => { if (!widgetHost?.dds?.prepare || !document.hidden) warmDdsRuntime(); }, 0);
