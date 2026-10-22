@@ -93,7 +93,7 @@ function preferencesFromForm(form) {
   return normalizePreferences({
     version: 1,
     alwaysHint: data.has('alwaysHint'),
-    allowMoreAnalysisTime: data.has('allowMoreAnalysisTime'),
+    allowMoreAnalysisTime: data.get('ddsLoadingAllowance') !== 'normal',
     ddsLoadingAllowance: data.get('ddsLoadingAllowance'),
     showAnalysisLog: data.has('showAnalysisLog'),
     autoplaySingletons: data.has('autoplaySingletons'),
@@ -105,7 +105,6 @@ function preferencesFromForm(form) {
 }
 
 function populateForm(form, preferences) {
-  form.elements.allowMoreAnalysisTime.checked = preferences.allowMoreAnalysisTime;
   form.elements.ddsLoadingAllowance.value = preferences.ddsLoadingAllowance;
   form.elements.showAnalysisLog.checked = preferences.showAnalysisLog;
   form.elements.alwaysHint.checked = preferences.alwaysHint;
@@ -134,10 +133,8 @@ export function mountPreferencesMenu() {
       <form>
         <fieldset>
           <legend>Analysis</legend>
-          <label class="ds-check"><input type="checkbox" name="allowMoreAnalysisTime"> Allow more analysis time</label>
-          <small>Allows four times as long for analysis calculations. Applies on the next analysis.</small>
-          <label>DDS loading allowance <select name="ddsLoadingAllowance"><option value="normal">Normal — 30 seconds</option><option value="extended">Extended — 2 minutes</option><option value="patient">Patient — 10 minutes</option></select></label>
-          <small>One loading attempt; Cancel and Retry are available in the analysis pane. Applies on the next load.</small>
+          <label>Loading and calculation allowance <select name="ddsLoadingAllowance"><option value="normal">Normal — 30 seconds</option><option value="extended">Extended — 2 minutes</option><option value="patient">Patient — 10 minutes</option></select></label>
+          <small>The same deadline applies separately to DDS loading and each calculation. Applies on the next attempt. Cancel and Retry are available in the analysis pane.</small>
           <label class="ds-check"><input type="checkbox" name="showAnalysisLog"> Show analysis log</label>
           <small>Movie, Random and Squeeze Analyzer: activity, copy log, Cancel and Retry controls.</small>
         </fieldset>
