@@ -1,6 +1,8 @@
 /* Deliberately classic, conservative JavaScript: survives a failed module bootstrap. */
 (function () {
   var done = false, timer, banner = document.createElement('section');
+  var releaseMeta = document.querySelector('meta[name="ds-release"]');
+  var release = releaseMeta ? releaseMeta.content : 'Website release: local development (not a published build)';
   var lines = [], token = new URLSearchParams(location.search).get('startup');
   banner.setAttribute('role', 'status');
   banner.style.cssText = 'margin:1rem;padding:1rem;background:#fff8e8;color:#263644;border:1px solid #bbaa88;font:16px sans-serif';
@@ -10,7 +12,7 @@
   var output = document.createElement('textarea'); output.readOnly = true; output.hidden = true; output.style.cssText = 'display:block;width:95%;min-height:10em';
   output.style.display = 'none'; banner.appendChild(output);
   copy.onclick = function () {
-    var text = ['Startup log', new Date().toISOString(), 'Browser: ' + navigator.userAgent,
+    var text = ['Startup log', new Date().toISOString(), release, 'Browser: ' + navigator.userAgent,
       'Platform: ' + navigator.platform, 'Logical processors reported: ' + (navigator.hardwareConcurrency || 'not exposed'),
       'Device memory (approximate GiB): ' + (navigator.deviceMemory || 'not exposed'),
       'Worker: ' + (typeof Worker !== 'undefined') + '; WebAssembly: ' + (typeof WebAssembly !== 'undefined')].concat(lines).join('\n');

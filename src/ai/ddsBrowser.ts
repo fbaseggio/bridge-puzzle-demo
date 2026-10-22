@@ -207,7 +207,7 @@ export function queryDdsNextPlays(input: DdsQueryInput): DdsQueryResult {
     const result = window.nextPlays(pbn, trump, plays);
     return { ok: true, result, pbn, trump, plays };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = err instanceof Error ? (err.stack || err.message) : String(err);
     return { ok: false, reason: 'runtime-error', detail, runtimeStatus: ddsRuntimeStatus, pbn, trump, plays };
   }
 }
