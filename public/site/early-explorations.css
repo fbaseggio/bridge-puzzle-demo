@@ -1,0 +1,8 @@
+/* Navigation for the earlier tools and articles; widget layouts stay unchanged. */
+.ee-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ee-breadcrumb > span { color: #64748b; }
+.ee-header { flex-wrap: wrap; }
+.ee-header .site-nav { flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .ee-header .site-nav { width: 100%; }
+}
