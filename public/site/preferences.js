@@ -2,7 +2,7 @@ export const PREFERENCES_KEY = 'deepsqueeze.preferences.v1';
 
 export const DEFAULT_PREFERENCES = Object.freeze({
   version: 1,
-  defensePolicy: 'laa',
+  defensePolicy: 'mule',
   alwaysHint: false,
   allowMoreAnalysisTime: false,
   ddsLoadingAllowance: 'normal',
@@ -33,7 +33,7 @@ export function normalizePreferences(value) {
   const tableColor = source.tableColor === 'light-green' ? 'very-light' : source.tableColor;
   return {
     version: 1,
-    defensePolicy: ['laa', 'lta', 'random'].includes(source.defensePolicy) ? source.defensePolicy : 'laa',
+    defensePolicy: ['mule', 'laa', 'lta', 'random'].includes(source.defensePolicy) ? source.defensePolicy : 'mule',
     allowMoreAnalysisTime: booleanOrDefault(source.allowMoreAnalysisTime, DEFAULT_PREFERENCES.allowMoreAnalysisTime),
     ddsLoadingAllowance: ['normal','extended','patient'].includes(source.ddsLoadingAllowance) ? source.ddsLoadingAllowance : (source.allowMoreAnalysisTime === true ? 'extended' : 'normal'),
     showAnalysisLog: booleanOrDefault(source.showAnalysisLog, DEFAULT_PREFERENCES.showAnalysisLog),
@@ -170,11 +170,11 @@ export function mountPreferencesMenu() {
         <div class="ds-dev-warning"><strong>For developers only</strong><p>These settings are not intended to be modified by users. Changing them may cause unexpected behavior.</p></div>
         <form data-dev-form>
           <label>Defense policy<select name="defensePolicy">
-            <option value="laa">Abstract-aware (LAA) — default</option>
+            <option value="mule">Mule 0.9 — default</option>
+            <option value="laa">Abstract-aware (LAA)</option>
             <option value="lta">Threat-aware (LTA) — legacy</option>
             <option value="random">Random legal</option>
             <option value="ddcta" disabled>DDCTA — unavailable in this build</option>
-            <option value="stubborn" disabled>Stubborn — unavailable in this build</option>
           </select></label>
           <p>Movie and Random only. Applies to newly loaded positions; saved links keep their selected policy. Reloading a link with a defense setting keeps that setting.</p>
           <p>DDS guidance still applies when available. Legacy Threat-aware requires explicit threat cards; without them, Abstract-aware is used and a notice is shown.</p>
@@ -207,7 +207,7 @@ export function mountPreferencesMenu() {
   };
   devForm.addEventListener('submit', event => event.preventDefault());
   devForm.addEventListener('change', () => saveDev(devForm.elements.defensePolicy.value));
-  devForm.querySelector('[data-reset-dev]').addEventListener('click', () => saveDev('laa'));
+  devForm.querySelector('[data-reset-dev]').addEventListener('click', () => saveDev('mule'));
   populate(readPreferences());
 
   const save = () => {

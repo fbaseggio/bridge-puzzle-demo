@@ -49,12 +49,15 @@ export type WidgetHost = {
   practiceSettings?: WidgetPracticeSettings;
   onPracticeSettingsChange?: (settings:WidgetPracticeSettings)=>void;
   /** Optional consumer preference: DDS-optimal cards when available; legal cards on an optional-DDS fallback. */
-  preferDefenderCards?: (state: State, candidates: readonly CardId[]) => readonly CardId[];
+  preferDefenderCards?: (state: State, candidates: readonly CardId[], history?: readonly CardId[]) => readonly CardId[];
+  /** Optional asynchronous preparation of the exact legal/DDS candidate pool. */
+  defenderCardsReady?: (state:State,candidates:readonly CardId[],history:readonly CardId[])=>boolean;
+  prepareDefenderCards?: (state:State,candidates:readonly CardId[],history:readonly CardId[])=>Promise<readonly CardId[]>;
   engine?: { init: typeof init; apply: typeof apply };
   articleScript?: ArticleScriptSpec;
   hideCompanionPanel?: boolean;
   replayHistory?: typeof replayArticleHistory;
-  onRender?: (state: State, trickFrozen: boolean) => void;
+  onRender?: (state: State, trickFrozen: boolean, history:readonly CardId[]) => void;
 };
 
 declare global { interface Window { dsWidgetHost?: WidgetHost } }

@@ -2607,10 +2607,13 @@ function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameter
     if (!browserDdsBackstopEnabled) {
       return { play: lowestEquivalentPlay(liveState, autoChoice.play, legalPlays) };
     }
+    // Supply the exact pre-choice history, including earlier autoplay in this batch.
+    const preference = widgetHost?.preferDefenderCards;
+    const prefer = preference ? (state: State, cards: readonly CardId[]) => preference(state, cards, [...playedCardIds] as CardId[]) : undefined;
     const legalCandidates = legalPlays.map((p) => toCardId(p.suit, p.rank) as CardId);
     const policyChoice = toCardId(autoChoice.play.suit, autoChoice.play.rank) as CardId;
     const fallback = (reason: 'runtime-unavailable' | 'no-safe-match') => {
-      const play = fallbackDefenderPlay(liveState, legalPlays, autoChoice.play!, widgetHost?.preferDefenderCards);
+      const play = fallbackDefenderPlay(liveState, legalPlays, autoChoice.play!, prefer);
       const finalChoice = toCardId(play.suit, play.rank) as CardId;
       playedCardIds.push(finalChoice);
       return { play, trace: {
@@ -2717,10 +2720,10 @@ function buildBrowserDdsBackstop(playedCardIds: string[]): NonNullable<Parameter
       }
       return fallback('no-safe-match');
     }
-    const preferredCandidates = defenderPreference(liveState, safeCandidates, widgetHost?.preferDefenderCards);
+    const preferredCandidates = defenderPreference(liveState, safeCandidates, prefer);
     const preferredChoice = preferredCandidates.includes(policyChoice) ? policyChoice : preferredCandidates[0];
     const preferredPlay = legalPlays.find((p) => (toCardId(p.suit, p.rank) as CardId) === preferredChoice) ?? autoChoice.play;
-    const safePlays = legalPlays.filter(play => safeCandidates.includes(toCardId(play.suit, play.rank) as CardId));
+    const safePlays = legalPlays.filter(play => preferredCandidates.includes(toCardId(play.suit, play.rank) as CardId));
     const finalPlay = lowestEquivalentPlay(liveState, preferredPlay, safePlays);
     const finalChoice = toCardId(finalPlay.suit, finalPlay.rank) as CardId;
     playedCardIds.push(finalChoice);
@@ -3080,6 +3083,7 @@ function advanceOneWidgetCard(): boolean {
   }
 
   if (!userTurn) {
+    if(deferDefenseAction(()=>{advanceOneWidgetCard();}))return false;
     const play = chooseSingleDefenderAdvancePlay();
     if (!play) {
       render();
@@ -5672,6 +5676,30 @@ function deferWorkerAction(action:()=>void):boolean {
  void prepareWorkerPosition().then(()=>{if(state===before&&ddsPlayHistory.join(',')===history&&!document.hidden)action();});
  return true;
 }
+let defensePreparation:{key:string;promise:Promise<unknown>;complete:boolean}|undefined;
+/** Only automatic choices wait for defense. Manual cards remain playable. */
+function deferDefenseAction(action:()=>void):boolean {
+ const prepare=widgetHost?.prepareDefenderCards;
+ if(!prepare||!['E','W'].includes(state.turn)||state.phase==='end')return false;
+ const before=state,history=[...ddsPlayHistory] as CardId[];
+ const legal=legalPlays(state).map(p=>toCardId(p.suit,p.rank) as CardId);
+ let candidates=legal;
+ const dd=queryDdsNextPlays(workerDdsInput());
+ if(dd.ok){
+  const scores=buildDdsScoreByCard(dd.result.plays),scored=legal.filter(c=>scores.has(c));
+  if(scored.length){const best=Math.max(...scored.map(c=>scores.get(c)!));candidates=legal.filter(c=>scores.get(c)===best);}
+ }
+ const key=JSON.stringify([workerDdsInput(),candidates]);
+ if(widgetHost?.defenderCardsReady?.(state,candidates,history))return false;
+ if(defensePreparation?.key===key&&!defensePreparation.complete)return true;
+ const entry={key,complete:false,promise:Promise.resolve() as Promise<unknown>};defensePreparation=entry;
+ entry.promise=prepare(structuredClone(state),candidates,history).catch(()=>{}).then(()=>{
+  if(defensePreparation!==entry)return;
+  entry.complete=true;
+  if(state===before&&ddsPlayHistory.join(',')===history.join(',')&&!document.hidden)action();
+ });
+ return true;
+}
 function syncWorkerDefenderAutoplay():void {
  if(!widgetHost?.dds?.prepare||articleScriptModeEnabled()||tableUndoPaused||document.hidden||!autoplayEw||state.phase==='end'||trickFrozen||!['E','W'].includes(state.turn))return;
  const key='worker:'+ddsPlayHistory.join(',')+':'+state.turn;
@@ -5681,6 +5709,7 @@ function syncWorkerDefenderAutoplay():void {
   clearSingletonAutoplayTimer();
   if(tableUndoPaused||document.hidden||!autoplayEw||trickFrozen||state.phase==='end'||key!=='worker:'+ddsPlayHistory.join(',')+':'+state.turn)return;
   if(deferWorkerAction(()=>{render();}))return;
+  if(deferDefenseAction(()=>{render();}))return;
   const play=chooseSingleDefenderAdvancePlay();if(play)runTurn(play);
  },autoplayPresentationDelay(300));
 }
@@ -8141,7 +8170,7 @@ function render(): void {
     autoplaySingletons, autoplayEw, hideEastWest, cardColoring:cardColoringEnabled,
     alwaysHint, narrate, alertMistakes, showGuides
   });
-  widgetHost?.onRender?.(state, trickFrozen);
+  widgetHost?.onRender?.(state, trickFrozen, [...ddsPlayHistory] as CardId[]);
   // Host layout/zoom and synchronous analysis finish before starting the clock.
   playPendingCardMotions();
   syncSingletonAutoplay();

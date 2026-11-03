@@ -1,6 +1,6 @@
 export type SitePreferences = {
   version: 1;
-  defensePolicy?: 'laa' | 'lta' | 'random';
+  defensePolicy?: 'mule' | 'laa' | 'lta' | 'random';
   alwaysHint: boolean;
   allowMoreAnalysisTime: boolean;
   ddsLoadingAllowance?: 'normal' | 'extended' | 'patient';
