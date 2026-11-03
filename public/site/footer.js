@@ -1,6 +1,7 @@
 // Supporting navigation belongs to the page, not its embedded diagrams.
 (() => {
   if (window.self !== window.top || document.querySelector('.ds-site-footer')) return;
+  import('/site/widgetEmbeds.js').then(({installWidgetEmbeds}) => installWidgetEmbeds()).catch(() => {});
   const footer = document.createElement('footer');
   footer.className = 'ds-site-footer';
   footer.innerHTML = `<nav aria-label="Site information">

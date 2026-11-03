@@ -1,0 +1,1 @@
+function t(n){const a=new URL(n),e=a.pathname.endsWith("/widget.html");return a.pathname=e?"/random/widget.html":"/random/",e||a.searchParams.set("analysisLog","1"),a.href}function o(n){const a=new URLSearchParams(n);return a.delete("analysisLog"),{showLog:n.get("analysisLog")==="1",replay:a.toString()?a:void 0}}export{o as a,t as r};

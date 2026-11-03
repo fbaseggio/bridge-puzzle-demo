@@ -50,3 +50,12 @@
 .ds-preferences-actions button:hover { background: #edf2eb; }
 .ds-preferences-actions [role="status"] { color: #6d7d73; font-size: 10px; text-align: right; }
 @media (max-width: 500px) { .ds-preferences-panel { position: fixed; top: 58px; right: 14px; left: 14px; width: auto; } }
+
+/* Developer controls are kept outside the ordinary preference pane. */
+.ds-preferences [hidden] { display: none !important; }
+.ds-preferences .ds-dev-link { border: 0; background: none; padding: 2px; color: #28594d; text-decoration: underline; cursor: pointer; font: inherit; }
+.ds-preferences-subtitle { margin: -8px 0 14px; color: #6d7d73; font-size: 11px; }
+.ds-dev-warning { border: 2px solid #ac382b; border-radius: 6px; background: #fff0e9; color: #85261d; padding: 12px; margin-bottom: 16px; }
+.ds-dev-warning strong { font-size: 16px; }
+.ds-preferences [data-dev-pane] p { font-size: 12px; line-height: 1.5; }
+.ds-dev-warning p { margin: 6px 0 0; }

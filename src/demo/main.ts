@@ -1,3 +1,4 @@
+import {embedDiagramZoom, installWidgetEmbedLayout} from './embedLayout';
 import { tableCardUndoCursor, replayBeforeTableCard, previousCompletedTrickCursor, replayCompletedTableTrick, retainTableContinuation, nextRecordedTrickCursor } from './tableCardUndo';
 import { allThreats, stoppingDefenders, cloneThreatContext as copyThreatContext } from '../ai/threatModel';
 import './style.css';
@@ -120,9 +121,6 @@ import {
   type HandDiagramNarrationEntry,
   type HandDiagramStatus
 } from './handDiagramSession';
-import {
-  resolveWidgetReadingEmbedReservedHeight
-} from './widgetReadingEmbedHeight';
 import {
   resolveWidgetNonScriptForwardMode,
   resolveWidgetNonScriptForwardPauseMessage
@@ -553,8 +551,9 @@ const initialArticleCheckpointIdFromUrl: string | null = (() => {
   return raw?.trim() ? raw.trim() : null;
 })();
 const initialArticleScriptSpec = widgetHost?.articleScript ?? resolveArticleScript(initialArticleScriptIdFromUrl);
-const readingWidgetEmbedHeightMessageType = 'ds-widget-reading-height';
-let lastReportedReadingWidgetEmbedHeight: number | null = null;
+const scheduleEmbedHeight = !widgetHost && isWidgetShellMode && window.parent !== window
+  ? installWidgetEmbedLayout(root) : () => {};
+const embedZoomParams = new URLSearchParams(location.search);
 const initialArticleCursor = (() => {
   if (initialWidgetSnapshotForRestore?.articleScript) {
     const bounded = Math.max(0, Math.min(initialWidgetSnapshotForRestore.articleScript.initialCursor, initialWidgetSnapshotForRestore.articleScript.history.length));
@@ -7910,28 +7909,6 @@ function ensureWidgetSnapshotDebugShortcut(): void {
   }, true);
 }
 
-function publishReadingWidgetEmbedHeight(readingRevealEnabled: boolean): void {
-  const height = resolveWidgetReadingEmbedReservedHeight({
-    readingProfileEnabledFromUrl: widgetReadingProfileEnabledFromUrl,
-    readingRevealEnabled,
-    readingControlsRevealStage: handDiagramSession.readingControlsRevealStage
-  });
-  if (height === null) {
-    lastReportedReadingWidgetEmbedHeight = null;
-    return;
-  }
-  if (!isWidgetShellMode || displayMode !== 'widget' || typeof window === 'undefined' || window.parent === window) return;
-  if (lastReportedReadingWidgetEmbedHeight === height) return;
-  lastReportedReadingWidgetEmbedHeight = height;
-  window.parent.postMessage(
-    {
-      type: readingWidgetEmbedHeightMessageType,
-      height,
-      widgetUrl: window.location.href
-    },
-    window.location.origin
-  );
-}
 
 function render(): void {
   renderingNow = true;
@@ -7964,8 +7941,9 @@ function render(): void {
   root.classList.toggle('ds-table-very-light', sitePreferencesEnabled && siteTableColor === 'very-light');
   root.classList.toggle('ds-table-light', sitePreferencesEnabled && siteTableColor === 'light');
   root.classList.toggle('ds-table-medium', sitePreferencesEnabled && siteTableColor === 'medium');
-  if (sitePreferencesEnabled && !widgetHost?.externalDiagramZoom) {
-    root.style.setProperty('--ds-diagram-scale', String(siteDiagramZoom / 100));
+  if ((sitePreferencesEnabled || (!widgetHost && isWidgetShellMode && embedZoomParams.has('diagramZoom'))) && !widgetHost?.externalDiagramZoom) {
+    const zoom = !widgetHost && isWidgetShellMode ? embedDiagramZoom(embedZoomParams, siteDiagramZoom) : siteDiagramZoom;
+    root.style.setProperty('--ds-diagram-scale', String(zoom / 100));
   } else {
     root.style.removeProperty('--ds-diagram-scale');
   }
@@ -8152,7 +8130,7 @@ function render(): void {
   applyCompactTableAlignment(tableCanvas);
   applyUnknownSlashLinePlacement(tableCanvas);
   applyNarrationBubbleCollisionAvoidance(tableCanvas);
-  publishReadingWidgetEmbedHeight(readingRevealEnabled);
+  scheduleEmbedHeight();
   if (displayMode === 'analysis' && (showLog || showDebugSection)) {
     root.appendChild(renderDebugSection());
   }

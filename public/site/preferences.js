@@ -2,6 +2,7 @@ export const PREFERENCES_KEY = 'deepsqueeze.preferences.v1';
 
 export const DEFAULT_PREFERENCES = Object.freeze({
   version: 1,
+  defensePolicy: 'laa',
   alwaysHint: false,
   allowMoreAnalysisTime: false,
   ddsLoadingAllowance: 'normal',
@@ -32,6 +33,7 @@ export function normalizePreferences(value) {
   const tableColor = source.tableColor === 'light-green' ? 'very-light' : source.tableColor;
   return {
     version: 1,
+    defensePolicy: ['laa', 'lta', 'random'].includes(source.defensePolicy) ? source.defensePolicy : 'laa',
     allowMoreAnalysisTime: booleanOrDefault(source.allowMoreAnalysisTime, DEFAULT_PREFERENCES.allowMoreAnalysisTime),
     ddsLoadingAllowance: ['normal','extended','patient'].includes(source.ddsLoadingAllowance) ? source.ddsLoadingAllowance : (source.allowMoreAnalysisTime === true ? 'extended' : 'normal'),
     showAnalysisLog: booleanOrDefault(source.showAnalysisLog, DEFAULT_PREFERENCES.showAnalysisLog),
@@ -91,6 +93,7 @@ function preferencesFromForm(form) {
   const data = new FormData(form);
   const tableColorIndex = Number(data.get('tableColorLevel'));
   return normalizePreferences({
+    ...readPreferences(),
     version: 1,
     alwaysHint: data.has('alwaysHint'),
     allowMoreAnalysisTime: data.get('ddsLoadingAllowance') !== 'normal',
@@ -129,14 +132,16 @@ export function mountPreferencesMenu() {
       <span class="ds-menu-icon" aria-hidden="true"><span></span><span></span><span></span></span>
     </summary>
     <div class="ds-preferences-panel">
-      <div class="ds-preferences-heading"><strong>Preferences</strong><span>Defaults for this browser</span></div>
+      <section data-main-pane>
+      <div class="ds-preferences-heading"><strong>Preferences</strong><button type="button" class="ds-dev-link" data-open-dev>Dev</button></div>
+      <p class="ds-preferences-subtitle">Defaults for this browser</p>
       <form>
         <fieldset>
           <legend>Analysis</legend>
           <label>Loading and calculation allowance <select name="ddsLoadingAllowance"><option value="normal">Normal — 30 seconds</option><option value="extended">Extended — 2 minutes</option><option value="patient">Patient — 10 minutes</option></select></label>
           <small>The same deadline applies separately to DDS loading and each calculation. Applies on the next attempt. Cancel and Retry are available in the analysis pane.</small>
-          <label class="ds-check"><input type="checkbox" name="showAnalysisLog"> Show analysis log</label>
-          <small>Movie, Random and Squeeze Analyzer: activity, copy log, Cancel and Retry controls.</small>
+          <label class="ds-check"><input type="checkbox" name="showAnalysisLog"> Show diagnostics / analysis log</label>
+          <small>Movie / Random: DDS diagnostics. Analyzer: squeeze-analysis progress. Each includes copy log, cancel and restart controls.</small>
         </fieldset>
         <fieldset>
           <legend>Guidance</legend>
@@ -159,16 +164,55 @@ export function mountPreferencesMenu() {
         </label>
         <div class="ds-preferences-actions"><button type="button" data-reset>Reset defaults</button><span data-status role="status" aria-live="polite">Stored only in this browser.</span></div>
       </form>
+      </section>
+      <section data-dev-pane hidden aria-label="Developer preferences">
+        <div class="ds-preferences-heading"><strong>Developer preferences</strong><button type="button" class="ds-dev-link" data-close-dev>Back</button></div>
+        <div class="ds-dev-warning"><strong>For developers only</strong><p>These settings are not intended to be modified by users. Changing them may cause unexpected behavior.</p></div>
+        <form data-dev-form>
+          <label>Defense policy<select name="defensePolicy">
+            <option value="laa">Abstract-aware (LAA) — default</option>
+            <option value="lta">Threat-aware (LTA) — legacy</option>
+            <option value="random">Random legal</option>
+            <option value="ddcta" disabled>DDCTA — unavailable in this build</option>
+            <option value="stubborn" disabled>Stubborn — unavailable in this build</option>
+          </select></label>
+          <p>Movie and Random only. Applies to newly loaded positions; saved links keep their selected policy. Reloading a link with a defense setting keeps that setting.</p>
+          <p>DDS guidance still applies when available. Legacy Threat-aware requires explicit threat cards; without them, Abstract-aware is used and a notice is shown.</p>
+          <div class="ds-preferences-actions"><button type="button" data-reset-dev>Restore default policy</button><span data-dev-status role="status" aria-live="polite">Stored only in this browser.</span></div>
+        </form>
+      </section>
     </div>`;
   target.append(menu);
 
   const form = menu.querySelector('form');
   const status = menu.querySelector('[data-status]');
-  populateForm(form, readPreferences());
+  const devForm = menu.querySelector('[data-dev-form]');
+  const devStatus = menu.querySelector('[data-dev-status]');
+  const populate = preferences => {
+    populateForm(form, preferences);
+    devForm.elements.defensePolicy.value = preferences.defensePolicy;
+  };
+  const showDev = open => {
+    menu.querySelector('[data-main-pane]').hidden = open;
+    menu.querySelector('[data-dev-pane]').hidden = !open;
+    menu.querySelector(open ? '[data-close-dev]' : '[data-open-dev]').focus();
+  };
+  menu.querySelector('[data-open-dev]').addEventListener('click', () => showDev(true));
+  menu.querySelector('[data-close-dev]').addEventListener('click', () => showDev(false));
+  const saveDev = policy => {
+    const result = writePreferences({...readPreferences(), defensePolicy: policy});
+    populate(result.preferences);
+    dispatchPreferences(result.preferences);
+    devStatus.textContent = result.saved ? 'Saved for new positions.' : 'Preferences could not be saved.';
+  };
+  devForm.addEventListener('submit', event => event.preventDefault());
+  devForm.addEventListener('change', () => saveDev(devForm.elements.defensePolicy.value));
+  devForm.querySelector('[data-reset-dev]').addEventListener('click', () => saveDev('laa'));
+  populate(readPreferences());
 
   const save = () => {
     const result = writePreferences(preferencesFromForm(form));
-    populateForm(form, result.preferences);
+    populate(result.preferences);
     status.textContent = result.saved ? 'Saved on this browser.' : 'Preferences could not be saved.';
     dispatchPreferences(result.preferences);
   };
@@ -179,20 +223,20 @@ export function mountPreferencesMenu() {
   form.addEventListener('change', save);
   form.querySelector('[data-reset]').addEventListener('click', () => {
     const result = resetPreferences();
-    populateForm(form, result.preferences);
+    populate(result.preferences);
     status.textContent = result.saved ? 'Defaults restored.' : 'Preferences could not be reset.';
     dispatchPreferences(result.preferences);
   });
   window.addEventListener('storage', event => {
     if (event.key !== PREFERENCES_KEY) return;
     const preferences = readPreferences();
-    populateForm(form, preferences);
+    populate(preferences);
     status.textContent = 'Updated from another tab.';
     dispatchPreferences(preferences);
   });
   window.addEventListener('deepsqueeze:preferenceschange', event => {
     if (!event.detail) return;
-    populateForm(form, normalizePreferences(event.detail));
+    populate(normalizePreferences(event.detail));
     status.textContent = 'Saved on this browser.';
   });
   document.addEventListener('pointerdown', event => {
