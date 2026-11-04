@@ -1,10 +1,10 @@
-# Accept formatted four-hand diagrams in Movie importer
+# Seeded suit and spot variation for Random
 
-Add newspaper-style four-hand text diagrams to the existing catchall loader, with explicit layout/card validation and compact exact-card share links. Preserve existing DF/LIN/PBN imports, catalog, reference data and frozen providers. No source-reference refresh; the previously recorded freshness mismatch remains deferred.
+Checked Binder2 isomorphism after saved/current variant0 acceptance; exact replay preserves base evidence, evaluated source and mappings; non-Random binding unchanged.
 
-Website release: 2026-11-02 03:15:36 UTC · 13c54ba27593 (release build time, UTC)
+Website release: 2026-11-04 14:25:02 UTC · 2f331506427e (release build time, UTC)
 
-Base: 709c2f6e57c0f1c81100677d8fae49eb345db8fe
+Base: b60b20c331a3a72a4df132131a9e0332aa86f349
 
 Consumer and production tests, typechecks and builds passed.
 Source freshness check: explicitly omitted by plan.
