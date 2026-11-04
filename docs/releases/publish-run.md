@@ -1,10 +1,10 @@
-# Random consolidation, developer preferences, embed sizing and diagnostics
+# Concise Analyzer explanations and catalog symmetry
 
-Combined staged UI changes: measured legacy embeds and author zoom override, clearer DDS/analyzer diagnostics and Random Analyzer handoff, plus preceding Random consolidation and packaged defense preferences.
+Adopt reviewed current Analyzer narration with smaller checked endings, TTC and idle/equivalent branch merging. Merge21 standalone wL/Lw catalog pairs into {Lw}, retain S087 correction and add the narrow Movie written-order adapter. Preserve existing Movie Nice, Defense provider/UI, Random selection, source associations and DDS runtime.
 
-Website release: 2026-11-03 19:20:40 UTC · e0df2842491d (release build time, UTC)
+Website release: 2026-11-04 02:49:31 UTC · 1acfc1aecb20 (release build time, UTC)
 
-Base: 53d64362e2a040e652686d81006e547621f21209
+Base: beb206191ac00a0665eb2ad9e5e28fd78ceaa6be
 
 Consumer and production tests, typechecks and builds passed.
 Source freshness check: explicitly omitted by plan.
