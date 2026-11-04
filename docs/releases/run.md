@@ -1,8 +1,10 @@
-# Catalog exact-card examples
+# Direct capital selection in Movie and Analyzer
 
-Replace196 catalog squeeze links with verified precomputed exact-card Movie links; retain197 displayed entries,195 groups, existing captions and explicit pending/suspect flags. No Analyzer, Random, Mule, binder runtime, catalog membership or source lookup changes.
+Adopt reviewed Direct selection6bb79c0 in both exact provider closures. Preserve S087 LWA and intentional capital pipes; no other staged features.
 
-Base: 33797cf52f90b6943a379273d7f10482fc58b58b
+Website release: 2026-11-04 13:03:35 UTC · 4ef5f89d3a28 (release build time, UTC)
+
+Base: 3841ab42de8c3e84f32b5d3e50ee3f561a051d0c
 
 Consumer and production tests, typechecks and builds passed.
 Source freshness check: explicitly omitted by plan.
