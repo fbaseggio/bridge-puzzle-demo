@@ -1,10 +1,8 @@
-# Unify modern navigation and add Guides and Early Explorations
+# Catalog exact-card examples
 
-Publish the reviewed shared header and Guides page, active loaded-starting-deal handoff to Analyzer, Early Explorations homepage grouping and legacy breadcrumbs, and the staged Eng/Wang bibliography and John Lee copyleft acknowledgement. Preserve catalog, source matches, solver/runtime and widget behavior. Existing source-reference freshness mismatch remains deferred; this release does not refresh source evidence.
+Replace196 catalog squeeze links with verified precomputed exact-card Movie links; retain197 displayed entries,195 groups, existing captions and explicit pending/suspect flags. No Analyzer, Random, Mule, binder runtime, catalog membership or source lookup changes.
 
-Website release: 2026-10-31 19:44:19 UTC · 89a30d08d9b9 (release build time, UTC)
-
-Base: bbad6f6b19553eb9a0d23203e988088c6fbd8906
+Base: 33797cf52f90b6943a379273d7f10482fc58b58b
 
 Consumer and production tests, typechecks and builds passed.
 Source freshness check: explicitly omitted by plan.
