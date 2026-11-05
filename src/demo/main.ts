@@ -1,5 +1,5 @@
 import {embedDiagramZoom, installWidgetEmbedLayout} from './embedLayout';
-import { tableCardUndoCursor, replayBeforeTableCard, previousCompletedTrickCursor, replayCompletedTableTrick, retainTableContinuation, nextRecordedTrickCursor } from './tableCardUndo';
+import { handCardReplacementTurn, tableCardUndoCursor, replayBeforeTableCard, previousCompletedTrickCursor, replayCompletedTableTrick, retainTableContinuation, nextRecordedTrickCursor } from './tableCardUndo';
 import { allThreats, stoppingDefenders, cloneThreatContext as copyThreatContext } from '../ai/threatModel';
 import './style.css';
 
@@ -173,7 +173,7 @@ import { shouldRenderForWidgetTransportOutcome } from './widgetTransportRenderSc
 import { explainPositionInverse, inferPositionEncapsulationDetailed } from '../encapsulation';
 import { waitForRequiredDdsReady, type DdsAvailabilityPhase } from './ddsAvailabilityGate';
 import { readWidgetHost } from './widgetHost';
-import { defenderPreference, fallbackDefenderPlay } from './defenderPreference';
+import { ddsDecisionContribution, defenderPreference, fallbackDefenderPlay } from './defenderPreference';
 import { readInitialSitePreferences, updateSitePreferences, watchSitePreferences, type SitePreferences } from './sitePreferences';
 import { CardMotionTiming } from './cardMotionTiming';
 import { lowestEquivalentPlay, singletonOrEqualsPlay } from './forcedAutoplay';
@@ -2984,6 +2984,10 @@ function chooseSingleDefenderAdvancePlay(): Play | null {
 }
 
 function advanceOneWidgetCard(): boolean {
+  if (widgetHost?.recordedPlay && nextRememberedTableTrickCursor() !== null) {
+    restoreTableHistory(playedTableHistory().length + 1, undefined, rememberedTableHistory);
+    return true;
+  }
   if(deferWorkerAction(()=>{advanceOneWidgetCard();}))return false;
   tableUndoPaused = false;
   syncConfiguredUserControls();
@@ -3089,7 +3093,7 @@ function advanceOneWidgetCard(): boolean {
       render();
       return false;
     }
-    runTurn(play);
+    runTurn(play,'automatic defense');
     return true;
   }
 
@@ -5303,7 +5307,7 @@ function syncSingletonAutoplay(): void {
       return;
     }
     clearSingletonAutoplayTimer();
-    runTurn(livePlay);
+    runTurn(livePlay,'automatic singleton / low from equals');
   }, autoplayPresentationDelay(500));
 }
 
@@ -5408,8 +5412,8 @@ type ResetGameOptions = {
 
 function resetGame(seed: number, reason: string, options: ResetGameOptions = {}): void {
   tableUndoExploration = false;
-  rememberedTableHistory = [];
-  tableUndoPaused = false;
+  rememberedTableHistory = [...(widgetHost?.recordedPlay?.cards ?? [])];
+  tableUndoPaused = Boolean(rememberedTableHistory.length);
   clearSingletonAutoplayTimer();
   clearArticleScriptProblemCompletePromotionState();
   clearPulseTimer();
@@ -5472,8 +5476,8 @@ function resetGame(seed: number, reason: string, options: ResetGameOptions = {})
 
 function selectProblem(problemId: string, variantId?: string | null): void {
   tableUndoExploration = false;
-  rememberedTableHistory = [];
-  tableUndoPaused = false;
+  rememberedTableHistory = [...(widgetHost?.recordedPlay?.cards ?? [])];
+  tableUndoPaused = Boolean(rememberedTableHistory.length);
   clearSingletonAutoplayTimer();
   clearArticleScriptProblemCompletePromotionState();
   clearPulseTimer();
@@ -5555,6 +5559,15 @@ function previousTableTrickCursor(): number | null {
   return previousCompletedTrickCursor(cursor, trickFrozen);
 }
 
+/** A hand click is a replacement; a table click remains a pure take-back. */
+function replacePlayedHandCard(play: Play): void {
+  if (trickFrozen || widgetJourneyStartPending()) return;
+  const replacement = handCardReplacementTurn(withDdSource(currentProblem),
+    playedTableHistory(), state.trick, play.seat, currentSeed, replayArticleHistory);
+  if (!replacement?.alternatives.some(p => p.suit === play.suit && p.rank === play.rank)) return;
+  if (restoreTableHistory(replacement.cursor, replacement.original)) runTurn(play);
+}
+
 function playedTableHistory(): CardId[] {
   return articleScriptState
     ? articleScriptState.history.slice(0, articleScriptState.cursor)
@@ -5579,13 +5592,13 @@ function backupPreviousTableTrick(): void {
 
 /** Shared rewind cleanup keeps automatic play paused and table-card take-back
  * available after either kind of navigation. */
-function restoreTableHistory(cursor: number, play?: Play, recorded?: CardId[]): void {
+function restoreTableHistory(cursor: number, play?: Play, recorded?: CardId[]): boolean {
   const history = recorded ?? (articleScriptState ? articleScriptState.history : ddsPlayHistory as CardId[]);
   const replayed = replayBeforeTableCard(withDdSource(currentProblem), history, cursor, currentSeed, replayArticleHistory);
-  if (!replayed || (play && replayed.state.turn !== play.seat)) return;
+  if (!replayed || (play && replayed.state.turn !== play.seat)) return false;
   const showCompleted = !play && cursor > 0 && cursor % 4 === 0;
   const completed = showCompleted ? replayCompletedTableTrick(withDdSource(currentProblem), history, cursor, currentSeed) : null;
-  if (showCompleted && !completed) return;
+  if (showCompleted && !completed) return false;
   rememberedTableHistory = retainTableContinuation(rememberedTableHistory, playedTableHistory());
 
   tableUndoPaused = true;
@@ -5631,7 +5644,7 @@ function restoreTableHistory(cursor: number, play?: Play, recorded?: CardId[]): 
   deferredLogLines = [];
   unfreezeTrick(false);
   syncConfiguredUserControls();
-  state.phase = 'awaitUser';
+  if (state.phase !== 'end') state.phase = 'awaitUser';
   if (completed) {
     const visible = cloneStateForLog(completed.before);
     for (const event of completed.events) applyEventToShadow(visible, event);
@@ -5642,6 +5655,7 @@ function restoreTableHistory(cursor: number, play?: Play, recorded?: CardId[]): 
   }
   logs = [...logs, play ? `[UNDO] returned to before ${play.seat}:${play.suit}${play.rank}` : `[HISTORY] returned to play ${cursor}`].slice(-500);
   render();
+  return true;
 }
 
 function backupLastUserPlay(): void {
@@ -5677,23 +5691,28 @@ function deferWorkerAction(action:()=>void):boolean {
  return true;
 }
 let defensePreparation:{key:string;promise:Promise<unknown>;complete:boolean}|undefined;
+function defenderDecisionContext(){
+ const legal=legalPlays(state).map(p=>toCardId(p.suit,p.rank) as CardId);
+ let candidates=legal;
+ const dd=queryDdsNextPlays(workerDdsInput());
+ const scores=dd.ok?buildDdsScoreByCard(dd.result.plays):undefined;
+ if(scores){
+  const scored=legal.filter(c=>scores.has(c));
+  if(scored.length){const best=Math.max(...scored.map(c=>scores.get(c)!));candidates=legal.filter(c=>scores.get(c)===best);}
+ }
+ return {candidates,...ddsDecisionContribution(legal,candidates,scores,state.turn,dd.ok?dd.result.player:undefined)};
+}
 /** Only automatic choices wait for defense. Manual cards remain playable. */
 function deferDefenseAction(action:()=>void):boolean {
  const prepare=widgetHost?.prepareDefenderCards;
  if(!prepare||!['E','W'].includes(state.turn)||state.phase==='end')return false;
  const before=state,history=[...ddsPlayHistory] as CardId[];
- const legal=legalPlays(state).map(p=>toCardId(p.suit,p.rank) as CardId);
- let candidates=legal;
- const dd=queryDdsNextPlays(workerDdsInput());
- if(dd.ok){
-  const scores=buildDdsScoreByCard(dd.result.plays),scored=legal.filter(c=>scores.has(c));
-  if(scored.length){const best=Math.max(...scored.map(c=>scores.get(c)!));candidates=legal.filter(c=>scores.get(c)===best);}
- }
+ const {candidates,ddsRestricted}=defenderDecisionContext();
  const key=JSON.stringify([workerDdsInput(),candidates]);
  if(widgetHost?.defenderCardsReady?.(state,candidates,history))return false;
  if(defensePreparation?.key===key&&!defensePreparation.complete)return true;
  const entry={key,complete:false,promise:Promise.resolve() as Promise<unknown>};defensePreparation=entry;
- entry.promise=prepare(structuredClone(state),candidates,history).catch(()=>{}).then(()=>{
+ entry.promise=prepare(structuredClone(state),candidates,history,{ddsRestricted}).catch(()=>{}).then(()=>{
   if(defensePreparation!==entry)return;
   entry.complete=true;
   if(state===before&&ddsPlayHistory.join(',')===history.join(',')&&!document.hidden)action();
@@ -5710,11 +5729,11 @@ function syncWorkerDefenderAutoplay():void {
   if(tableUndoPaused||document.hidden||!autoplayEw||trickFrozen||state.phase==='end'||key!=='worker:'+ddsPlayHistory.join(',')+':'+state.turn)return;
   if(deferWorkerAction(()=>{render();}))return;
   if(deferDefenseAction(()=>{render();}))return;
-  const play=chooseSingleDefenderAdvancePlay();if(play)runTurn(play);
+  const play=chooseSingleDefenderAdvancePlay();if(play)runTurn(play,'automatic defense');
  },autoplayPresentationDelay(300));
 }
-function runTurn(play: Play): void {
-  if(deferWorkerAction(()=>runTurn(play)))return;
+function runTurn(play: Play, autoDefenseRule?:string): void {
+  if(deferWorkerAction(()=>runTurn(play,autoDefenseRule)))return;
   if (articleScriptModeEnabled() && articleScriptWaitingOnDds()) {
     ensureArticleScriptDdsLoading();
     render();
@@ -5794,12 +5813,16 @@ function runTurn(play: Play): void {
       clearDdErrorVisual();
     }
   }
+  const autoDefenseContext=autoDefenseRule&&widgetHost?.onDefenderAutoPlay&&['E','W'].includes(play.seat)?{...defenderDecisionContext(),hostRule:autoDefenseRule}:undefined;
   const result = apply(state, play, {
     eventCollector: semanticCollector,
     userDdError: userDdError?.ddError,
     manualDecision,
     autoplayBackstop: buildBrowserDdsBackstop(backstopHistoryForTurn)
   });
+  if(autoDefenseContext&&result.events.some(event=>event.type==='played'&&event.play.seat===play.seat&&event.play.suit===play.suit&&event.play.rank===play.rank)){
+    try{widgetHost?.onDefenderAutoPlay?.(before,toCardId(play.suit,play.rank) as CardId,ddsHistoryForTurn as CardId[],autoDefenseContext!);}catch{/* Reporting must never alter play. */}
+  }
   stageCardMotions(result.events);
   state = result.state;
   if (variantDdErrorById) {
@@ -6283,7 +6306,8 @@ function renderSuitRow(
   ddErrorGoodSet: Set<CardId>,
   scriptedNextSet: Set<CardId>,
   scriptedChoiceSet: Set<CardId>,
-  scriptedChoiceCompletedSet: Set<CardId>
+  scriptedChoiceCompletedSet: Set<CardId>,
+  replacementSet: Set<CardId>
 ): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'suit-row';
@@ -6322,10 +6346,11 @@ function renderSuitRow(
       const isEquivalent = regularDisplay?.isEquivalent ?? false;
       const colorVisual = regularDisplay?.visual ?? rankColorVisualForCard(view, seat, cardId);
 
-      if (isLegal) {
+      if (isLegal || replacementSet.has(cardId)) {
         const rankBtn = document.createElement('button');
         rankBtn.type = 'button';
-        rankBtn.className = 'rank-text legal';
+        rankBtn.className = isLegal ? 'rank-text legal' : 'rank-text muted';
+        if (!isLegal) rankBtn.setAttribute('aria-label', `Replace ${seatName[seat]}'s play with ${suitName[suit]} ${rank}`);
         rankBtn.dataset.seat = seat;
         rankBtn.dataset.cardId = cardId;
         if (hintBestSet.has(cardId)) rankBtn.classList.add('hint-best');
@@ -6337,7 +6362,7 @@ function renderSuitRow(
           rankBtn.classList.add('card-pulse');
         }
         appendRankContent(rankBtn, rank, colorVisual, isEquivalent);
-        rankBtn.onclick = () => runTurn({ seat, suit, rank });
+        rankBtn.onclick = () => isLegal ? runTurn({ seat, suit, rank }) : replacePlayedHandCard({ seat, suit, rank });
         cards.appendChild(rankBtn);
       } else {
         const rankEl = document.createElement('span');
@@ -6456,6 +6481,10 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
   }
 
   const startBlocked = widgetJourneyStartPending() && !trickFrozen;
+  const replacement = !trickFrozen && !startBlocked
+    ? handCardReplacementTurn(withDdSource(currentProblem), playedTableHistory(), view.trick, seat, currentSeed, replayArticleHistory)
+    : null;
+  const replacementSet = new Set<CardId>(replacement?.alternatives.map(p => toCardId(p.suit, p.rank) as CardId) ?? []);
   const legal = !trickFrozen && !startBlocked && active ? legalPlays(view) : [];
   const legalSet = new Set(legal.map((p) => `${p.suit}${p.rank}`));
   const canAct = !trickFrozen && !startBlocked && view.phase !== 'end' && view.userControls.includes(seat) && active;
@@ -6501,7 +6530,7 @@ function renderSeatHand(view: State, seat: Seat): HTMLElement {
     const effectiveLegalSet = scriptedChoiceBestSet.size > 0 ? scriptedChoiceBestSet : legalSet;
     const effectiveHintBestSet = new Set<CardId>([...hintBestSet]);
     const effectiveScriptNextSet = new Set<CardId>([...scriptedNextSet]);
-    content.appendChild(renderSuitRow(view, seat, suit, displayRanks, effectiveLegalSet, effectiveCanAct, effectiveHintBestSet, ddErrorGoodSet, effectiveScriptNextSet, scriptedChoiceBestSet, scriptedChoiceCompletedSet));
+    content.appendChild(renderSuitRow(view, seat, suit, displayRanks, effectiveLegalSet, effectiveCanAct, effectiveHintBestSet, ddErrorGoodSet, effectiveScriptNextSet, scriptedChoiceBestSet, scriptedChoiceCompletedSet, replacementSet));
   }
 
   if (seat === 'W') {
@@ -8060,6 +8089,9 @@ function render(): void {
     currentViewState,
     articleScriptUndoTargetCursor,
     backupLastUserPlay,
+    previousCard: widgetHost?.recordedPlay && ddsPlayHistory.length > 0
+      ? () => restoreTableHistory(ddsPlayHistory.length - 1) : undefined,
+    recordedPlayNavigation: Boolean(widgetHost?.recordedPlay),
     previousTrick: widgetHost ? backupPreviousTableTrick : undefined,
     previousTrickAvailable: Boolean(widgetHost && previousTableTrickCursor() !== null),
     replayNextTrick: widgetHost && nextRememberedTableTrickCursor() !== null ? replayNextRememberedTableTrick : undefined,
@@ -8170,7 +8202,8 @@ function render(): void {
     autoplaySingletons, autoplayEw, hideEastWest, cardColoring:cardColoringEnabled,
     alwaysHint, narrate, alertMistakes, showGuides
   });
-  widgetHost?.onRender?.(state, trickFrozen, [...ddsPlayHistory] as CardId[]);
+  rememberedTableHistory = retainTableContinuation(rememberedTableHistory, playedTableHistory());
+  widgetHost?.onRender?.(state, trickFrozen, [...ddsPlayHistory] as CardId[], rememberedTableHistory);
   // Host layout/zoom and synchronous analysis finish before starting the clock.
   playPendingCardMotions();
   syncSingletonAutoplay();
@@ -8492,6 +8525,10 @@ if (sitePreferencesEnabled) watchSitePreferences(applyLiveSitePreferences);
 ensureReadingInteractionTracking();
 ensureWidgetSnapshotDebugShortcut();
 replayInitialUserHistoryIfPresent();
+if (widgetHost?.recordedPlay?.cards.length) {
+  rememberedTableHistory = [...widgetHost.recordedPlay.cards];
+  restoreTableHistory(widgetHost.recordedPlay.cursor, undefined, rememberedTableHistory);
+}
 widgetHost?.dds?.controlsReady?.(async () => {
   // Reload analysis only; the deal, play history and frozen trick stay intact.
   clearSingletonAutoplayTimer();

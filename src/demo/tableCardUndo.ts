@@ -1,4 +1,4 @@
-import type { CardId, Play, Problem } from '../core';
+import type { CardId, Play, Problem, Seat } from '../core';
 import { apply, legalPlays } from '../core';
 import { replayArticleHistory } from './articleScriptRuntime';
 
@@ -17,6 +17,25 @@ export function replayBeforeTableCard(problem: Problem, history: CardId[], curso
   const replayed = replay(problem, history, cursor, seed);
   // A partial replay must never silently replace the displayed position.
   return replayed.playedCardIds.length === cursor ? replayed : null;
+}
+
+/** Legal alternatives for a hand that has already contributed to this open
+ * trick. Reconstruct its turn using the same engine as table-card take-back;
+ * following suit is judged there, not against the current player's turn.
+ * Completed/cleared tricks retain their existing navigation semantics. */
+export function handCardReplacementTurn(problem: Problem, history: CardId[],
+  trick: readonly Play[], seat: Seat, seed: number,
+  replay: typeof replayArticleHistory = replayArticleHistory) {
+  if (trick.length === 0 || trick.length >= 4) return null;
+  const original = trick.find(play => play.seat === seat);
+  if (!original) return null;
+  const cursor = tableCardUndoCursor(history, trick, original);
+  if (cursor === null || cursor - trick.indexOf(original) + trick.length !== history.length) return null;
+  const replayed = replayBeforeTableCard(problem, history, cursor, seed, replay);
+  if (!replayed || replayed.state.turn !== seat) return null;
+  const alternatives = legalPlays(replayed.state).filter(play =>
+    play.suit !== original.suit || play.rank !== original.rank);
+  return { cursor, original, alternatives };
 }
 
 /** A frozen trick is already visible, so step to the one before it. A cleared

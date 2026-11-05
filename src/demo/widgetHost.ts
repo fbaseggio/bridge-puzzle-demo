@@ -52,12 +52,16 @@ export type WidgetHost = {
   preferDefenderCards?: (state: State, candidates: readonly CardId[], history?: readonly CardId[]) => readonly CardId[];
   /** Optional asynchronous preparation of the exact legal/DDS candidate pool. */
   defenderCardsReady?: (state:State,candidates:readonly CardId[],history:readonly CardId[])=>boolean;
-  prepareDefenderCards?: (state:State,candidates:readonly CardId[],history:readonly CardId[])=>Promise<readonly CardId[]>;
+  prepareDefenderCards?: (state:State,candidates:readonly CardId[],history:readonly CardId[],context?:{ddsRestricted:boolean})=>Promise<readonly CardId[]>;
+  /** Notification only after an automatically selected E/W card actually commits; history is pre-play. */
+  onDefenderAutoPlay?:(state:State,card:CardId,history:readonly CardId[],context:{candidates:readonly CardId[];ddsRestricted:boolean;ddsIncomplete?:boolean;hostRule:string})=>void;
   engine?: { init: typeof init; apply: typeof apply };
   articleScript?: ArticleScriptSpec;
+  /** Recorded physical play, independent of article scripting. Open paused at cursor. */
+  recordedPlay?: { cards: readonly CardId[]; cursor: number };
   hideCompanionPanel?: boolean;
   replayHistory?: typeof replayArticleHistory;
-  onRender?: (state: State, trickFrozen: boolean, history:readonly CardId[]) => void;
+  onRender?: (state: State, trickFrozen: boolean, history:readonly CardId[], continuation:readonly CardId[]) => void;
 };
 
 declare global { interface Window { dsWidgetHost?: WidgetHost } }

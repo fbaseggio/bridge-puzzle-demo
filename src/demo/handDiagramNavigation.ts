@@ -80,6 +80,8 @@ type HandDiagramNavigationDeps = {
   currentViewState: () => State;
   articleScriptUndoTargetCursor: () => number;
   backupLastUserPlay: () => void;
+  previousCard?: () => void;
+  recordedPlayNavigation?: boolean;
   previousTrick?: () => void;
   previousTrickAvailable?: boolean;
   replayNextTrick?: () => void;
@@ -486,7 +488,7 @@ function renderReadingQuietTransportRow(args: {
   undoBtn.title = 'Previous';
   undoBtn.setAttribute('aria-label', 'Previous');
   if (widgetArticleScript) undoBtn.disabled = articleScriptAtAbsoluteStart;
-  else undoBtn.disabled = undoStack.length === 0;
+  else undoBtn.disabled = deps.recordedPlayNavigation ? !deps.previousCard : undoStack.length === 0;
   undoBtn.onclick = () => {
     dismissTransientWidgetOutcome(currentViewState());
     if (widgetArticleScript) {
@@ -494,6 +496,7 @@ function renderReadingQuietTransportRow(args: {
       render();
       return;
     }
+    if (deps.recordedPlayNavigation) { deps.previousCard?.(); return; }
     if (undoStack.length === 0) return;
     backupLastUserPlay();
   };
@@ -806,6 +809,7 @@ function renderTransportRow(args: {
   if (isWidgetShellMode) undoBtn.classList.add('icon-btn', 'undo-btn');
   if (widgetTransport) undoBtn.classList.add('script-transport-btn');
   if (widgetArticleScript) undoBtn.disabled = articleScriptAtAbsoluteStart;
+  else if (deps.recordedPlayNavigation) undoBtn.disabled = !deps.previousCard;
   else if (!isWidgetShellMode) undoBtn.disabled = undoStack.length === 0;
   undoBtn.onclick = () => {
     dismissTransientWidgetOutcome(currentViewState());
@@ -814,6 +818,7 @@ function renderTransportRow(args: {
       render();
       return;
     }
+    if (deps.recordedPlayNavigation) { deps.previousCard?.(); return; }
     if (undoStack.length === 0) return;
     backupLastUserPlay();
   };

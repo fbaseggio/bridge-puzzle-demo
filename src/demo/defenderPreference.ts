@@ -24,3 +24,14 @@ export function fallbackDefenderPlay(state:State, legal:readonly Play[], policyC
  const chosen=legal.find(play=>`${play.suit}${play.rank}`===chosenId)??policyChoice;
  return lowestEquivalentPlay(state,chosen,legal.filter(play=>preferred.includes(`${play.suit}${play.rank}` as CardId)));
 }
+
+/** Reporting provenance only: a partial/wrong-player result cannot justify 'DDS best'. */
+export function hasConfirmedDdsCoverage(legal:readonly CardId[],scores:ReadonlyMap<CardId,number>,turn:State['turn'],player?:State['turn']):boolean {
+ return legal.length>0&&(player===undefined||player===turn)&&legal.every(card=>Number.isFinite(scores.get(card)));
+}
+
+/** Explain DDS only when it changed the pool; retain incomplete evidence explicitly. */
+export function ddsDecisionContribution(legal:readonly CardId[],candidates:readonly CardId[],scores:ReadonlyMap<CardId,number>|undefined,turn:State['turn'],player?:State['turn']){
+ const complete=!!scores&&hasConfirmedDdsCoverage(legal,scores,turn,player);
+ return {ddsRestricted:complete&&candidates.length<legal.length,ddsIncomplete:!complete};
+}
