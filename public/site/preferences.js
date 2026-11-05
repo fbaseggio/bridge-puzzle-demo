@@ -119,6 +119,10 @@ function populateForm(form, preferences) {
   form.elements.animation.value = preferences.animation;
   form.elements.zoom.value = String(preferences.zoom);
   form.querySelector('[data-zoom-value]').textContent = `${preferences.zoom}%`;
+  const number=form.querySelector('[data-zoom-number]');if(number)number.value=String(preferences.zoom);
+  if(document.documentElement.dataset.movieVersion==='2'){
+    try{const raw=JSON.parse(browserStorage()?.getItem(PREFERENCES_KEY)||'null');if(typeof raw?.showAnalysisLog!=='boolean')form.elements.showAnalysisLog.checked=true;}catch{form.elements.showAnalysisLog.checked=true;}
+  }
 }
 
 export function mountPreferencesMenu() {
@@ -182,6 +186,35 @@ export function mountPreferencesMenu() {
         </form>
       </section>
     </div>`;
+  const movie2 = document.documentElement.dataset.movieVersion === '2';
+  if (movie2) {
+    menu.querySelector('summary').setAttribute('aria-label', 'Open settings');
+    menu.querySelector('summary').title = 'Settings';
+    menu.querySelector('[data-main-pane] strong').textContent = 'Settings';
+    menu.querySelector('.ds-preferences-subtitle').remove();
+    menu.querySelector('[data-dev-pane]').setAttribute('aria-label','Developer settings');
+    menu.querySelector('[data-dev-pane] strong').textContent='Developer settings';
+    const mainForm=menu.querySelector('form');
+    const fields=[...mainForm.querySelectorAll('fieldset')];
+    const play=fields[1];play.querySelector('legend').textContent='Play';
+    for(const label of [...fields[2].querySelectorAll('label')])play.append(label);
+    fields[2].remove();
+    play.querySelector('[name=autoplaySingletons]').nextSibling.textContent=' Autoplay singletons / equals';
+    play.querySelector('[name=autoplayEw]').nextSibling.textContent=' Autoplay East / West';
+    const display=document.createElement('fieldset');display.innerHTML='<legend>Display</legend>';
+    for(const label of [...mainForm.querySelectorAll(':scope > label')])display.append(label);
+    const diagnostics=fields[0];diagnostics.querySelector('legend').textContent='Diagnostics';
+    diagnostics.querySelector('label').firstChild.textContent='Time allowance ';
+    const notes=diagnostics.querySelectorAll('small');notes[0].textContent='Per load or calculation; applies on the next attempt.';notes[1].remove();
+    diagnostics.querySelector('[name=showAnalysisLog]').nextSibling.textContent=' Show Diagnostics tab';
+    const actions=mainForm.querySelector('.ds-preferences-actions');
+    mainForm.insertBefore(play,actions);mainForm.insertBefore(display,actions);mainForm.insertBefore(diagnostics,actions);
+    const range=display.querySelector('[name=zoom]');range.setAttribute('aria-label','Default diagram zoom');
+    const number=document.createElement('input');number.type='number';number.min='50';number.max='200';number.step='10';number.setAttribute('data-zoom-number','');number.setAttribute('aria-label','Default diagram zoom percent');
+    range.after(number);number.after(document.createTextNode('%'));display.querySelector('[data-zoom-value]').hidden=true;number.addEventListener('input',()=>{if(Number.isFinite(number.valueAsNumber))range.value=number.value;});
+    number.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();range.dispatchEvent(new Event('change',{bubbles:true}));}});
+    mainForm.querySelector('[data-status]').textContent='Saved in this browser.';
+  }
   target.append(menu);
 
   const form = menu.querySelector('form');
