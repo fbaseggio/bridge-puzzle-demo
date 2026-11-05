@@ -1,10 +1,10 @@
-# Analyzer checked threat families and concise explanations
+# Mule continuation defense and qualified native interpretations
 
-Publish reviewed checked-question threat reporting, invariant lead-to wording, complete exact shorter explanations, optional catalog recognition and precise current Catalog links. Exact reviewed provider closure and final committed metadata; no later Madcap changes or catalog/intake refresh.
+Reviewed generic DDS-constrained next-entry defense in Movie/Random using one DDS worker, warm cache and exact history; preserve cumulative exclusions and source-aware lower rules. Adopt matching v2 and prime-extension native providers with complete reviewed dependencies. Catalog/intake unchanged; existing fallback narration for prime forms remains. Historical source-reference freshness mismatch is explicitly outside scope.
 
-Website release: 2026-11-05 14:11:15 UTC · 1654ca6f8056 (release build time, UTC)
+Website release: 2026-11-05 18:30:37 UTC · 9d05879d917e (release build time, UTC)
 
-Base: 7a5181424ca53dd889b4562ac9e00118606d79dc
+Base: 99251a6efc1a2fcae638ee606a728accc84a19ac
 
 Consumer and production tests, typechecks and builds passed.
 Source freshness check: explicitly omitted by plan.

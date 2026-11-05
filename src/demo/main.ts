@@ -2954,6 +2954,11 @@ function chooseSingleDefenderAdvancePlay(): Play | null {
       return legal.find((candidate) => (toCardId(candidate.suit, candidate.rank) as CardId) === chosenCardId) ?? null;
     }
   }
+  if(widgetHost?.prepareDefenderCards){
+    const {candidates}=defenderDecisionContext();
+    if(widgetHost.defenderCardsReady?.(state,candidates,ddsPlayHistory as CardId[]) &&
+       widgetHost.preferDefenderCards?.(state,candidates,ddsPlayHistory as CardId[]).length===0)return null;
+  }
   const legal = legalPlays(state).filter((candidate) => candidate.seat === seat);
   if (legal.length === 0) return null;
   if (legal.length === 1) return legal[0] ?? null;
