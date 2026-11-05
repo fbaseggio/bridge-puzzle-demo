@@ -1,10 +1,10 @@
-# Analyzer interpretation recovery and concise continuations
+# Analyzer pending-trick TTC explanations
 
-Publish reviewed Analyzer source/expanded interpretation recovery, retained separate proofs, strict identical mid-trick TTC folding, concise branch rendering and nested catalog continuation recognition. Includes exact BI/conditional-head dependency closure and committed metadata. No Mule/catalog data refresh.
+Publish reviewed S131 pending-trick take-the-rest recognition in exact and checked abstract explanations, with the accepted combined provider closure. Preserve required friendly discards and full original proof. No catalog/intake refresh or unrelated provider adoption.
 
-Website release: 2026-11-05 05:49:53 UTC · 398111fb0422 (release build time, UTC)
+Website release: 2026-11-05 15:56:15 UTC · b102fd9260e0 (release build time, UTC)
 
-Base: 11e6641b5dce8b6c986f491af0a8759fc8bdcc4e
+Base: 3a9d1e05d24da28886e5e52ccb307d150dd87b76
 
 Consumer and production tests, typechecks and builds passed.
 Source freshness check: explicitly omitted by plan.
