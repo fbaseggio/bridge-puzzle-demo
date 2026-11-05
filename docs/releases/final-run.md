@@ -1,10 +1,10 @@
-# Mule following-suit TTC and Analyzer threat reporting
+# Analyzer checked threat families and concise explanations
 
-Publish reviewed Mule following-suit preferences, TTC checking on follows, lowest-eligible-per-suit TTC scheduling, and coherent leading-threat Analyzer reporting. Preserve DDS/legal restrictions, bounded unknown outcomes, exact physical history and Analyzer solver semantics.
+Publish reviewed checked-question threat reporting, invariant lead-to wording, complete exact shorter explanations, optional catalog recognition and precise current Catalog links. Exact reviewed provider closure and final committed metadata; no later Madcap changes or catalog/intake refresh.
 
-Website release: 2026-11-05 04:55:25 UTC · 7bba44601f24 (release build time, UTC)
+Website release: 2026-11-05 14:11:15 UTC · 1654ca6f8056 (release build time, UTC)
 
-Base: bb1228778fad9485096ca53bb1c33f4eb2d23c92
+Base: 7a5181424ca53dd889b4562ac9e00118606d79dc
 
 Consumer and production tests, typechecks and builds passed.
 Source freshness check: explicitly omitted by plan.
