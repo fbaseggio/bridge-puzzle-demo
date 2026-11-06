@@ -1,0 +1,1 @@
+function e(t){return"/catalog/#position="+encodeURIComponent(t)}function r(t,n){if(!t.startsWith("#position="))return;let o;try{o=decodeURIComponent(t.slice(10))}catch{return}return Array.from(n).find(i=>i.textContent?.trim()===o)}export{e as c,r as f};
