@@ -3,6 +3,8 @@ export const PREFERENCES_KEY = 'deepsqueeze.preferences.v1';
 export const DEFAULT_PREFERENCES = Object.freeze({
   version: 1,
   defensePolicy: 'mule',
+  bindingPolicy: 'standard',
+  exploreBranches: false,
   alwaysHint: false,
   allowMoreAnalysisTime: false,
   ddsLoadingAllowance: 'normal',
@@ -33,6 +35,8 @@ export function normalizePreferences(value) {
   const tableColor = source.tableColor === 'light-green' ? 'very-light' : source.tableColor;
   return {
     version: 1,
+    exploreBranches: booleanOrDefault(source.exploreBranches, DEFAULT_PREFERENCES.exploreBranches),
+    bindingPolicy: source.bindingPolicy === 'jrl' ? 'jrl' : 'standard',
     defensePolicy: ['mule', 'laa', 'lta', 'random'].includes(source.defensePolicy) ? source.defensePolicy : 'mule',
     allowMoreAnalysisTime: booleanOrDefault(source.allowMoreAnalysisTime, DEFAULT_PREFERENCES.allowMoreAnalysisTime),
     ddsLoadingAllowance: ['normal','extended','patient'].includes(source.ddsLoadingAllowance) ? source.ddsLoadingAllowance : (source.allowMoreAnalysisTime === true ? 'extended' : 'normal'),
@@ -95,6 +99,8 @@ function preferencesFromForm(form) {
   return normalizePreferences({
     ...readPreferences(),
     version: 1,
+    exploreBranches: form.elements.exploreBranches ? data.has('exploreBranches') : readPreferences().exploreBranches,
+    bindingPolicy: data.get('bindingPolicy') ?? readPreferences().bindingPolicy,
     alwaysHint: data.has('alwaysHint'),
     allowMoreAnalysisTime: data.get('ddsLoadingAllowance') !== 'normal',
     ddsLoadingAllowance: data.get('ddsLoadingAllowance'),
@@ -107,7 +113,13 @@ function preferencesFromForm(form) {
   });
 }
 
+function modernPlayerSettings() {
+  return document.documentElement.dataset.movieVersion === '2' || document.documentElement.dataset.playerUi === 'modern';
+}
+
 function populateForm(form, preferences) {
+  if(form.elements.exploreBranches)form.elements.exploreBranches.checked = preferences.exploreBranches;
+  if(form.elements.bindingPolicy)form.elements.bindingPolicy.value = preferences.bindingPolicy;
   form.elements.ddsLoadingAllowance.value = preferences.ddsLoadingAllowance;
   form.elements.showAnalysisLog.checked = preferences.showAnalysisLog;
   form.elements.alwaysHint.checked = preferences.alwaysHint;
@@ -120,7 +132,7 @@ function populateForm(form, preferences) {
   form.elements.zoom.value = String(preferences.zoom);
   form.querySelector('[data-zoom-value]').textContent = `${preferences.zoom}%`;
   const number=form.querySelector('[data-zoom-number]');if(number)number.value=String(preferences.zoom);
-  if(document.documentElement.dataset.movieVersion==='2'){
+  if(modernPlayerSettings()){
     try{const raw=JSON.parse(browserStorage()?.getItem(PREFERENCES_KEY)||'null');if(typeof raw?.showAnalysisLog!=='boolean')form.elements.showAnalysisLog.checked=true;}catch{form.elements.showAnalysisLog.checked=true;}
   }
 }
@@ -186,8 +198,7 @@ export function mountPreferencesMenu() {
         </form>
       </section>
     </div>`;
-  const movie2 = document.documentElement.dataset.movieVersion === '2';
-  if (movie2) {
+  if (modernPlayerSettings()) {
     menu.querySelector('summary').setAttribute('aria-label', 'Open settings');
     menu.querySelector('summary').title = 'Settings';
     menu.querySelector('[data-main-pane] strong').textContent = 'Settings';
@@ -201,7 +212,8 @@ export function mountPreferencesMenu() {
     fields[2].remove();
     play.querySelector('[name=autoplaySingletons]').nextSibling.textContent=' Autoplay singletons / equals';
     play.querySelector('[name=autoplayEw]').nextSibling.textContent=' Autoplay East / West';
-    const display=document.createElement('fieldset');display.innerHTML='<legend>Display</legend>';
+    const branches=document.createElement('label');branches.className='ds-check';branches.innerHTML='<input type="checkbox" name="exploreBranches"> Explore Branches On';play.append(branches);
+    const display=document.createElement('fieldset');display.innerHTML='<legend>Display</legend><label>Binding policy<select name="bindingPolicy"><option value="standard">Standard</option><option value="jrl">JRL</option></select></label><small>Movie encapsulations and catalog examples. Applies on the next load.</small>';
     for(const label of [...mainForm.querySelectorAll(':scope > label')])display.append(label);
     const diagnostics=fields[0];diagnostics.querySelector('legend').textContent='Diagnostics';
     diagnostics.querySelector('label').firstChild.textContent='Time allowance ';
