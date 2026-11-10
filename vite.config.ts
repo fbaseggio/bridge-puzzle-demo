@@ -8,7 +8,7 @@ export default defineConfig({
       input: {
         home: resolve(__dirname, 'index.html'),
         workbench: resolve(__dirname, 'workbench/index.html'),
-        practice: resolve(__dirname, 'practice/index.html'),
+        legacyPractice: resolve(__dirname, 'legacy_practice/index.html'),
         puzzles: resolve(__dirname, 'puzzles/index.html'),
         articles: resolve(__dirname, 'articles/index.html'),
         puzzlesDoubleDummy1: resolve(__dirname, 'puzzles/double-dummy-1/index.html'),

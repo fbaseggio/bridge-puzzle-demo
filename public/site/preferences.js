@@ -192,7 +192,7 @@ export function mountPreferencesMenu() {
             <option value="random">Random legal</option>
             <option value="ddcta" disabled>DDCTA — unavailable in this build</option>
           </select></label>
-          <p>Movie and Random only. Applies to newly loaded positions; saved links keep their selected policy. Reloading a link with a defense setting keeps that setting.</p>
+          <p>Explorer and Random only. Applies to newly loaded positions; saved links keep their selected policy. Reloading a link with a defense setting keeps that setting.</p>
           <p>DDS guidance still applies when available. Legacy Threat-aware requires explicit threat cards; without them, Abstract-aware is used and a notice is shown.</p>
           <div class="ds-preferences-actions"><button type="button" data-reset-dev>Restore default policy</button><span data-dev-status role="status" aria-live="polite">Stored only in this browser.</span></div>
         </form>

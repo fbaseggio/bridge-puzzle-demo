@@ -25,7 +25,7 @@ window.addEventListener('message', event => {
     const url = new URL(frame.src);
     url.searchParams.set('a', data.a);
     frame.src = url.href;
-    url.pathname = '/movie2/';
+    url.pathname = '/explorer/';
     frame.closest('.deal').querySelector('.movie-link').href = url.href;
   }
 });

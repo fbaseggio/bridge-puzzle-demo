@@ -14,6 +14,7 @@ export function analysisTimeLimits(allowMoreAnalysisTime = false, ddsLoadingAllo
   devDdsLoadMs: allowanceMs,
   topTricksMs: 2000 * scale,
   abstractSolveMs: 2000 * scale,
+  pureValidationMs: 10000 * scale,
   threatAssessmentMs: 5000 * scale,
   assessmentMs: 12000 * scale,
   assessmentSolveMs: 1500 * scale,

@@ -408,14 +408,14 @@ const displayMode: DisplayMode = (() => {
   const mode = params.get('mode');
   if (mode === 'practice' || mode === 'widget' || mode === 'analysis') return mode;
   const path = window.location.pathname.toLowerCase();
-  if (path.endsWith('/practice') || path.endsWith('/practice/') || path.endsWith('/practice.html') || path.includes('/practice/')) {
+  if (path.endsWith('/legacy_practice') || path.includes('/legacy_practice/') || path.endsWith('/practice') || path.endsWith('/practice/') || path.endsWith('/practice.html') || path.includes('/practice/')) {
     return 'practice';
   }
   return 'analysis';
 })();
 const sitePreferencesEnabled = widgetHost?.inheritSitePreferences === true || (!widgetHost && (() => {
   const path = window.location.pathname.toLowerCase();
-  return path === '/practice' || path.startsWith('/practice/')
+  return path === '/legacy_practice' || path.startsWith('/legacy_practice/') || path === '/practice' || path.startsWith('/practice/')
     || path === '/workbench' || path.startsWith('/workbench/');
 })());
 const initialSitePreferences = sitePreferencesEnabled ? readInitialSitePreferences() : undefined;

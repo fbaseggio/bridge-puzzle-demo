@@ -1,1 +1,0 @@
-const s="/movie2/",t="/movie/classic.html";function n(i){const e=new URL(i,"https://deepsqueeze.ai");return e.origin!=="https://deepsqueeze.ai"||!["/movie","/movie/","/movie/index.html",s].includes(e.pathname)?i:s+e.search+e.hash}export{t as C,s as M,n as m};
