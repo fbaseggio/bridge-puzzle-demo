@@ -6,8 +6,9 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   bindingPolicy: 'standard',
   exploreBranches: false,
   alwaysHint: false,
-  allowMoreAnalysisTime: false,
-  ddsLoadingAllowance: 'normal',
+  allowMoreAnalysisTime: true,
+  // Historical storage key; now the shared Calculation patience profile.
+  ddsLoadingAllowance: 'patient',
   showAnalysisLog: false,
   autoplaySingletons: false,
   autoplayEw: false,
@@ -32,14 +33,17 @@ function zoomOrDefault(value) {
 
 export function normalizePreferences(value) {
   const source = value && typeof value === 'object' && value.version === 1 ? value : {};
+  const patience = ['normal','extended','patient'].includes(source.ddsLoadingAllowance) ? source.ddsLoadingAllowance
+    : typeof source.allowMoreAnalysisTime === 'boolean' ? (source.allowMoreAnalysisTime ? 'extended' : 'normal')
+    : DEFAULT_PREFERENCES.ddsLoadingAllowance;
   const tableColor = source.tableColor === 'light-green' ? 'very-light' : source.tableColor;
   return {
     version: 1,
     exploreBranches: booleanOrDefault(source.exploreBranches, DEFAULT_PREFERENCES.exploreBranches),
     bindingPolicy: source.bindingPolicy === 'jrl' ? 'jrl' : 'standard',
     defensePolicy: ['mule', 'laa', 'lta', 'random'].includes(source.defensePolicy) ? source.defensePolicy : 'mule',
-    allowMoreAnalysisTime: booleanOrDefault(source.allowMoreAnalysisTime, DEFAULT_PREFERENCES.allowMoreAnalysisTime),
-    ddsLoadingAllowance: ['normal','extended','patient'].includes(source.ddsLoadingAllowance) ? source.ddsLoadingAllowance : (source.allowMoreAnalysisTime === true ? 'extended' : 'normal'),
+    allowMoreAnalysisTime: patience !== 'normal',
+    ddsLoadingAllowance: patience,
     showAnalysisLog: booleanOrDefault(source.showAnalysisLog, DEFAULT_PREFERENCES.showAnalysisLog),
     alwaysHint: booleanOrDefault(source.alwaysHint, DEFAULT_PREFERENCES.alwaysHint),
     autoplaySingletons: booleanOrDefault(source.autoplaySingletons, DEFAULT_PREFERENCES.autoplaySingletons),
@@ -154,8 +158,8 @@ export function mountPreferencesMenu() {
       <form>
         <fieldset>
           <legend>Analysis</legend>
-          <label>Loading and calculation allowance <select name="ddsLoadingAllowance"><option value="normal">Normal — 30 seconds</option><option value="extended">Extended — 2 minutes</option><option value="patient">Patient — 10 minutes</option></select></label>
-          <small>The same deadline applies separately to DDS loading and each calculation. Applies on the next attempt. Cancel and Retry are available in the analysis pane.</small>
+          <label>Calculation patience <select name="ddsLoadingAllowance"><option value="normal">Normal</option><option value="extended">Extended</option><option value="patient">Patient — generous</option></select></label>
+          <small>Defaults for DDS, binding, Analyze and defense preparation. Applies on the next attempt; automatic play stays quick.</small>
           <label class="ds-check"><input type="checkbox" name="showAnalysisLog"> Show diagnostics / analysis log</label>
           <small>Movie / Random: DDS diagnostics. Analyzer: squeeze-analysis progress. Each includes copy log, cancel and restart controls.</small>
         </fieldset>
@@ -216,8 +220,8 @@ export function mountPreferencesMenu() {
     const display=document.createElement('fieldset');display.innerHTML='<legend>Display</legend><label>Binding policy<select name="bindingPolicy"><option value="standard">Standard</option><option value="jrl">JRL</option></select></label><small>Movie encapsulations and catalog examples. Applies on the next load.</small>';
     for(const label of [...mainForm.querySelectorAll(':scope > label')])display.append(label);
     const diagnostics=fields[0];diagnostics.querySelector('legend').textContent='Diagnostics';
-    diagnostics.querySelector('label').firstChild.textContent='Time allowance ';
-    const notes=diagnostics.querySelectorAll('small');notes[0].textContent='Per load or calculation; applies on the next attempt.';notes[1].remove();
+    diagnostics.querySelector('label').firstChild.textContent='Calculation patience ';
+    const notes=diagnostics.querySelectorAll('small');notes[0].textContent='Defaults for DDS, binding, Analyze and defense preparation. Automatic play stays quick.';notes[1].remove();
     diagnostics.querySelector('[name=showAnalysisLog]').nextSibling.textContent=' Show Diagnostics tab';
     const actions=mainForm.querySelector('.ds-preferences-actions');
     mainForm.insertBefore(play,actions);mainForm.insertBefore(display,actions);mainForm.insertBefore(diagnostics,actions);
