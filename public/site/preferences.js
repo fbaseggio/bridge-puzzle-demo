@@ -1,10 +1,12 @@
 export const PREFERENCES_KEY = 'deepsqueeze.preferences.v1';
 // Separate storage protects explicit choices from older tabs rewriting the v1 record.
 export const CALCULATION_PATIENCE_KEY = 'deepsqueeze.calculationPatience.v1';
+export const DEFENSE_DDS_POLICY_KEY = 'deepsqueeze.defenseDdsPolicy.v1';
 
 export const DEFAULT_PREFERENCES = Object.freeze({
   version: 1,
   defensePolicy: 'mule',
+  defenseDdsPolicy: 'required',
   bindingPolicy: 'standard',
   exploreBranches: false,
   alwaysHint: false,
@@ -45,6 +47,7 @@ export function normalizePreferences(value) {
     exploreBranches: booleanOrDefault(source.exploreBranches, DEFAULT_PREFERENCES.exploreBranches),
     bindingPolicy: source.bindingPolicy === 'jrl' ? 'jrl' : 'standard',
     defensePolicy: ['mule', 'laa', 'lta', 'random'].includes(source.defensePolicy) ? source.defensePolicy : 'mule',
+    defenseDdsPolicy: ['required', 'fallback-on-timeout', 'off'].includes(source.defenseDdsPolicy) ? source.defenseDdsPolicy : 'required',
     calculationPatience: patience,
     allowMoreAnalysisTime: patience !== 'normal',
     ddsLoadingAllowance: patience,
@@ -63,22 +66,25 @@ function browserStorage() {
 }
 
 export function readPreferences(storage = browserStorage()) {
-  let legacy, choice;
+  let legacy, choice, defenseDdsPolicy;
   if (storage) {
     try { legacy = JSON.parse(storage.getItem(PREFERENCES_KEY) || 'null'); } catch {}
     try { choice = JSON.parse(storage.getItem(CALCULATION_PATIENCE_KEY) || 'null'); } catch {}
+    try { defenseDdsPolicy = JSON.parse(storage.getItem(DEFENSE_DDS_POLICY_KEY) || 'null'); } catch {}
   }
   // The old record supplies other preferences only, never a patience migration.
-  return normalizePreferences({ ...normalizePreferences(legacy), calculationPatience: choice });
+  return normalizePreferences({ ...normalizePreferences(legacy), calculationPatience: choice, defenseDdsPolicy });
 }
 
-export function writePreferences(value, storage = browserStorage(), { calculationPatienceChanged = false } = {}) {
+export function writePreferences(value, storage = browserStorage(), { calculationPatienceChanged = false, defenseDdsPolicyChanged = false } = {}) {
   const choice = calculationPatienceChanged ? value?.calculationPatience : readPreferences(storage).calculationPatience;
-  const preferences = normalizePreferences({ ...value, calculationPatience: choice });
+  const defenseDdsPolicy = defenseDdsPolicyChanged ? value?.defenseDdsPolicy : readPreferences(storage).defenseDdsPolicy;
+  const preferences = normalizePreferences({ ...value, calculationPatience: choice, defenseDdsPolicy });
   if (!storage) return { preferences, saved: false };
   try {
-    const { calculationPatience, ...legacy } = preferences;
+    const { calculationPatience, defenseDdsPolicy, ...legacy } = preferences;
     if (calculationPatienceChanged) storage.setItem(CALCULATION_PATIENCE_KEY, JSON.stringify(calculationPatience));
+    if (defenseDdsPolicyChanged) storage.setItem(DEFENSE_DDS_POLICY_KEY, JSON.stringify(defenseDdsPolicy));
     storage.setItem(PREFERENCES_KEY, JSON.stringify(legacy));
     return { preferences, saved: true };
   } catch {
@@ -90,6 +96,7 @@ export function resetPreferences(storage = browserStorage()) {
   if (!storage) return { preferences: normalizePreferences(), saved: false };
   try {
     storage.removeItem(CALCULATION_PATIENCE_KEY);
+    storage.removeItem(DEFENSE_DDS_POLICY_KEY);
     storage.removeItem(PREFERENCES_KEY);
     return { preferences: normalizePreferences(), saved: true };
   } catch {
@@ -117,6 +124,7 @@ function preferencesFromForm(form) {
     version: 1,
     exploreBranches: form.elements.exploreBranches ? data.has('exploreBranches') : readPreferences().exploreBranches,
     bindingPolicy: data.get('bindingPolicy') ?? readPreferences().bindingPolicy,
+    defenseDdsPolicy: data.get('defenseDdsPolicy') ?? readPreferences().defenseDdsPolicy,
     alwaysHint: data.has('alwaysHint'),
     calculationPatience: data.get('calculationPatience'),
     showAnalysisLog: data.has('showAnalysisLog'),
@@ -135,6 +143,7 @@ function modernPlayerSettings() {
 function populateForm(form, preferences) {
   if(form.elements.exploreBranches)form.elements.exploreBranches.checked = preferences.exploreBranches;
   if(form.elements.bindingPolicy)form.elements.bindingPolicy.value = preferences.bindingPolicy;
+  if(form.elements.defenseDdsPolicy)form.elements.defenseDdsPolicy.value = preferences.defenseDdsPolicy;
   form.elements.calculationPatience.value = preferences.calculationPatience;
   form.elements.showAnalysisLog.checked = preferences.showAnalysisLog;
   form.elements.alwaysHint.checked = preferences.alwaysHint;
@@ -170,7 +179,7 @@ export function mountPreferencesMenu() {
         <fieldset>
           <legend>Analysis</legend>
           <label>Calculation patience <select name="calculationPatience"><option value="normal">Normal</option><option value="extended">Extended</option><option value="patient">Patient — generous</option></select></label>
-          <small>Defaults for DDS, binding, Analyze and defense preparation. Applies on the next attempt; automatic play stays quick.</small>
+          <small>Defaults for DDS, binding, Analyze and defense calculations. Applies on the next attempt.</small>
           <label class="ds-check"><input type="checkbox" name="showAnalysisLog"> Show diagnostics / analysis log</label>
           <small>Movie / Random: DDS diagnostics. Analyzer: squeeze-analysis progress. Each includes copy log, cancel and restart controls.</small>
         </fieldset>
@@ -227,12 +236,13 @@ export function mountPreferencesMenu() {
     fields[2].remove();
     play.querySelector('[name=autoplaySingletons]').nextSibling.textContent=' Autoplay singletons / equals';
     play.querySelector('[name=autoplayEw]').nextSibling.textContent=' Autoplay East / West';
+    const defenseDds=document.createElement('label');defenseDds.innerHTML='<span>DDS for defense</span><select name="defenseDdsPolicy"><option value="required">Require DDS</option><option value="fallback-on-timeout">Allow fallback if DDS times out</option><option value="off">Do not use DDS</option></select>';play.append(defenseDds);
     const branches=document.createElement('label');branches.className='ds-check';branches.innerHTML='<input type="checkbox" name="exploreBranches"> Explore Branches On';play.append(branches);
     const display=document.createElement('fieldset');display.innerHTML='<legend>Display</legend><label>Binding policy<select name="bindingPolicy"><option value="standard">Standard</option><option value="jrl">JRL</option></select></label><small>Movie encapsulations and catalog examples. Applies on the next load.</small>';
     for(const label of [...mainForm.querySelectorAll(':scope > label')])display.append(label);
     const diagnostics=fields[0];diagnostics.querySelector('legend').textContent='Diagnostics';
     diagnostics.querySelector('label').firstChild.textContent='Calculation patience ';
-    const notes=diagnostics.querySelectorAll('small');notes[0].textContent='Defaults for DDS, binding, Analyze and defense preparation. Automatic play stays quick.';notes[1].remove();
+    const notes=diagnostics.querySelectorAll('small');notes[0].textContent='Defaults for DDS, binding, Analyze and defense calculations.';notes[1].remove();
     diagnostics.querySelector('[name=showAnalysisLog]').nextSibling.textContent=' Show Diagnostics tab';
     const actions=mainForm.querySelector('.ds-preferences-actions');
     mainForm.insertBefore(play,actions);mainForm.insertBefore(display,actions);mainForm.insertBefore(diagnostics,actions);
@@ -272,7 +282,8 @@ export function mountPreferencesMenu() {
 
   const save = event => {
     const result = writePreferences(preferencesFromForm(form), undefined, {
-      calculationPatienceChanged: event.target.name === 'calculationPatience'
+      calculationPatienceChanged: event.target.name === 'calculationPatience',
+      defenseDdsPolicyChanged: event.target.name === 'defenseDdsPolicy'
     });
     populate(result.preferences);
     status.textContent = result.saved ? 'Saved on this browser.' : 'Preferences could not be saved.';
@@ -290,7 +301,7 @@ export function mountPreferencesMenu() {
     dispatchPreferences(result.preferences);
   });
   window.addEventListener('storage', event => {
-    if (event.key !== null && event.key !== PREFERENCES_KEY && event.key !== CALCULATION_PATIENCE_KEY) return;
+    if (event.key !== null && event.key !== PREFERENCES_KEY && event.key !== CALCULATION_PATIENCE_KEY && event.key !== DEFENSE_DDS_POLICY_KEY) return;
     const preferences = readPreferences();
     populate(preferences);
     status.textContent = 'Updated from another tab.';
