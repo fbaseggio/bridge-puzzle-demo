@@ -1,8 +1,12 @@
 export type SitePreferences = {
   version: 1;
+  exploreBranches?: boolean;
+  bindingPolicy?: 'standard' | 'jrl';
   defensePolicy?: 'mule' | 'laa' | 'lta' | 'random';
   alwaysHint: boolean;
   allowMoreAnalysisTime: boolean;
+  calculationPatience?: 'normal' | 'extended' | 'patient';
+  // Derived compatibility field; use calculationPatience when saving a choice.
   ddsLoadingAllowance?: 'normal' | 'extended' | 'patient';
   showAnalysisLog?: boolean;
   autoplaySingletons: boolean;
@@ -14,8 +18,9 @@ export type SitePreferences = {
 
 type PreferencesModule = {
   readPreferences: () => SitePreferences;
-  writePreferences: (value: SitePreferences) => { preferences: SitePreferences; saved: boolean };
+  writePreferences: (value: SitePreferences, storage?: unknown, options?: { calculationPatienceChanged: boolean }) => { preferences: SitePreferences; saved: boolean };
   PREFERENCES_KEY: string;
+  CALCULATION_PATIENCE_KEY: string;
 };
 
 // Bundle the existing preference reader so startup never waits for another download.
@@ -32,7 +37,9 @@ export async function readSitePreferences(): Promise<SitePreferences> {
 
 export async function updateSitePreferences(patch: Partial<SitePreferences>): Promise<SitePreferences> {
   const module = preferences;
-  const result = module.writePreferences({ ...module.readPreferences(), ...patch });
+  const result = module.writePreferences({ ...module.readPreferences(), ...patch }, undefined, {
+    calculationPatienceChanged: Object.prototype.hasOwnProperty.call(patch, 'calculationPatience')
+  });
   window.dispatchEvent(new CustomEvent('deepsqueeze:preferenceschange', { detail: result.preferences }));
   return result.preferences;
 }
@@ -43,7 +50,7 @@ export function watchSitePreferences(onChange: (preferences: SitePreferences) =>
     if (detail) onChange(detail);
   };
   const storage = (event: StorageEvent) => {
-    if (event.key === preferences.PREFERENCES_KEY) onChange(preferences.readPreferences());
+    if (event.key === null || event.key === preferences.PREFERENCES_KEY || event.key === preferences.CALCULATION_PATIENCE_KEY) onChange(preferences.readPreferences());
   };
   window.addEventListener('deepsqueeze:preferenceschange', custom);
   window.addEventListener('storage', storage);

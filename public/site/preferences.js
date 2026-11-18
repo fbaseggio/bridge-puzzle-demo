@@ -1,4 +1,6 @@
 export const PREFERENCES_KEY = 'deepsqueeze.preferences.v1';
+// Separate storage protects explicit choices from older tabs rewriting the v1 record.
+export const CALCULATION_PATIENCE_KEY = 'deepsqueeze.calculationPatience.v1';
 
 export const DEFAULT_PREFERENCES = Object.freeze({
   version: 1,
@@ -7,7 +9,9 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   exploreBranches: false,
   alwaysHint: false,
   allowMoreAnalysisTime: true,
-  // Historical storage key; now the shared Calculation patience profile.
+  // New preference: old DDS defaults must not become an explicit patience choice.
+  calculationPatience: 'patient',
+  // Compatibility fields for existing calculation consumers; derived below.
   ddsLoadingAllowance: 'patient',
   showAnalysisLog: false,
   autoplaySingletons: false,
@@ -33,15 +37,15 @@ function zoomOrDefault(value) {
 
 export function normalizePreferences(value) {
   const source = value && typeof value === 'object' && value.version === 1 ? value : {};
-  const patience = ['normal','extended','patient'].includes(source.ddsLoadingAllowance) ? source.ddsLoadingAllowance
-    : typeof source.allowMoreAnalysisTime === 'boolean' ? (source.allowMoreAnalysisTime ? 'extended' : 'normal')
-    : DEFAULT_PREFERENCES.ddsLoadingAllowance;
+  const patience = ['normal','extended','patient'].includes(source.calculationPatience)
+    ? source.calculationPatience : DEFAULT_PREFERENCES.calculationPatience;
   const tableColor = source.tableColor === 'light-green' ? 'very-light' : source.tableColor;
   return {
     version: 1,
     exploreBranches: booleanOrDefault(source.exploreBranches, DEFAULT_PREFERENCES.exploreBranches),
     bindingPolicy: source.bindingPolicy === 'jrl' ? 'jrl' : 'standard',
     defensePolicy: ['mule', 'laa', 'lta', 'random'].includes(source.defensePolicy) ? source.defensePolicy : 'mule',
+    calculationPatience: patience,
     allowMoreAnalysisTime: patience !== 'normal',
     ddsLoadingAllowance: patience,
     showAnalysisLog: booleanOrDefault(source.showAnalysisLog, DEFAULT_PREFERENCES.showAnalysisLog),
@@ -59,16 +63,23 @@ function browserStorage() {
 }
 
 export function readPreferences(storage = browserStorage()) {
-  if (!storage) return normalizePreferences();
-  try { return normalizePreferences(JSON.parse(storage.getItem(PREFERENCES_KEY) || 'null')); }
-  catch { return normalizePreferences(); }
+  let legacy, choice;
+  if (storage) {
+    try { legacy = JSON.parse(storage.getItem(PREFERENCES_KEY) || 'null'); } catch {}
+    try { choice = JSON.parse(storage.getItem(CALCULATION_PATIENCE_KEY) || 'null'); } catch {}
+  }
+  // The old record supplies other preferences only, never a patience migration.
+  return normalizePreferences({ ...normalizePreferences(legacy), calculationPatience: choice });
 }
 
-export function writePreferences(value, storage = browserStorage()) {
-  const preferences = normalizePreferences(value);
+export function writePreferences(value, storage = browserStorage(), { calculationPatienceChanged = false } = {}) {
+  const choice = calculationPatienceChanged ? value?.calculationPatience : readPreferences(storage).calculationPatience;
+  const preferences = normalizePreferences({ ...value, calculationPatience: choice });
   if (!storage) return { preferences, saved: false };
   try {
-    storage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
+    const { calculationPatience, ...legacy } = preferences;
+    if (calculationPatienceChanged) storage.setItem(CALCULATION_PATIENCE_KEY, JSON.stringify(calculationPatience));
+    storage.setItem(PREFERENCES_KEY, JSON.stringify(legacy));
     return { preferences, saved: true };
   } catch {
     return { preferences, saved: false };
@@ -78,6 +89,7 @@ export function writePreferences(value, storage = browserStorage()) {
 export function resetPreferences(storage = browserStorage()) {
   if (!storage) return { preferences: normalizePreferences(), saved: false };
   try {
+    storage.removeItem(CALCULATION_PATIENCE_KEY);
     storage.removeItem(PREFERENCES_KEY);
     return { preferences: normalizePreferences(), saved: true };
   } catch {
@@ -106,8 +118,7 @@ function preferencesFromForm(form) {
     exploreBranches: form.elements.exploreBranches ? data.has('exploreBranches') : readPreferences().exploreBranches,
     bindingPolicy: data.get('bindingPolicy') ?? readPreferences().bindingPolicy,
     alwaysHint: data.has('alwaysHint'),
-    allowMoreAnalysisTime: data.get('ddsLoadingAllowance') !== 'normal',
-    ddsLoadingAllowance: data.get('ddsLoadingAllowance'),
+    calculationPatience: data.get('calculationPatience'),
     showAnalysisLog: data.has('showAnalysisLog'),
     autoplaySingletons: data.has('autoplaySingletons'),
     autoplayEw: data.has('autoplayEw'),
@@ -124,7 +135,7 @@ function modernPlayerSettings() {
 function populateForm(form, preferences) {
   if(form.elements.exploreBranches)form.elements.exploreBranches.checked = preferences.exploreBranches;
   if(form.elements.bindingPolicy)form.elements.bindingPolicy.value = preferences.bindingPolicy;
-  form.elements.ddsLoadingAllowance.value = preferences.ddsLoadingAllowance;
+  form.elements.calculationPatience.value = preferences.calculationPatience;
   form.elements.showAnalysisLog.checked = preferences.showAnalysisLog;
   form.elements.alwaysHint.checked = preferences.alwaysHint;
   form.elements.autoplaySingletons.checked = preferences.autoplaySingletons;
@@ -158,7 +169,7 @@ export function mountPreferencesMenu() {
       <form>
         <fieldset>
           <legend>Analysis</legend>
-          <label>Calculation patience <select name="ddsLoadingAllowance"><option value="normal">Normal</option><option value="extended">Extended</option><option value="patient">Patient — generous</option></select></label>
+          <label>Calculation patience <select name="calculationPatience"><option value="normal">Normal</option><option value="extended">Extended</option><option value="patient">Patient — generous</option></select></label>
           <small>Defaults for DDS, binding, Analyze and defense preparation. Applies on the next attempt; automatic play stays quick.</small>
           <label class="ds-check"><input type="checkbox" name="showAnalysisLog"> Show diagnostics / analysis log</label>
           <small>Movie / Random: DDS diagnostics. Analyzer: squeeze-analysis progress. Each includes copy log, cancel and restart controls.</small>
@@ -259,8 +270,10 @@ export function mountPreferencesMenu() {
   devForm.querySelector('[data-reset-dev]').addEventListener('click', () => saveDev('mule'));
   populate(readPreferences());
 
-  const save = () => {
-    const result = writePreferences(preferencesFromForm(form));
+  const save = event => {
+    const result = writePreferences(preferencesFromForm(form), undefined, {
+      calculationPatienceChanged: event.target.name === 'calculationPatience'
+    });
     populate(result.preferences);
     status.textContent = result.saved ? 'Saved on this browser.' : 'Preferences could not be saved.';
     dispatchPreferences(result.preferences);
@@ -277,7 +290,7 @@ export function mountPreferencesMenu() {
     dispatchPreferences(result.preferences);
   });
   window.addEventListener('storage', event => {
-    if (event.key !== PREFERENCES_KEY) return;
+    if (event.key !== null && event.key !== PREFERENCES_KEY && event.key !== CALCULATION_PATIENCE_KEY) return;
     const preferences = readPreferences();
     populate(preferences);
     status.textContent = 'Updated from another tab.';
