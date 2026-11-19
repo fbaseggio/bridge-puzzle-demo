@@ -8,7 +8,7 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   defensePolicy: 'mule',
   defenseDdsPolicy: 'required',
   bindingPolicy: 'standard',
-  exploreBranches: false,
+  exploreBranches: true,
   alwaysHint: false,
   allowMoreAnalysisTime: true,
   // New preference: old DDS defaults must not become an explicit patience choice.
