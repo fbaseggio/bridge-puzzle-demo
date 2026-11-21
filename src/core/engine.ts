@@ -1216,7 +1216,7 @@ export function apply(state: State, play: Play, options?: ApplyOptions): { state
         source: options.manualDecision.source,
         chosenBucket: options.manualDecision.chosenBucket,
         ddPolicy: options.manualDecision.ddPolicy,
-        ddError: options?.userDdError === true
+        ddError: options?.userDdError === true, userDdAssessment: typeof options?.userDdError === 'boolean' ? 'assessed' : 'unassessed'
       }
     });
   } else {
@@ -1226,7 +1226,7 @@ export function apply(state: State, play: Play, options?: ApplyOptions): { state
       card: toCardId(play.suit, play.rank) as CardId,
       suit: play.suit,
       rank: play.rank,
-      details: { source: 'user', ddError: options?.userDdError === true }
+      details: { source: 'user', ddError: options?.userDdError === true, userDdAssessment: typeof options?.userDdError === 'boolean' ? 'assessed' : 'unassessed' }
     });
   }
   events.push(...applyOnePlay(next, play, collector, 'played'));
