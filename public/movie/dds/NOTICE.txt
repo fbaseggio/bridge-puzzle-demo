@@ -1,0 +1,22 @@
+DDS and browser port — attribution and local modifications
+
+Double Dummy Solver (DDS): Bo Haglund and Soren Hein.
+Copyright 2006-2014 by Bo Haglund.
+Copyright 2014 by Bo Haglund / Soren Hein as of version 2.8.0.
+Upstream: https://github.com/dds-bridge/dds
+
+JavaScript port and wrapper: Dan Vanderkam.
+Upstream: https://github.com/danvk/dds.js
+Source revision: cb9bf826838a087d1d1a0c70dd295dbec5093800
+Both projects use the Apache License, Version 2.0; see LICENSE.txt.
+
+DeepSqueeze distribution notes (2026-11-21):
+- out.js is unchanged from the above JavaScript-port revision (SHA-256
+  092901270107e44a531e6b7e01256f26bfe51f919e1c58dceb9d2d5ec76d97f7).
+- dds.js has been modified by DeepSqueeze for lazy runtime initialization,
+  browser/worker exports, input validation and release of owned native input
+  and result buffers. Local error-handling changes preserve the original error.
+- This package is served at both /dds/ and /movie/dds/.
+
+These distribution notes were added by DeepSqueeze; they are not an upstream
+NOTICE file and do not change either project's license.

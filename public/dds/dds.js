@@ -1,4 +1,8 @@
 /**
+ * Modified by DeepSqueeze: lazy runtime initialization, worker support, input
+ * validation and native buffer cleanup. See NOTICE.txt and LICENSE.txt.
+ */
+/**
  * JavaScript wrapper for libdds, the bridge double dummy solver.
  *
  * To use:
